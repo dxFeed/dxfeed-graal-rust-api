@@ -1,0 +1,15 @@
+[package]
+name = "dxfeed-graal"
+description = "Rust API for dxFeed over the Graal Native SDK"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[dependencies]
+dxfeed-graal-sys = { path = "../dxfeed-graal-sys" }
+
+[lints]
+workspace = true
