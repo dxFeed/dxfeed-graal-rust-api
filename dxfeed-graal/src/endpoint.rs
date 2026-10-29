@@ -127,7 +127,7 @@ impl DXEndpointBuilder {
         }
         // SAFETY: the builder is live and the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_Builder_build(t, b, out) })?;
-        DXEndpoint::new(handle)
+        DXEndpoint::new(handle, true)
     }
 }
 
@@ -180,22 +180,34 @@ impl std::fmt::Debug for DXEndpoint {
 }
 
 impl DXEndpoint {
-    /// Takes ownership of a new endpoint and gets its role, feed and publisher, which every endpoint has.
-    pub(crate) fn new(endpoint: Handle<sys::dxfg_v4_endpoint_t>) -> Result<Self> {
+    /// Takes ownership of an endpoint and gets its role, feed and publisher, which every endpoint has.
+    ///
+    /// If that fails, the endpoint is closed when `close_on_failure`: an endpoint created for this call has no other
+    /// owner to close it, but the default one of the process must stay open for the next attempt.
+    pub(crate) fn new(endpoint: Handle<sys::dxfg_v4_endpoint_t>, close_on_failure: bool) -> Result<Self> {
         let e = endpoint.as_ptr();
-        let mut role = sys::DXFG_ENDPOINT_ROLE_FEED;
-        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getRole(t, e, &mut role) })?;
-        // SAFETY: as above.
-        let feed = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getFeed(t, e, out) })?;
-        // SAFETY: as above.
-        let publisher = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getPublisher(t, e, out) })?;
+        let parts = || {
+            let mut role = sys::DXFG_ENDPOINT_ROLE_FEED;
+            // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+            call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getRole(t, e, &mut role) })?;
+            // SAFETY: as above.
+            let feed = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getFeed(t, e, out) })?;
+            // SAFETY: as above.
+            let publisher = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getPublisher(t, e, out) })?;
+            Ok((Role::from_sys(role)?, feed, publisher))
+        };
+        let (role, feed, publisher) = parts().inspect_err(|_| {
+            if close_on_failure {
+                // SAFETY: the endpoint is live: its handle is released only after this call.
+                let _ = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) });
+            }
+        })?;
         Ok(DXEndpoint {
             state: Arc::new(EndpointState {
                 endpoint,
                 feed,
                 publisher,
-                role: Role::from_sys(role)?,
+                role,
                 closed: AtomicBool::new(false),
             }),
         })
@@ -217,7 +229,7 @@ impl DXEndpoint {
     pub fn create_with_role(role: Role) -> Result<Self> {
         // SAFETY: the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_createWithRole(t, role.to_sys(), out) })?;
-        Self::new(handle)
+        Self::new(handle, true)
     }
 
     /// Returns the default endpoint of the process, with the [`Role::Feed`] role (`DXEndpoint.getInstance()`).
@@ -239,7 +251,7 @@ impl DXEndpoint {
             })?);
             // SAFETY: as above.
             let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getInstance(t, out) })?;
-            Self::new(handle)
+            Self::new(handle, false)
         })
     }
 
