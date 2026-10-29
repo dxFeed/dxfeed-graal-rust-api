@@ -82,10 +82,11 @@ impl Listener {
 
 type Job = Box<dyn FnOnce() + Send>;
 
+static RELEASE_THREAD: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+
 /// Runs `job` on the crate's release thread, started on first use.
 fn release_thread(job: Job) {
-    static SENDER: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
-    let sender = SENDER.get_or_init(|| {
+    let sender = RELEASE_THREAD.get_or_init(|| {
         let (sender, receiver) = mpsc::channel::<Job>();
         std::thread::Builder::new()
             .name("dxfeed-graal-release".into())
@@ -102,6 +103,19 @@ fn release_thread(job: Job) {
     });
     // The receiver lives as long as the process, so sending cannot fail.
     let _ = sender.lock().unwrap_or_else(PoisonError::into_inner).send(job);
+}
+
+/// Waits until the release thread has run the jobs sent before this call, if it was ever started.
+pub(crate) fn drain_release_thread() {
+    if RELEASE_THREAD.get().is_none() {
+        return;
+    }
+    let (done, wait) = mpsc::channel();
+    release_thread(Box::new(move || {
+        let _ = done.send(());
+    }));
+    // An error means the thread stopped because the process is exiting: nothing to wait for.
+    let _ = wait.recv();
 }
 
 /// A process-unique id of the calling thread, never `0`.

@@ -61,7 +61,11 @@ unsafe impl<T: SdkHandle> Sync for Handle<T> {}
 
 impl<T: SdkHandle> Handle<T> {
     /// Calls an SDK function that writes a new handle to its out-pointer and takes ownership of it.
+    /// Returns [`Error::ShutDown`] after [`crate::system::shutdown`].
     pub(crate) fn create(f: impl FnOnce(Thread, *mut *mut T) -> i32) -> Result<Self> {
+        if isolate::shut_down() {
+            return Err(Error::ShutDown);
+        }
         let mut raw = std::ptr::null_mut();
         call(|t| f(t, &mut raw))?;
         let null = || {

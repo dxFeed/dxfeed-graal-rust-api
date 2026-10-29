@@ -13,6 +13,9 @@ use crate::isolate::call;
 ///
 /// Pass it to [`EndpointBuilder::with_executor`](crate::EndpointBuilder::with_executor). Useful for tests and for
 /// applications that deliver events on a thread of their own. Clones share one executor.
+///
+/// [`system::shutdown`](crate::system::shutdown) waits for the tasks of every endpoint: while it runs, another thread
+/// must call `process_all_pending`, or it blocks.
 #[derive(Clone)]
 pub struct ManualExecutor {
     pub(crate) handle: Arc<Handle<sys::dxfg_v4_executor_t>>,

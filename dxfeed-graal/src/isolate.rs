@@ -31,6 +31,9 @@ static ISOLATE: OnceLock<std::result::Result<Isolate, i32>> = OnceLock::new();
 /// Set by the `atexit` handler: from then on nothing calls the SDK from destructors (KTD10).
 static EXITING: AtomicBool = AtomicBool::new(false);
 
+/// Set by [`crate::system::shutdown`]: from then on nothing new can be created (KTD10).
+static SHUT_DOWN: AtomicBool = AtomicBool::new(false);
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum State {
     /// The crate has not attached this thread.
@@ -93,6 +96,20 @@ impl Drop for Guard {
 /// Whether the process is exiting (the `atexit` handler has run).
 pub(crate) fn exiting() -> bool {
     EXITING.load(Ordering::Acquire)
+}
+
+/// Whether [`crate::system::shutdown`] has been called.
+pub(crate) fn shut_down() -> bool {
+    SHUT_DOWN.load(Ordering::Acquire)
+}
+
+pub(crate) fn set_shut_down() {
+    SHUT_DOWN.store(true, Ordering::Release);
+}
+
+/// Whether the isolate has been created (successfully or not).
+pub(crate) fn isolate_created() -> bool {
+    ISOLATE.get().is_some()
 }
 
 extern "C" fn on_exit() {
