@@ -2,7 +2,13 @@
 //!
 //! The project is in alpha: the API may change in any release, and only a part of the SDK is covered.
 //!
+//! The names follow the dxFeed Java API: [`DXEndpoint`], [`DXFeed`], [`DXFeedSubscription`], [`DXPublisher`], with
+//! methods in snake case (`addEventListener` is [`add_event_listener`](DXFeedSubscription::add_event_listener)) and
+//! getters without `get` ([`DXEndpoint::feed`]); the Java names are search aliases in the documentation.
+//!
 //! # Example
+//!
+//! Print the quotes of a symbol until Enter is pressed:
 //!
 //! ```no_run
 //! use dxfeed_graal::DXEndpoint;
@@ -10,15 +16,36 @@
 //!
 //! fn main() -> dxfeed_graal::Result<()> {
 //!     let endpoint = DXEndpoint::create()?;
-//!     endpoint.connect("demo.dxfeed.com:7300")?;
 //!     let subscription = endpoint.feed().create_subscription::<Quote>()?;
 //!     subscription.add_event_listener(|quotes| {
 //!         for quote in quotes {
-//!             println!("{quote:?}");
+//!             println!("{quote}");
 //!         }
 //!     })?;
 //!     subscription.add_symbols(["AAPL"])?;
-//!     std::thread::sleep(std::time::Duration::from_secs(10));
+//!     endpoint.connect("demo.dxfeed.com:7300")?;
+//!     std::io::stdin().read_line(&mut String::new()).ok();
+//!     endpoint.close_and_await_termination()
+//! }
+//! ```
+//!
+//! A quote prints as Java prints it: `Quote{AAPL, eventTime=0, time=20241004-093000.000, timeNanoPart=0, ...}`.
+//! A subscription to several event types, [`DXFeed::create_subscription_with_types`], gives its listeners an
+//! [`EventRef`] to match.
+//!
+//! The default feed of the process, [`DXFeed::get_instance`], connects to the address in the `dxfeed.address` system
+//! property or in the `dxfeed.properties` file:
+//!
+//! ```no_run
+//! use dxfeed_graal::event::Quote;
+//! use dxfeed_graal::{DXFeed, system};
+//!
+//! fn main() -> dxfeed_graal::Result<()> {
+//!     system::set_property("dxfeed.address", "demo.dxfeed.com:7300")?;
+//!     let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
+//!     subscription.add_event_listener(|quotes| quotes.for_each(|quote| println!("{quote}")))?;
+//!     subscription.add_symbols(["AAPL"])?;
+//!     std::io::stdin().read_line(&mut String::new()).ok();
 //!     Ok(())
 //! }
 //! ```
@@ -42,11 +69,15 @@
 //! Every fallible call returns [`Result`]. A Java exception becomes [`Error::Java`] with its class, message, stack
 //! trace and causes; invalid arguments, such as strings with NUL bytes, are rejected before any SDK call.
 //!
-//! # Shutdown and exit
+//! # Closing and exit
 //!
-//! The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
-//! longer called and destructors no longer call the SDK. [`system::shutdown`] stops the listeners and closes all
-//! endpoints explicitly; afterwards nothing new can be created.
+//! Close an endpoint with [`DXEndpoint::close_and_await_termination`], which waits for the notifications already
+//! scheduled, or with [`DXEndpoint::close`], which does not; dropping its last handle closes it as well. The process
+//! may also exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no longer
+//! called and destructors no longer call the SDK.
+//!
+//! [`system::shutdown`] is an advanced function with no counterpart in the other dxFeed APIs: it stops all listeners
+//! and closes all endpoints of the process, the default one included; afterwards nothing new can be created.
 //!
 //! # Deployment
 //!

@@ -37,6 +37,10 @@ pub fn get_property(key: &str) -> Result<Option<String>> {
 /// Shuts the SDK down (`dxfg_v4_system_shutdown`): stops the calls of all listeners, waiting for the running ones,
 /// then closes all endpoints and waits for their termination. It cannot be undone.
 ///
+/// It is an advanced function with no counterpart in the other dxFeed APIs, for an orderly stop of everything at once.
+/// An application usually closes its endpoints with
+/// [`DXEndpoint::close_and_await_termination`](crate::DXEndpoint::close_and_await_termination) instead.
+///
 /// Afterwards every call that creates something (an endpoint, a feed, a subscription, a listener, an executor) returns
 /// [`Error::ShutDown`]; existing values keep working, so dropping and closing them is safe. Calling it again, also from
 /// several threads at once, waits for the first call and returns `Ok`.

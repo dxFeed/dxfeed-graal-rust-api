@@ -27,7 +27,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Running](#running)
 - [Usage](#usage)
   * [Threads and Listeners](#threads-and-listeners)
-  * [Shutdown and Exit](#shutdown-and-exit)
+  * [Closing and Exit](#closing-and-exit)
 - [Samples](#samples)
 - [Current State](#current-state)
 - [Development](#development)
@@ -37,6 +37,9 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 
 dxFeed Graal Rust API lets Rust applications receive and publish dxFeed market data with a safe, idiomatic API:
 owned handles released on drop, `Result` errors that carry Java exceptions, and closures as event listeners.
+The names follow the [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html): `DXEndpoint`,
+`DXFeed`, `DXFeedSubscription` and `DXPublisher`, with methods in snake case (`add_event_listener`,
+`close_and_await_termination`) and getters without `get` (`feed()`, `publisher()`). Events print as Java prints them.
 
 | Crate | Purpose |
 |---|---|
@@ -118,27 +121,37 @@ build script.
 
 ## Usage
 
-How to connect to a QD endpoint and print quotes:
+How to connect to a QD endpoint and print quotes until Enter is pressed:
 
 ```rust
-use dxfeed_graal::{Endpoint, EventRef, EventType, Role};
+use dxfeed_graal::DXEndpoint;
+use dxfeed_graal::event::Quote;
 
 fn main() -> dxfeed_graal::Result<()> {
-    let endpoint = Endpoint::create(Role::Feed)?;
-    endpoint.connect("demo.dxfeed.com:7300")?;
-    let subscription = endpoint.feed()?.create_subscription(&[EventType::Quote])?;
-    subscription.add_listener(|events| {
-        for event in events {
-            if let EventRef::Quote(quote) = event {
-                println!("{quote:?}");
-            }
+    let endpoint = DXEndpoint::create()?;
+    let subscription = endpoint.feed().create_subscription::<Quote>()?;
+    subscription.add_event_listener(|quotes| {
+        for quote in quotes {
+            println!("{quote}");
         }
     })?;
-    subscription.add_symbols(&["AAPL"])?;
-    std::thread::sleep(std::time::Duration::from_secs(10));
-    Ok(())
+    subscription.add_symbols(["AAPL"])?;
+    endpoint.connect("demo.dxfeed.com:7300")?;
+    std::io::stdin().read_line(&mut String::new()).ok();
+    endpoint.close_and_await_termination()
 }
 ```
+
+A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, timeNanoPart=0, sequence=0, ...}`.
+
+- A subscription to one event type, `create_subscription::<Quote>()`, gives its listener `&QuoteRef` values; a
+  subscription to several, `create_subscription_with_types(&[EventType::Quote, EventType::Trade])`, gives `EventRef`
+  values to match.
+- Calls chain as in Java: a feed or a subscription taken from a chain keeps its endpoint open, e.g.
+  `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();`.
+- `DXFeed::get_instance()` and `DXEndpoint::get_instance()` return the default feed and endpoint of the process,
+  configured by the `dxfeed.properties` file and the system properties (`system::set_property("dxfeed.address", ...)`)
+  on first use.
 
 ### Threads and Listeners
 
@@ -150,11 +163,15 @@ fn main() -> dxfeed_graal::Result<()> {
 - Removing a listener or dropping its subscription waits for its running calls (inside a callback it does not), so do
   not hold a lock that a closure takes while doing that from another thread.
 
-### Shutdown and Exit
+### Closing and Exit
 
+- `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
+  `close()` does not wait. Dropping the last handle of an endpoint (the endpoint, its feed, its publisher or a
+  subscription) closes it as well.
 - The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
   longer called and destructors no longer call the SDK.
-- `system::shutdown()` stops all listeners, waiting for the running calls, and closes all endpoints. Afterwards
+- `system::shutdown()` is an advanced function with no counterpart in the other dxFeed APIs. It stops all listeners,
+  waiting for the running calls, and closes all endpoints of the process. Afterwards
   nothing new can be created (`Error::ShutDown`), while existing values can still be closed and dropped. It cannot be
   called from a listener (`Error::InCallback`). While it runs, an endpoint on a `ManualExecutor` needs another thread
   calling `process_all_pending`.
@@ -162,7 +179,8 @@ fn main() -> dxfeed_graal::Result<()> {
 
 ## Samples
 
-- [print_quotes](dxfeed-graal/examples/print_quotes.rs) prints the quotes of a symbol until Enter is pressed:
+- [print_quotes](dxfeed-graal/examples/print_quotes.rs) prints the quotes of a symbol until Enter is pressed, like
+  `PrintQuoteEventsSample` of the other dxFeed APIs:
 
   ```bash
   cargo run --example print_quotes -- [SYMBOL] [ADDRESS]
@@ -186,9 +204,10 @@ fn main() -> dxfeed_graal::Result<()> {
 
 ### Features
 
-- [x] System properties
-- [x] Subscriptions to string symbols, listeners, publishing
-- [x] Explicit shutdown and clean process exit
+- [x] System properties, the default endpoint and feed (`get_instance`)
+- [x] Typed and untyped subscriptions to string symbols, listeners, publishing
+- [x] Events printed in the format of Java's `toString`
+- [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [ ] Time series subscriptions, models, IPF, schedules, other symbol types
 
 ## Development
