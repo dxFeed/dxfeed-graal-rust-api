@@ -4,7 +4,8 @@
 
 use std::process::ExitCode;
 
-use dxfeed_graal::{DXEndpoint, EventRef, EventType, Role, system};
+use dxfeed_graal::event::Quote;
+use dxfeed_graal::{DXEndpoint, Role, system};
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -21,22 +22,20 @@ fn main() -> ExitCode {
 
 fn run(symbol: &str, address: &str) -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::create_with_role(Role::Feed)?;
-    let subscription = endpoint.feed().create_subscription(&[EventType::Quote])?;
+    let subscription = endpoint.feed().create_subscription::<Quote>()?;
     // Listeners go before symbols, so the first quotes are not missed.
-    subscription.add_event_listener(|events| {
-        for event in events {
-            if let EventRef::Quote(q) = event {
-                println!(
-                    "{} bid {} x {} ({}) ask {} x {} ({})",
-                    q.symbol(),
-                    q.bid_price(),
-                    q.bid_size(),
-                    q.bid_exchange_code(),
-                    q.ask_price(),
-                    q.ask_size(),
-                    q.ask_exchange_code(),
-                );
-            }
+    subscription.add_event_listener(|quotes| {
+        for q in quotes {
+            println!(
+                "{} bid {} x {} ({}) ask {} x {} ({})",
+                q.symbol(),
+                q.bid_price(),
+                q.bid_size(),
+                q.bid_exchange_code(),
+                q.ask_price(),
+                q.ask_size(),
+                q.ask_exchange_code(),
+            );
         }
     })?;
     subscription.add_symbols(&[symbol])?;

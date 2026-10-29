@@ -5,8 +5,10 @@
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
-use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::{DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, ManualExecutor, Role};
+use dxfeed_graal::event::{Quote, QuoteRef, Trade, TradeRef};
+use dxfeed_graal::{
+    DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, EventRef, ManualExecutor, Role, SubscriptionItem,
+};
 
 /// A `LOCAL_HUB` endpoint with a name unique in this process, its manual executor, feed and publisher.
 pub struct Hub {
@@ -54,13 +56,40 @@ impl Hub {
     }
 }
 
+/// An item a listener receives, copied into an owned event.
+pub trait ToEvent {
+    fn to_event(&self) -> Option<Event>;
+}
+
+impl ToEvent for &QuoteRef {
+    fn to_event(&self) -> Option<Event> {
+        Some(QuoteRef::to_owned(self).into())
+    }
+}
+
+impl ToEvent for &TradeRef {
+    fn to_event(&self) -> Option<Event> {
+        Some(TradeRef::to_owned(self).into())
+    }
+}
+
+impl ToEvent for EventRef<'_> {
+    fn to_event(&self) -> Option<Event> {
+        self.to_owned()
+    }
+}
+
 /// Adds a listener that sends copies of the received events to the returned channel; assertions belong in the test.
-pub fn collect(subscription: &DXFeedSubscription) -> Receiver<Event> {
+pub fn collect<E>(subscription: &DXFeedSubscription<E>) -> Receiver<Event>
+where
+    E: SubscriptionItem,
+    for<'a> E::Item<'a>: ToEvent,
+{
     let (sender, receiver) = mpsc::channel();
     subscription
         .add_event_listener(move |events| {
             for event in events {
-                if let Some(event) = event.to_owned() {
+                if let Some(event) = event.to_event() {
                     let _ = sender.send(event);
                 }
             }

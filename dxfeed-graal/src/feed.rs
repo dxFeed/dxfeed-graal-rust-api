@@ -6,7 +6,7 @@ use dxfeed_graal_sys as sys;
 
 use crate::endpoint::EndpointState;
 use crate::error::{Error, Result};
-use crate::event::EventType;
+use crate::event::{Event, EventKind, EventType};
 use crate::handle::Handle;
 use crate::subscription::DXFeedSubscription;
 
@@ -23,10 +23,46 @@ impl DXFeed {
         DXFeed { endpoint }
     }
 
-    /// Creates a subscription to events of `types`, attached to this feed.
+    /// Creates a subscription to events of type `E`, [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade), attached to
+    /// this feed; its listeners receive `&QuoteRef` or `&TradeRef`.
+    ///
+    /// ```no_run
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use dxfeed_graal::DXEndpoint;
+    /// use dxfeed_graal::event::Quote;
+    ///
+    /// let subscription = DXEndpoint::create()?.feed().create_subscription::<Quote>()?;
+    /// subscription.add_event_listener(|quotes| quotes.for_each(|quote| println!("{}", quote.symbol())))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// A subscription to several event types is created with
+    /// [`create_subscription_with_types`](Self::create_subscription_with_types):
+    ///
+    /// ```compile_fail
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use dxfeed_graal::{DXEndpoint, Event};
+    ///
+    /// let subscription = DXEndpoint::create()?.feed().create_subscription::<Event>()?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[doc(alias = "createSubscription")]
+    pub fn create_subscription<E: EventKind>(&self) -> Result<DXFeedSubscription<E>> {
+        let feed = self.endpoint.feed.as_ptr();
+        // SAFETY: the feed is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeed_createSubscription(t, feed, E::TYPE.to_sys(), out) })?;
+        Ok(DXFeedSubscription::new(handle, self.clone()))
+    }
+
+    /// Creates a subscription to events of `types`, attached to this feed; its listeners receive
+    /// [`EventRef`](crate::EventRef).
     ///
     /// Returns [`Error::InvalidArgument`] if `types` is empty.
-    pub fn create_subscription(&self, types: &[EventType]) -> Result<DXFeedSubscription> {
+    #[doc(alias = "createSubscription")]
+    pub fn create_subscription_with_types(&self, types: &[EventType]) -> Result<DXFeedSubscription<Event>> {
         if types.is_empty() {
             return Err(Error::InvalidArgument(
                 "a subscription needs at least one event type".into(),

@@ -2,7 +2,8 @@
 
 use std::cell::RefCell;
 
-use dxfeed_graal::{DXEndpoint, EventType, Role, live_handles};
+use dxfeed_graal::event::Quote;
+use dxfeed_graal::{DXEndpoint, Role, live_handles};
 
 thread_local! {
     static KEPT: RefCell<Option<DXEndpoint>> = const { RefCell::new(None) };
@@ -23,7 +24,7 @@ fn handles_are_released() {
     {
         let feed = DXEndpoint::create_with_role(Role::LocalHub).unwrap().feed();
         assert_eq!(live_handles(), before + 3);
-        let subscription = feed.create_subscription(&[EventType::Quote]).unwrap();
+        let subscription = feed.create_subscription::<Quote>().unwrap();
         drop(feed);
         assert_eq!(live_handles(), before + 4);
         drop(subscription);

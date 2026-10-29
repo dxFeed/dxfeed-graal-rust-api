@@ -86,11 +86,104 @@ impl From<Trade> for Event {
     }
 }
 
-/// The events of one listener call: an iterator of [`EventRef`] borrowed from the SDK.
-pub struct Events<'a> {
+/// What a [`DXFeedSubscription`](crate::DXFeedSubscription) delivers: [`Quote`] or [`Trade`] for a subscription to
+/// one event type, [`Event`] for a subscription to several.
+///
+/// The trait is sealed: only this crate implements it.
+pub trait SubscriptionItem: sealed::Sealed + Send + 'static {
+    /// The item a listener iterates: `&QuoteRef`, `&TradeRef` or [`EventRef`].
+    type Item<'a>;
+}
+
+/// The event types a subscription can be created for by type: [`Quote`] and [`Trade`]; see
+/// [`DXFeed::create_subscription`](crate::DXFeed::create_subscription).
+///
+/// The trait is sealed: only this crate implements it.
+pub trait EventKind: SubscriptionItem {
+    /// The event type.
+    const TYPE: EventType;
+}
+
+mod sealed {
+    use super::{SubscriptionItem, sys};
+
+    pub trait Sealed {
+        /// Whether every SDK event converts to an item, so that [`Events`](super::Events) knows its exact length.
+        const ALL: bool;
+
+        /// Converts an SDK event, or returns `None` for an event of another type.
+        ///
+        /// # Safety
+        ///
+        /// `event` must be a live SDK event that outlives `'a`.
+        unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<Self::Item<'a>>
+        where
+            Self: SubscriptionItem;
+    }
+}
+
+impl sealed::Sealed for Quote {
+    const ALL: bool = false;
+
+    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<&'a QuoteRef> {
+        // SAFETY: the caller guarantees the event is live for `'a`; a quote is a `dxfg_quote_t`.
+        unsafe { ((*event).clazz == sys::DXFG_EVENT_QUOTE).then(|| &*(event as *const QuoteRef)) }
+    }
+}
+
+impl SubscriptionItem for Quote {
+    type Item<'a> = &'a QuoteRef;
+}
+
+impl EventKind for Quote {
+    const TYPE: EventType = EventType::Quote;
+}
+
+impl sealed::Sealed for Trade {
+    const ALL: bool = false;
+
+    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<&'a TradeRef> {
+        // SAFETY: the caller guarantees the event is live for `'a`; a trade is a `dxfg_trade_t`.
+        unsafe { ((*event).clazz == sys::DXFG_EVENT_TRADE).then(|| &*(event as *const TradeRef)) }
+    }
+}
+
+impl SubscriptionItem for Trade {
+    type Item<'a> = &'a TradeRef;
+}
+
+impl EventKind for Trade {
+    const TYPE: EventType = EventType::Trade;
+}
+
+impl sealed::Sealed for Event {
+    const ALL: bool = true;
+
+    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<EventRef<'a>> {
+        // SAFETY: the caller guarantees the event is live for `'a`; its first field is the class.
+        Some(unsafe {
+            match (*event).clazz {
+                sys::DXFG_EVENT_QUOTE => EventRef::Quote(&*(event as *const QuoteRef)),
+                sys::DXFG_EVENT_TRADE => EventRef::Trade(&*(event as *const TradeRef)),
+                other => EventRef::Other(other),
+            }
+        })
+    }
+}
+
+impl SubscriptionItem for Event {
+    type Item<'a> = EventRef<'a>;
+}
+
+/// The events of one listener call, borrowed from the SDK: `&QuoteRef` for a subscription to quotes, `&TradeRef` for
+/// one to trades and [`EventRef`] for an untyped one.
+///
+/// A typed iterator skips events of other types; the SDK does not deliver them.
+pub struct Events<'a, E: SubscriptionItem = Event> {
     elements: &'a [*mut sys::dxfg_event_type_t],
     next: usize,
     _list: PhantomData<&'a sys::dxfg_event_type_list>,
+    _item: PhantomData<fn() -> E>,
 }
 
 impl<'a> Events<'a> {
@@ -110,33 +203,42 @@ impl<'a> Events<'a> {
             elements,
             next: 0,
             _list: PhantomData,
+            _item: PhantomData,
+        }
+    }
+
+    /// The same events as items of `E`.
+    pub(crate) fn typed<E: SubscriptionItem>(self) -> Events<'a, E> {
+        Events {
+            elements: self.elements,
+            next: self.next,
+            _list: PhantomData,
+            _item: PhantomData,
         }
     }
 }
 
-impl<'a> Iterator for Events<'a> {
-    type Item = EventRef<'a>;
+impl<'a, E: SubscriptionItem> Iterator for Events<'a, E> {
+    type Item = E::Item<'a>;
 
-    fn next(&mut self) -> Option<EventRef<'a>> {
-        let event = *self.elements.get(self.next)?;
-        self.next += 1;
-        // SAFETY: the elements of a live list are live events whose first field is the class.
-        Some(unsafe {
-            match (*event).clazz {
-                sys::DXFG_EVENT_QUOTE => EventRef::Quote(&*(event as *const QuoteRef)),
-                sys::DXFG_EVENT_TRADE => EventRef::Trade(&*(event as *const TradeRef)),
-                other => EventRef::Other(other),
+    fn next(&mut self) -> Option<E::Item<'a>> {
+        while let Some(&event) = self.elements.get(self.next) {
+            self.next += 1;
+            // SAFETY: the elements of a live list are live events for `'a`.
+            if let Some(item) = unsafe { E::item(event) } {
+                return Some(item);
             }
-        })
+        }
+        None
     }
 
     fn size_hint(&self) -> (usize, Option<usize>) {
         let n = self.elements.len() - self.next;
-        (n, Some(n))
+        (if E::ALL { n } else { 0 }, Some(n))
     }
 }
 
-impl ExactSizeIterator for Events<'_> {}
+impl ExactSizeIterator for Events<'_, Event> {}
 
 /// A Java `char` exchange code from the SDK.
 fn exchange_code(code: i16) -> char {

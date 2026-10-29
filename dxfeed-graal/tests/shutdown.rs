@@ -13,7 +13,8 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, EventType, ManualExecutor, Role, live_handles, system};
+use dxfeed_graal::event::Quote;
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, ManualExecutor, Role, live_handles, system};
 use support::{Hub, collect, quote, quote_with_bid};
 
 /// Set for the child processes; the scenarios do nothing without it.
@@ -66,13 +67,13 @@ fn is_child() -> bool {
 }
 
 /// A feed endpoint connected to a local socket, with a subscription and a listener.
-fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription) {
+fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription<Quote>) {
     let peer = TcpListener::bind("127.0.0.1:0").unwrap();
     let endpoint = DXEndpoint::create_with_role(Role::Feed).unwrap();
     endpoint
         .connect(&format!("127.0.0.1:{}", peer.local_addr().unwrap().port()))
         .unwrap();
-    let subscription = endpoint.feed().create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = endpoint.feed().create_subscription::<Quote>().unwrap();
     subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
     // Let the endpoint connect, so its connection threads run.
@@ -94,7 +95,7 @@ fn child_shutdown_stops_delivery_and_creation() {
         return;
     }
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[quote("AAPL").into()]);
@@ -144,7 +145,7 @@ fn child_shutdown_in_listener_is_refused() {
         return;
     }
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let (sender, results) = mpsc::channel();
     subscription
         .add_event_listener(move |_| {
@@ -186,7 +187,7 @@ fn child_exit_during_callback() {
         return;
     }
     let hub = Hub::with_default_executor();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let (started, wait_started) = mpsc::channel();
     let (_release, blocked) = mpsc::channel::<()>();
     subscription

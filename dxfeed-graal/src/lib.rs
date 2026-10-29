@@ -5,17 +5,16 @@
 //! # Example
 //!
 //! ```no_run
-//! use dxfeed_graal::{DXEndpoint, EventRef, EventType};
+//! use dxfeed_graal::DXEndpoint;
+//! use dxfeed_graal::event::Quote;
 //!
 //! fn main() -> dxfeed_graal::Result<()> {
 //!     let endpoint = DXEndpoint::create()?;
 //!     endpoint.connect("demo.dxfeed.com:7300")?;
-//!     let subscription = endpoint.feed().create_subscription(&[EventType::Quote])?;
-//!     subscription.add_event_listener(|events| {
-//!         for event in events {
-//!             if let EventRef::Quote(quote) = event {
-//!                 println!("{quote:?}");
-//!             }
+//!     let subscription = endpoint.feed().create_subscription::<Quote>()?;
+//!     subscription.add_event_listener(|quotes| {
+//!         for quote in quotes {
+//!             println!("{quote:?}");
 //!         }
 //!     })?;
 //!     subscription.add_symbols(["AAPL"])?;
@@ -68,7 +67,7 @@ pub mod system;
 
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role};
 pub use error::{Error, JavaException, Result};
-pub use event::{Event, EventRef, EventType, Events};
+pub use event::{Event, EventKind, EventRef, EventType, Events, SubscriptionItem};
 pub use executor::ManualExecutor;
 pub use feed::DXFeed;
 #[doc(hidden)]

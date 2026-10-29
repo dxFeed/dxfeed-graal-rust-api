@@ -7,8 +7,8 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
-use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, Event, EventType, ManualExecutor, Role};
+use dxfeed_graal::event::{Quote, QuoteRef, Trade};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, Event, EventRef, EventType, ManualExecutor, Role};
 use support::{Hub, collect, quote, quote_with_bid, trade};
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
@@ -94,7 +94,7 @@ fn feed_and_publisher_keep_the_endpoint_open() {
     let publisher = endpoint.publisher();
     let feed = endpoint.feed();
     drop(endpoint);
-    let subscription = feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = feed.create_subscription::<Quote>().unwrap();
     drop(feed);
     let events = collect(&subscription);
     subscription.add_symbols(["AAPL"]).unwrap();
@@ -110,7 +110,7 @@ fn java_style_chain_compiles_and_works() {
         .build()
         .unwrap()
         .feed()
-        .create_subscription(&[EventType::Quote])
+        .create_subscription::<Quote>()
         .unwrap();
     subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(["AAPL"]).unwrap();
@@ -119,7 +119,7 @@ fn java_style_chain_compiles_and_works() {
 #[test]
 fn close_and_await_termination_delivers_scheduled_events() {
     let hub = Hub::with_default_executor();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(["AAPL"]).unwrap();
     hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
@@ -132,7 +132,7 @@ fn close_and_await_termination_delivers_scheduled_events() {
 #[test]
 fn close_and_await_termination_is_refused_in_a_listener() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let endpoint = hub.endpoint.clone();
     let (sender, results) = mpsc::channel();
     subscription
@@ -148,7 +148,7 @@ fn close_and_await_termination_is_refused_in_a_listener() {
 #[test]
 fn symbols_from_any_iterable() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(["AAPL", "IBM"]).unwrap();
     subscription.add_symbols(vec![String::from("MSFT")]).unwrap();
@@ -173,6 +173,7 @@ fn types_are_send_and_sync() {
     send_sync::<dxfeed_graal::DXPublisher>();
     send_sync::<ManualExecutor>();
     send_sync::<DXFeedSubscription>();
+    send_sync::<DXFeedSubscription<Quote>>();
 }
 
 #[test]
@@ -180,7 +181,7 @@ fn symbols_and_listeners() {
     let hub = Hub::new();
     let subscription = hub
         .feed
-        .create_subscription(&[EventType::Quote, EventType::Trade])
+        .create_subscription_with_types(&[EventType::Quote, EventType::Trade])
         .unwrap();
     // Listeners go before symbols: the SDK refuses a listener for a subscription that has symbols.
     let id = subscription.add_event_listener(|_| {}).unwrap();
@@ -197,7 +198,7 @@ fn symbols_and_listeners() {
         Err(Error::InvalidArgument(_))
     ));
     assert!(matches!(
-        hub.feed.create_subscription(&[]),
+        hub.feed.create_subscription_with_types(&[]),
         Err(Error::InvalidArgument(_))
     ));
     subscription.close().unwrap();
@@ -206,7 +207,7 @@ fn symbols_and_listeners() {
 #[test]
 fn quote_round_trip() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[quote("AAPL").into()]);
@@ -216,11 +217,82 @@ fn quote_round_trip() {
 #[test]
 fn trade_round_trip() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Trade]).unwrap();
+    let subscription = hub.feed.create_subscription::<Trade>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[trade("AAPL").into()]);
     assert_eq!(received(&events), vec![Event::Trade(delivered_trade(trade("AAPL")))]);
+}
+
+#[test]
+fn typed_listener_receives_quote_refs() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let (sender, quotes) = mpsc::channel();
+    subscription
+        .add_event_listener(move |events| {
+            for quote in events {
+                let quote: &QuoteRef = quote;
+                let _ = sender.send(quote.to_owned());
+            }
+        })
+        .unwrap();
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    assert_eq!(
+        quotes.try_iter().collect::<Vec<_>>(),
+        vec![delivered_quote(quote("AAPL"))]
+    );
+}
+
+#[test]
+fn untyped_listener_receives_event_refs_in_order() {
+    let hub = Hub::new();
+    let subscription = hub
+        .feed
+        .create_subscription_with_types(&[EventType::Quote, EventType::Trade])
+        .unwrap();
+    let (sender, batches) = mpsc::channel();
+    subscription
+        .add_event_listener(move |events| {
+            let len = events.len();
+            let kinds: Vec<&str> = events
+                .map(|event| match event {
+                    EventRef::Quote(_) => "quote",
+                    EventRef::Trade(_) => "trade",
+                    _ => "other",
+                })
+                .collect();
+            let _ = sender.send((len, kinds));
+        })
+        .unwrap();
+    subscription.add_symbols(["IBM"]).unwrap();
+    hub.publish_and_process(&[quote("IBM").into(), trade("IBM").into()]);
+    let kinds: Vec<&str> = batches
+        .try_iter()
+        .flat_map(|(len, kinds)| {
+            assert_eq!(len, kinds.len());
+            kinds
+        })
+        .collect();
+    assert_eq!(kinds, ["quote", "trade"]);
+}
+
+#[test]
+fn quote_subscription_receives_no_trades() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let c = calls.clone();
+    subscription
+        .add_event_listener(move |_| _ = c.fetch_add(1, Ordering::SeqCst))
+        .unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&[trade("AAPL").into()]);
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    hub.publish_and_process(&[trade("AAPL").into(), quote("AAPL").into()]);
+    assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
 }
 
 #[test]
@@ -253,7 +325,7 @@ fn quote_and_trade_in_order() {
     let hub = Hub::new();
     let subscription = hub
         .feed
-        .create_subscription(&[EventType::Quote, EventType::Trade])
+        .create_subscription_with_types(&[EventType::Quote, EventType::Trade])
         .unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["IBM"]).unwrap();
@@ -265,7 +337,7 @@ fn quote_and_trade_in_order() {
 #[test]
 fn unsubscribed_symbol_is_not_delivered() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[quote("MSFT").into()]);
@@ -277,7 +349,7 @@ fn hubs_are_isolated() {
     // Run in parallel with the other tests that publish AAPL: each hub sees only its own events.
     for _ in 0..20 {
         let hub = Hub::new();
-        let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+        let subscription = hub.feed.create_subscription::<Quote>().unwrap();
         let events = collect(&subscription);
         subscription.add_symbols(&["AAPL"]).unwrap();
         let mine = quote_with_bid("AAPL", 1.0);
@@ -289,7 +361,7 @@ fn hubs_are_isolated() {
 #[test]
 fn panic_in_listener_keeps_it_active() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
     subscription
@@ -308,9 +380,9 @@ fn panic_in_listener_keeps_it_active() {
 #[test]
 fn subscription_dropped_in_own_listener() {
     let hub = Hub::new();
-    let slot: Arc<Mutex<Option<DXFeedSubscription>>> = Arc::default();
+    let slot: Arc<Mutex<Option<DXFeedSubscription<Quote>>>> = Arc::default();
     let calls = Arc::new(AtomicUsize::new(0));
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let (s, c) = (slot.clone(), calls.clone());
     subscription
         .add_event_listener(move |_| {
@@ -330,7 +402,7 @@ fn subscription_dropped_in_own_listener() {
 #[test]
 fn remove_listener_waits_for_running_call() {
     let hub = Arc::new(Hub::new());
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let started = Arc::new(Barrier::new(2));
     let finished = Arc::new(AtomicBool::new(false));
     let (b, f) = (started.clone(), finished.clone());
@@ -359,11 +431,11 @@ fn remove_listener_waits_for_running_call() {
 #[test]
 fn concurrent_processing_delivers_each_event_once() {
     let hub = Arc::new(Hub::new());
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let count = Arc::new(AtomicUsize::new(0));
     let c = count.clone();
     subscription
-        .add_event_listener(move |events| _ = c.fetch_add(events.len(), Ordering::SeqCst))
+        .add_event_listener(move |events| _ = c.fetch_add(events.count(), Ordering::SeqCst))
         .unwrap();
     let symbols: Vec<String> = (0..200).map(|i| format!("S{i}")).collect();
     subscription.add_symbols(&symbols).unwrap();
@@ -387,7 +459,7 @@ fn concurrent_processing_delivers_each_event_once() {
 #[test]
 fn processing_from_listener_does_not_nest_calls() {
     let hub = Arc::new(Hub::new());
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     let (calls, inside, nested) = (
         Arc::new(AtomicUsize::new(0)),
         Arc::new(AtomicBool::new(false)),
@@ -418,11 +490,11 @@ fn processing_from_listener_does_not_nest_calls() {
 #[test]
 fn listeners_drop_each_other_without_deadlock() {
     let hub = Hub::with_default_executor();
-    let slots: [Arc<Mutex<Option<DXFeedSubscription>>>; 2] = [Arc::default(), Arc::default()];
+    let slots: [Arc<Mutex<Option<DXFeedSubscription<Quote>>>>; 2] = [Arc::default(), Arc::default()];
     let started: Arc<[AtomicBool; 2]> = Arc::default();
     let (done, wait) = mpsc::channel();
     for i in 0..2 {
-        let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+        let subscription = hub.feed.create_subscription::<Quote>().unwrap();
         let (other, started, done) = (slots[1 - i].clone(), started.clone(), done.clone());
         subscription
             .add_event_listener(move |_| {
@@ -468,7 +540,7 @@ fn listeners_drop_each_other_without_deadlock() {
 #[test]
 fn hub_with_pending_tasks_drops_quickly() {
     let hub = Hub::new();
-    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
     subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();

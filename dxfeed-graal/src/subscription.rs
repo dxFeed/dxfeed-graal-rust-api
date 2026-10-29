@@ -1,12 +1,13 @@
 //! Subscriptions to events.
 
+use std::marker::PhantomData;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
-use crate::event::Events;
+use crate::event::{Event, Events, SubscriptionItem};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
@@ -16,36 +17,43 @@ use crate::listener::Listener;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ListenerId(u64);
 
-/// A subscription of a [`DXFeed`] to events of some types for some symbols (`DXFeedSubscription`).
+/// A subscription of a [`DXFeed`] to events for some symbols (`DXFeedSubscription`).
+///
+/// `E` is what its listeners receive: [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade) for a subscription created
+/// with [`DXFeed::create_subscription`], [`Event`] for one created with
+/// [`DXFeed::create_subscription_with_types`].
 ///
 /// Dropping it removes and releases its listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its
 /// listeners, so do not hold a lock their closures take while dropping it. It keeps its feed's endpoint open.
-pub struct DXFeedSubscription {
+pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, Listener)>>,
     // Dropped last: it may close the endpoint.
     _feed: DXFeed,
+    _item: PhantomData<fn() -> E>,
 }
 
-impl DXFeedSubscription {
+impl<E: SubscriptionItem> DXFeedSubscription<E> {
     pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_t>, feed: DXFeed) -> Self {
         DXFeedSubscription {
             handle,
             listeners: Mutex::new(Vec::new()),
             _feed: feed,
+            _item: PhantomData,
         }
     }
 
     /// Adds a listener; `f` is called with each batch of received events, on a thread of the endpoint's executor.
     ///
-    /// Add listeners before symbols, so the first events are not missed. A panic in `f` is caught and printed to
+    /// The batch iterates `&QuoteRef` for a subscription to quotes, `&TradeRef` for one to trades and
+    /// [`EventRef`](crate::EventRef) for an untyped one. Add listeners before symbols, so the first events are not missed. A panic in `f` is caught and printed to
     /// stderr; the listener stays active. The events are valid during the call only: copy what you keep with
     /// `to_owned()`.
     #[doc(alias = "addEventListener")]
-    pub fn add_event_listener(&self, f: impl FnMut(Events<'_>) + Send + 'static) -> Result<ListenerId> {
+    pub fn add_event_listener(&self, mut f: impl FnMut(Events<'_, E>) + Send + 'static) -> Result<ListenerId> {
         static NEXT: AtomicU64 = AtomicU64::new(1);
-        let listener = Listener::new(Box::new(f))?;
+        let listener = Listener::new(Box::new(move |events: Events<'_>| f(events.typed())))?;
         let (s, l) = (self.handle.as_ptr(), listener.as_ptr());
         // SAFETY: the subscription and the listener are live.
         if let Err(e) = call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addEventListener(t, s, l) }) {
@@ -115,7 +123,7 @@ impl DXFeedSubscription {
     }
 }
 
-impl Drop for DXFeedSubscription {
+impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
     fn drop(&mut self) {
         if isolate::exiting() {
             // The process is exiting: no SDK calls from destructors. The listeners are dropped without being released,
