@@ -2,18 +2,23 @@
 //!
 //! The SDK comes from, in order: nowhere when `DOCS_RS` is set (no link directives); the unpacked archive in
 //! `DXFEED_GRAAL_SDK_DIR`, whose library is copied into `OUT_DIR`; the GitHub release archive, verified against a
-//! pinned SHA-256 and unpacked into `OUT_DIR` (feature `download`). Linking always points at `OUT_DIR`, so cargo puts
-//! the library on the loader path for `cargo run` and `cargo test`.
+//! pinned SHA-256 and unpacked into `OUT_DIR` (feature `download`). With `DXFEED_GRAAL_SDK_CACHE_DIR` the verified
+//! archive is kept in that directory and reused by later builds after its digest is checked again. Linking always
+//! points at `OUT_DIR`, so cargo puts the library on the loader path for `cargo run` and `cargo test`.
 
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(feature = "download")]
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
 const SDK_VERSION: &str = "3.12.0";
 const LIB_NAME: &str = "DxFeedGraalNativeSdk";
 const SDK_DIR_VAR: &str = "DXFEED_GRAAL_SDK_DIR";
+/// An absolute directory where downloaded archives are kept across builds; unset or empty means no cache.
+const CACHE_DIR_VAR: &str = "DXFEED_GRAAL_SDK_CACHE_DIR";
 /// Overrides the expected archive digest; only for testing the digest check.
 const SHA256_OVERRIDE_VAR: &str = "DXFEED_GRAAL_SDK_SHA256";
 
@@ -73,6 +78,7 @@ fn run() -> Result<()> {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-env-changed=DOCS_RS");
     println!("cargo::rerun-if-env-changed={SDK_DIR_VAR}");
+    println!("cargo::rerun-if-env-changed={CACHE_DIR_VAR}");
     println!("cargo::rerun-if-env-changed={SHA256_OVERRIDE_VAR}");
     if env::var_os("DOCS_RS").is_some() {
         return Ok(());
@@ -218,7 +224,8 @@ fn download_sdk(target: &Target, _out_dir: &Path) -> Result<PathBuf> {
     ))
 }
 
-/// Downloads, verifies and unpacks the release archive into `OUT_DIR`, once.
+/// Downloads, verifies and unpacks the release archive into `OUT_DIR`, once. With a cache directory the archive is
+/// taken from it, or downloaded into it, and kept there.
 #[cfg(feature = "download")]
 fn download_sdk(target: &Target, out_dir: &Path) -> Result<PathBuf> {
     let name = archive_name(target);
@@ -226,18 +233,20 @@ fn download_sdk(target: &Target, out_dir: &Path) -> Result<PathBuf> {
     if sdk.is_dir() {
         return Ok(sdk);
     }
-    let url = format!("https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/download/v{SDK_VERSION}/{name}.zip");
-    let expected = env::var(SHA256_OVERRIDE_VAR).unwrap_or_else(|_| target.sha256.to_owned());
-    let hint = format!("or set {SDK_DIR_VAR} to an unpacked copy of {url}");
+    let source = Source {
+        url: format!("https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/download/v{SDK_VERSION}/{name}.zip"),
+        expected: env::var(SHA256_OVERRIDE_VAR).unwrap_or_else(|_| target.sha256.to_owned()),
+    };
 
-    let part = out_dir.join(format!("{name}.zip.part"));
-    let digest = download(&url, &part).map_err(|e| format!("cannot download {url}: {e}; check the network {hint}"))?;
-    if digest != expected {
-        let _ = fs::remove_file(&part);
-        return Err(format!("{url} has SHA-256 {digest}, expected {expected}; {hint}"));
-    }
-    let archive = out_dir.join(format!("{name}.zip"));
-    fs::rename(&part, &archive).map_err(|e| format!("cannot rename {}: {e}", part.display()))?;
+    let cache_dir = cache_dir()?;
+    let archive = match &cache_dir {
+        Some(dir) => cached_archive(&source, dir, &name)?,
+        None => {
+            let archive = out_dir.join(format!("{name}.zip"));
+            source.fetch(&out_dir.join(format!("{name}.zip.part")), &archive)?;
+            archive
+        }
+    };
 
     // Unpack next to the final directory and rename it into place, so an interrupted build never leaves a partial SDK.
     let unpacking = out_dir.join(format!("{name}.unpacking"));
@@ -246,8 +255,129 @@ fn download_sdk(target: &Target, out_dir: &Path) -> Result<PathBuf> {
     }
     unpack(&archive, &unpacking).map_err(|e| format!("cannot unpack {}: {e}", archive.display()))?;
     fs::rename(&unpacking, &sdk).map_err(|e| format!("cannot rename {}: {e}", unpacking.display()))?;
-    let _ = fs::remove_file(&archive);
+    if cache_dir.is_none() {
+        let _ = fs::remove_file(&archive);
+    }
     Ok(sdk)
+}
+
+/// The cache directory from `DXFEED_GRAAL_SDK_CACHE_DIR`. A relative path is rejected: build scripts run in the
+/// package directory, so it would point somewhere the user did not mean.
+#[cfg(feature = "download")]
+fn cache_dir() -> Result<Option<PathBuf>> {
+    let Some(dir) = env::var_os(CACHE_DIR_VAR).filter(|dir| !dir.is_empty()) else {
+        return Ok(None);
+    };
+    let dir = PathBuf::from(dir);
+    if dir.is_relative() {
+        return Err(format!(
+            "{CACHE_DIR_VAR} must be an absolute path, not {}",
+            dir.display()
+        ));
+    }
+    Ok(Some(dir))
+}
+
+/// Returns the verified archive in the cache, downloading it first when it is missing or does not match the digest.
+/// Several builds may share the cache, so each downloads into its own `.part` file and renames it into place.
+#[cfg(feature = "download")]
+fn cached_archive(source: &Source, dir: &Path, name: &str) -> Result<PathBuf> {
+    let archive = dir.join(format!("{name}.zip"));
+    if archive.is_file() {
+        match file_digest(&archive) {
+            Ok(digest) if digest == source.expected => return Ok(archive),
+            Ok(digest) => println!(
+                "cargo::warning={} has SHA-256 {digest}, expected {}; downloading it again",
+                archive.display(),
+                source.expected
+            ),
+            Err(e) => println!(
+                "cargo::warning=cannot read {}: {e}; downloading it again",
+                archive.display()
+            ),
+        }
+        let _ = fs::remove_file(&archive);
+    }
+
+    fs::create_dir_all(dir).map_err(|e| format!("cannot create {}: {e}", dir.display()))?;
+    remove_stale_parts(dir, name);
+    let nanos = SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_nanos());
+    let part = dir.join(format!("{name}.zip.{}-{nanos}.part", std::process::id()));
+    match source.fetch(&part, &archive) {
+        Ok(()) => Ok(archive),
+        // Another build may have put a verified archive in place meanwhile, which also makes the rename fail on
+        // Windows while that build reads it.
+        Err(_) if file_digest(&archive).is_ok_and(|digest| digest == source.expected) => Ok(archive),
+        Err(e) => Err(e),
+    }
+}
+
+/// Removes `.part` files of downloads that were killed midway, which no later build reuses. A part file older than
+/// an hour cannot belong to a running download, which gives up after ten minutes.
+#[cfg(feature = "download")]
+fn remove_stale_parts(dir: &Path, name: &str) {
+    let Ok(entries) = fs::read_dir(dir) else { return };
+    let prefix = format!("{name}.zip.");
+    for entry in entries.flatten() {
+        let file_name = entry.file_name();
+        let file_name = file_name.to_string_lossy();
+        let stale = || {
+            entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .ok()
+                .and_then(|time| time.elapsed().ok())
+                .is_some_and(|age| age > Duration::from_secs(60 * 60))
+        };
+        if file_name.starts_with(&prefix) && file_name.ends_with(".part") && stale() {
+            let _ = fs::remove_file(entry.path());
+        }
+    }
+}
+
+/// The release archive and its expected SHA-256.
+#[cfg(feature = "download")]
+struct Source {
+    url: String,
+    expected: String,
+}
+
+#[cfg(feature = "download")]
+impl Source {
+    /// Downloads the archive to `part`, checks its digest and renames it to `archive`. Removes `part` on failure.
+    fn fetch(&self, part: &Path, archive: &Path) -> Result<()> {
+        let Self { url, expected } = self;
+        let hint = format!("or set {SDK_DIR_VAR} to an unpacked copy of {url}");
+        let result = match download(url, part) {
+            Err(e) => Err(format!("cannot download {url}: {e}; check the network {hint}")),
+            Ok(digest) if digest != *expected => {
+                Err(format!("{url} has SHA-256 {digest}, expected {expected}; {hint}"))
+            }
+            Ok(_) => fs::rename(part, archive).map_err(|e| format!("cannot rename {}: {e}", part.display())),
+        };
+        if result.is_err() {
+            let _ = fs::remove_file(part);
+        }
+        result
+    }
+}
+
+/// SHA-256 of the file at `path`.
+#[cfg(feature = "download")]
+fn file_digest(path: &Path) -> std::io::Result<String> {
+    use std::io::Read;
+
+    let mut file = fs::File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buf = vec![0; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.update(&buf[..n]);
+    }
+    Ok(hex(&hasher.finalize()))
 }
 
 /// Writes the body of `url` to `path` and returns its SHA-256. Uses the proxy environment variables and the

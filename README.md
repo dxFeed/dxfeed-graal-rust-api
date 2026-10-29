@@ -107,6 +107,10 @@ The build script of `dxfeed-graal-sys` gets SDK 3.12.0 in one of these ways:
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
   certificate store.
 - With `--no-default-features` and no `DXFEED_GRAAL_SDK_DIR`, the build fails.
+- `DXFEED_GRAAL_SDK_CACHE_DIR`, an absolute path, keeps the downloaded archive in that directory, so a clean build or
+  another target directory reuses it instead of downloading 21 MB again. The archive's SHA-256 is checked on every
+  reuse; one that does not match is downloaded again with a warning. Without the variable nothing is written outside
+  the build directory.
 
 The build fails if the SDK headers differ from those of 3.12.0, because the committed bindings fit only that version.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
