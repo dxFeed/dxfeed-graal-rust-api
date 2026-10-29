@@ -1,5 +1,6 @@
 //! Market events: borrowed views passed to listeners and owned values for publishing.
 
+mod format;
 mod quote;
 mod trade;
 
@@ -55,6 +56,17 @@ impl EventRef<'_> {
     }
 }
 
+/// The text of Java's `toString` of the event; an event of an unmapped type prints as `Event{class=<code>}`.
+impl std::fmt::Display for EventRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            EventRef::Quote(q) => q.fmt(f),
+            EventRef::Trade(t) => t.fmt(f),
+            EventRef::Other(class) => write!(f, "Event{{class={class}}}"),
+        }
+    }
+}
+
 /// An owned event, e.g. for publishing.
 #[derive(Debug, Clone, PartialEq)]
 #[non_exhaustive]
@@ -70,6 +82,16 @@ impl Event {
         match self {
             Event::Quote(q) => &q.symbol,
             Event::Trade(t) => &t.symbol,
+        }
+    }
+}
+
+/// The text of Java's `toString` of the event.
+impl std::fmt::Display for Event {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Event::Quote(q) => q.fmt(f),
+            Event::Trade(t) => t.fmt(f),
         }
     }
 }

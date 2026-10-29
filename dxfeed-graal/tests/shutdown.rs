@@ -158,6 +158,38 @@ fn child_shutdown_in_listener_is_refused() {
 }
 
 #[test]
+fn display_after_shutdown() {
+    let stderr = run("child_display_after_shutdown");
+    let event_time = stderr
+        .lines()
+        .find_map(|line| line.strip_prefix("eventTime="))
+        .unwrap_or_else(|| panic!("no time printed\n{stderr}"));
+    // The SDK formats the time, or the time prints as its milliseconds if the SDK refuses.
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    let formatted = event_time
+        .split_once(['-', '.'])
+        .is_some_and(|(date, _)| date.len() == 8 && digits(date))
+        && event_time.ends_with(".123");
+    assert!(formatted || event_time == "1700000000123", "{event_time}");
+}
+
+#[test]
+#[ignore = "run by display_after_shutdown"]
+fn child_display_after_shutdown() {
+    if !is_child() {
+        return;
+    }
+    system::shutdown().unwrap();
+    let quote = Quote {
+        event_time: 1_700_000_000_123,
+        ..Quote::new("AAPL")
+    };
+    let text = quote.to_string();
+    let event_time = text.split(", ").find_map(|f| f.strip_prefix("eventTime=")).unwrap();
+    eprintln!("eventTime={event_time}");
+}
+
+#[test]
 fn concurrent_shutdown() {
     run("child_concurrent_shutdown");
 }

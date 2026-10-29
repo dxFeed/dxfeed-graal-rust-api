@@ -5,6 +5,7 @@ use std::ffi::c_char;
 
 use dxfeed_graal_sys as sys;
 
+use super::format::{JavaChar, JavaDouble, Time};
 use super::{exchange_code, market_event, sys_exchange_code};
 use crate::error::Result;
 use crate::isolate::string;
@@ -100,6 +101,13 @@ impl std::fmt::Debug for QuoteRef {
     }
 }
 
+/// The text of Java's `Quote.toString`, e.g. `Quote{AAPL, eventTime=0, time=20241004-093000.000, ...}`.
+impl std::fmt::Display for QuoteRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.to_owned().fmt(f)
+    }
+}
+
 /// An owned quote; see [`QuoteRef`] for the fields.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Quote {
@@ -148,6 +156,16 @@ impl Quote {
         }
     }
 
+    /// The quote time in milliseconds, as Java's `Quote.getTime` computes it.
+    fn time(&self) -> i64 {
+        self.bid_time.max(self.ask_time).div_euclid(1000) * 1000 + i64::from((self.time_millis_sequence as u32) >> 22)
+    }
+
+    /// The sequence of the quote, as Java's `Quote.getSequence` computes it.
+    fn sequence(&self) -> i32 {
+        self.time_millis_sequence & 0x3F_FFFF
+    }
+
     pub(super) fn to_sys(&self, symbol: *const c_char) -> Result<sys::dxfg_quote_t> {
         Ok(sys::dxfg_quote_t {
             market_event: market_event(sys::DXFG_EVENT_QUOTE, symbol, self.event_time),
@@ -162,5 +180,41 @@ impl Quote {
             ask_price: self.ask_price,
             ask_size: self.ask_size,
         })
+    }
+}
+
+/// The text of Java's `Quote.toString`; times print in the default time zone of the SDK.
+impl std::fmt::Display for Quote {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Quote{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, bidTime={}, bidExchange={}, bidPrice={}, \
+             bidSize={}, askTime={}, askExchange={}, askPrice={}, askSize={}}}",
+            self.symbol,
+            Time {
+                millis: self.event_time,
+                with_millis: true
+            },
+            Time {
+                millis: self.time(),
+                with_millis: true
+            },
+            self.time_nano_part,
+            self.sequence(),
+            Time {
+                millis: self.bid_time,
+                with_millis: false
+            },
+            JavaChar(self.bid_exchange_code),
+            JavaDouble(self.bid_price),
+            JavaDouble(self.bid_size),
+            Time {
+                millis: self.ask_time,
+                with_millis: false
+            },
+            JavaChar(self.ask_exchange_code),
+            JavaDouble(self.ask_price),
+            JavaDouble(self.ask_size),
+        )
     }
 }
