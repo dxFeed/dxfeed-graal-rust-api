@@ -3,7 +3,7 @@
 //! Most properties take effect only when set before the first endpoint is created.
 
 use std::ptr;
-use std::sync::{Mutex, PoisonError};
+use std::sync::Mutex;
 
 use dxfeed_graal_sys as sys;
 
@@ -28,7 +28,7 @@ pub fn get_property(key: &str) -> Result<Option<String>> {
         return Ok(None);
     }
     // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
-    let copy = unsafe { isolate::string(value) };
+    let copy = unsafe { isolate::string(value) }.into_owned();
     // SAFETY: `value` came from dxfg_v4_system_get_property and is released once.
     let _ = call(|t| unsafe { sys::dxfg_v4_system_release_property(t, value) });
     Ok(Some(copy))
@@ -51,7 +51,7 @@ pub fn shutdown() -> Result<()> {
     if isolate::in_callback() {
         return Err(Error::InCallback);
     }
-    let mut done = DONE.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut done = crate::lock(&DONE);
     if *done {
         return Ok(());
     }

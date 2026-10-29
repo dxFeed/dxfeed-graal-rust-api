@@ -5,8 +5,9 @@ use std::ffi::c_char;
 
 use dxfeed_graal_sys as sys;
 
-use super::{exchange_code, market_event, symbol, sys_exchange_code};
+use super::{exchange_code, market_event, sys_exchange_code};
 use crate::error::Result;
+use crate::isolate::string;
 
 /// A quote received by a listener: the best bid and offer of a symbol (`Quote`). Valid during the callback only.
 #[repr(transparent)]
@@ -16,7 +17,7 @@ impl QuoteRef {
     /// The symbol; replacement characters stand for bytes that are not UTF-8.
     pub fn symbol(&self) -> Cow<'_, str> {
         // SAFETY: the SDK keeps the symbol alive while the event lives.
-        unsafe { symbol(self.0.market_event.event_symbol) }
+        unsafe { string(self.0.market_event.event_symbol) }
     }
 
     /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.

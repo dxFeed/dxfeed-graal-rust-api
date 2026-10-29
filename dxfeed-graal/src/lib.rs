@@ -75,3 +75,8 @@ pub use feed::Feed;
 pub use handle::live_handles;
 pub use publisher::Publisher;
 pub use subscription::{ListenerId, Subscription};
+
+/// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
+fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}

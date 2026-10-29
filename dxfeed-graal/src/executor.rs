@@ -1,4 +1,4 @@
-//! An executor whose tasks run when the application asks (KTD11).
+//! An executor whose tasks run when the application asks.
 
 use std::sync::Arc;
 

@@ -1,10 +1,11 @@
-//! The `LOCAL_HUB` fixture (KTD11): events published to a hub reach its listeners on the test thread.
+//! The `LOCAL_HUB` fixture: events published to a hub reach its listeners on the test thread.
 
 #![allow(dead_code)] // Each test binary uses a part.
 
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
+use dxfeed_graal::event::{Quote, Trade};
 use dxfeed_graal::{Endpoint, Event, Feed, ManualExecutor, Publisher, Role, Subscription};
 
 /// A `LOCAL_HUB` endpoint with a name unique in this process, its manual executor, feed and publisher.
@@ -66,4 +67,49 @@ pub fn collect(subscription: &Subscription) -> Receiver<Event> {
         })
         .unwrap();
     receiver
+}
+
+/// A quote with a distinct non-zero value in every field.
+pub fn quote(symbol: &str) -> Quote {
+    Quote {
+        event_time: 1_700_000_000_500,
+        time_millis_sequence: (123 << 22) | 7,
+        time_nano_part: 456,
+        bid_time: 1_700_000_000_000,
+        bid_exchange_code: 'Q',
+        bid_price: 189.5,
+        bid_size: 100.0,
+        ask_time: 1_700_000_001_000, // Whole seconds: the SDK truncates the time to seconds.
+        ask_exchange_code: 'N',
+        ask_price: 189.75,
+        ask_size: 200.0,
+        ..Quote::new(symbol)
+    }
+}
+
+/// A trade with a distinct non-zero value in every field.
+pub fn trade(symbol: &str) -> Trade {
+    Trade {
+        event_time: 1_700_000_000_500,
+        time_sequence: (1_700_000_000_000 << 22) | 9,
+        time_nano_part: 321,
+        exchange_code: 'Q',
+        price: 190.25,
+        change: 0.5,
+        size: 300.0,
+        day_id: 19_675,
+        day_volume: 1_000_000.0,
+        day_turnover: 190_000_000.0,
+        flags: 4,
+        trade_id: 42,
+        ..Trade::new(symbol)
+    }
+}
+
+/// [`quote`] with another bid price: the hub does not deliver a quote identical to the last one.
+pub fn quote_with_bid(symbol: &str, bid_price: f64) -> Quote {
+    Quote {
+        bid_price,
+        ..quote(symbol)
+    }
 }

@@ -5,8 +5,9 @@ use std::ffi::c_char;
 
 use dxfeed_graal_sys as sys;
 
-use super::{exchange_code, market_event, symbol, sys_exchange_code};
+use super::{exchange_code, market_event, sys_exchange_code};
 use crate::error::Result;
+use crate::isolate::string;
 
 /// A trade received by a listener: the last trade of a symbol (`Trade`). Valid during the callback only.
 #[repr(transparent)]
@@ -20,7 +21,7 @@ impl TradeRef {
     /// The symbol; replacement characters stand for bytes that are not UTF-8.
     pub fn symbol(&self) -> Cow<'_, str> {
         // SAFETY: the SDK keeps the symbol alive while the event lives.
-        unsafe { symbol(self.base().market_event.event_symbol) }
+        unsafe { string(self.base().market_event.event_symbol) }
     }
 
     /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.

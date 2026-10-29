@@ -1,4 +1,4 @@
-//! Owned SDK object handles (KTD7).
+//! Owned SDK object handles.
 
 use std::ptr::NonNull;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -68,15 +68,8 @@ impl<T: SdkHandle> Handle<T> {
         }
         let mut raw = std::ptr::null_mut();
         call(|t| f(t, &mut raw))?;
-        let null = || {
-            Error::Java(JavaException::new(
-                String::new(),
-                "the SDK returned NULL".into(),
-                String::new(),
-                None,
-            ))
-        };
-        let handle = NonNull::new(raw).ok_or_else(null)?;
+        let handle =
+            NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned NULL")))?;
         LIVE.fetch_add(1, Ordering::SeqCst);
         Ok(Handle(handle))
     }

@@ -1,14 +1,14 @@
 //! Subscriptions to events.
 
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Mutex, PoisonError};
+use std::sync::{Mutex, MutexGuard};
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
 use crate::event::Events;
 use crate::handle::Handle;
-use crate::isolate::call;
+use crate::isolate::{self, call};
 use crate::listener::Listener;
 
 /// Identifies a listener added by [`Subscription::add_listener`].
@@ -94,8 +94,8 @@ impl Subscription {
         call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })
     }
 
-    fn lock(&self) -> std::sync::MutexGuard<'_, Vec<(ListenerId, Listener)>> {
-        self.listeners.lock().unwrap_or_else(PoisonError::into_inner)
+    fn lock(&self) -> MutexGuard<'_, Vec<(ListenerId, Listener)>> {
+        crate::lock(&self.listeners)
     }
 
     fn remove(&self, listener: Listener) -> Result<()> {
@@ -109,6 +109,11 @@ impl Subscription {
 
 impl Drop for Subscription {
     fn drop(&mut self) {
+        if isolate::exiting() {
+            // The process is exiting: no SDK calls from destructors. The listeners are dropped without being released,
+            // which leaks their state, as the SDK may still call their trampoline.
+            return;
+        }
         let listeners = std::mem::take(&mut *self.lock());
         for (_, listener) in listeners {
             let _ = self.remove(listener);

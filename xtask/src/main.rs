@@ -63,8 +63,7 @@ fn gen_bindings(sdk_dir: &Path) -> Result<PathBuf, String> {
     let out = Path::new(env!("CARGO_MANIFEST_DIR")).join("../dxfeed-graal-sys/src/bindings.rs");
     let text = format!(
         "// Generated from the headers of dxFeed Graal Native SDK {SDK_VERSION} by\n\
-         // `cargo run -p xtask -- gen-bindings <sdk dir>`. Do not edit.\n\n{}",
-        bindings
+         // `cargo run -p xtask -- gen-bindings <sdk dir>`. Do not edit.\n\n{bindings}"
     );
     std::fs::write(&out, text).map_err(|error| format!("cannot write {}: {error}", out.display()))?;
     Ok(out.canonicalize().unwrap_or(out))

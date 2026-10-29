@@ -1,4 +1,4 @@
-//! Shutdown and process exit (KTD10). Each scenario runs in a child process, because shutdown and exit are
+//! Shutdown and process exit. Each scenario runs in a child process, because shutdown and exit are
 //! process-wide: the parent test re-runs this executable with `<scenario> --exact --ignored` and fails if the child
 //! fails or does not exit within 60 seconds. Scenarios that test exit with live handles leave through
 //! `process::exit(0)`, so no `Drop` runs and the `atexit` path is what executes.
@@ -13,9 +13,8 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::event::Quote;
 use dxfeed_graal::{Endpoint, Error, EventType, ManualExecutor, Role, Subscription, live_handles, system};
-use support::{Hub, collect};
+use support::{Hub, collect, quote, quote_with_bid};
 
 /// Set for the child processes; the scenarios do nothing without it.
 const CHILD: &str = "DXFEED_GRAAL_TEST_CHILD";
@@ -52,19 +51,18 @@ fn run(scenario: &str) -> String {
     };
     let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
     assert!(status.success(), "{scenario} failed with {status}\n{stdout}\n{stderr}");
+    // A scenario name that matches no test makes libtest run nothing and exit with 0. The header is printed before the
+    // test starts, so it is also there when the scenario leaves through `process::exit`.
+    assert!(
+        stdout.contains("running 1 test\n"),
+        "{scenario} did not run exactly one test\n{stdout}\n{stderr}"
+    );
     stderr
 }
 
 /// Whether this process is a child that runs a scenario.
 fn is_child() -> bool {
     std::env::var_os(CHILD).is_some()
-}
-
-fn quote() -> Quote {
-    Quote {
-        bid_price: 1.0,
-        ..Quote::new("AAPL")
-    }
 }
 
 /// A feed endpoint connected to a local socket, with a subscription and a listener.
@@ -103,7 +101,7 @@ fn child_shutdown_stops_delivery_and_creation() {
     let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publish_and_process(&[quote().into()]);
+    hub.publish_and_process(&[quote("AAPL").into()]);
     assert!(events.try_recv().is_ok());
 
     // Shutdown waits for the endpoint's tasks: a manual executor needs another thread to run them meanwhile.
@@ -121,11 +119,7 @@ fn child_shutdown_stops_delivery_and_creation() {
     stop.store(true, Ordering::Release);
     pump.join().unwrap();
     system::shutdown().unwrap();
-    let _ = hub.publisher.publish(&[Quote {
-        bid_price: 2.0,
-        ..quote()
-    }
-    .into()]);
+    let _ = hub.publisher.publish(&[quote_with_bid("AAPL", 2.0).into()]);
     let _ = hub.executor.process_all_pending();
     assert!(events.try_recv().is_err());
     assert!(matches!(Endpoint::create(Role::LocalHub), Err(Error::ShutDown)));
@@ -159,7 +153,7 @@ fn child_shutdown_in_listener_is_refused() {
         })
         .unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publish_and_process(&[quote().into()]);
+    hub.publish_and_process(&[quote("AAPL").into()]);
     assert!(matches!(results.try_recv(), Ok(Err(Error::InCallback))));
 }
 
@@ -203,7 +197,7 @@ fn child_exit_during_callback() {
         })
         .unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publisher.publish(&[quote().into()]).unwrap();
+    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
     wait_started.recv_timeout(Duration::from_secs(10)).unwrap();
     process::exit(0);
 }

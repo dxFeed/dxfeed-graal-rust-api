@@ -9,36 +9,26 @@ use std::time::Duration;
 
 use dxfeed_graal::event::{Quote, Trade};
 use dxfeed_graal::{Endpoint, Error, Event, EventType, ManualExecutor, Role, Subscription};
-use support::{Hub, collect};
+use support::{Hub, collect, quote, quote_with_bid, trade};
 
-fn quote(symbol: &str) -> Quote {
+/// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
+/// nanosecond part of a quote through the hub, they come back as zero.
+fn delivered_quote(sent: Quote) -> Quote {
     Quote {
         event_time: 0,
-        bid_time: 1_700_000_000_000,
-        bid_exchange_code: 'Q',
-        bid_price: 189.5,
-        bid_size: 100.0,
-        ask_time: 1_700_000_000_000,
-        ask_exchange_code: 'N',
-        ask_price: 189.75,
-        ask_size: 200.0,
-        ..Quote::new(symbol)
+        time_millis_sequence: 0,
+        time_nano_part: 0,
+        ..sent
     }
 }
 
-fn trade(symbol: &str) -> Trade {
+/// The trade as `LOCAL_HUB` delivers it: the SDK does not carry the event time and the nanosecond part of a trade
+/// through the hub, they come back as zero.
+fn delivered_trade(sent: Trade) -> Trade {
     Trade {
-        time_sequence: 1_700_000_000_000 << 22,
-        exchange_code: 'Q',
-        price: 190.25,
-        change: 0.5,
-        size: 300.0,
-        day_id: 19_675,
-        day_volume: 1_000_000.0,
-        day_turnover: 190_000_000.0,
-        flags: 4,
-        trade_id: 42,
-        ..Trade::new(symbol)
+        event_time: 0,
+        time_nano_part: 0,
+        ..sent
     }
 }
 
@@ -124,7 +114,7 @@ fn quote_round_trip() {
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[quote("AAPL").into()]);
-    assert_eq!(received(&events), vec![Event::Quote(quote("AAPL"))]);
+    assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
 }
 
 #[test]
@@ -134,16 +124,32 @@ fn trade_round_trip() {
     let events = collect(&subscription);
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[trade("AAPL").into()]);
-    let got = received(&events);
-    let [Event::Trade(t)] = got.as_slice() else {
-        panic!("expected one trade, got {got:?}");
-    };
-    let sent = trade("AAPL");
-    assert_eq!(
-        (t.price, t.size, t.day_volume, t.trade_id, t.flags),
-        (sent.price, sent.size, sent.day_volume, 42, 4)
-    );
-    assert_eq!(t.symbol, "AAPL");
+    assert_eq!(received(&events), vec![Event::Trade(delivered_trade(trade("AAPL")))]);
+}
+
+#[test]
+fn invalid_events_are_rejected() {
+    let hub = Hub::new();
+    let wide = '\u{1F600}'; // Does not fit a Java char.
+    let events: [Event; 3] = [
+        Quote {
+            bid_exchange_code: wide,
+            ..quote("AAPL")
+        }
+        .into(),
+        Trade {
+            exchange_code: wide,
+            ..trade("AAPL")
+        }
+        .into(),
+        quote("A\0B").into(),
+    ];
+    for event in events {
+        assert!(
+            matches!(hub.publisher.publish(&[event]), Err(Error::InvalidArgument(_))),
+            "an invalid event was accepted"
+        );
+    }
 }
 
 #[test]
@@ -178,12 +184,9 @@ fn hubs_are_isolated() {
         let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
         let events = collect(&subscription);
         subscription.add_symbols(&["AAPL"]).unwrap();
-        let mine = Quote {
-            bid_price: 1.0,
-            ..quote("AAPL")
-        };
+        let mine = quote_with_bid("AAPL", 1.0);
         hub.publish_and_process(&[mine.clone().into()]);
-        assert_eq!(received(&events), vec![Event::Quote(mine)]);
+        assert_eq!(received(&events), vec![Event::Quote(delivered_quote(mine))]);
     }
 }
 
@@ -202,11 +205,7 @@ fn panic_in_listener_keeps_it_active() {
         .unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
     hub.publish_and_process(&[quote("AAPL").into()]);
-    hub.publish_and_process(&[Quote {
-        bid_price: 1.0,
-        ..quote("AAPL")
-    }
-    .into()]);
+    hub.publish_and_process(&[quote_with_bid("AAPL", 1.0).into()]);
     assert_eq!(calls.load(Ordering::SeqCst), 2);
 }
 
@@ -227,12 +226,7 @@ fn subscription_dropped_in_own_listener() {
     subscription.add_symbols(&["AAPL"]).unwrap();
     *slot.lock().unwrap() = Some(subscription);
     hub.publish_and_process(&[quote("AAPL").into()]);
-    // A changed quote: an identical one would not be delivered anyway.
-    hub.publish_and_process(&[Quote {
-        bid_price: 1.0,
-        ..quote("AAPL")
-    }
-    .into()]);
+    hub.publish_and_process(&[quote_with_bid("AAPL", 1.0).into()]);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     assert!(slot.lock().unwrap().is_none());
 }
@@ -313,11 +307,7 @@ fn processing_from_listener_does_not_nest_calls() {
                 && let Some(hub) = h.upgrade()
             {
                 // The SDK serializes the calls of a subscription: this quote comes in a second call after this one.
-                hub.publish_and_process(&[Quote {
-                    bid_price: 1.0,
-                    ..quote("AAPL")
-                }
-                .into()]);
+                hub.publish_and_process(&[quote_with_bid("AAPL", 1.0).into()]);
             }
             i.store(false, Ordering::SeqCst);
         })
@@ -370,13 +360,7 @@ fn listeners_drop_each_other_without_deadlock() {
     });
     cleanup.recv_timeout(Duration::from_secs(10)).expect("deadlock");
     while wait.recv_timeout(Duration::from_millis(500)).is_ok() {}
-    hub.publisher
-        .publish(&[Quote {
-            bid_price: 2.0,
-            ..quote("AAPL")
-        }
-        .into()])
-        .unwrap();
+    hub.publisher.publish(&[quote_with_bid("AAPL", 2.0).into()]).unwrap();
     assert!(
         wait.recv_timeout(Duration::from_millis(500)).is_err(),
         "a dropped subscription still receives"

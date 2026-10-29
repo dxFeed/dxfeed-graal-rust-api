@@ -1,9 +1,10 @@
-//! The process-wide isolate, thread attachment and the call helper (KTD5, KTD6).
+//! The process-wide isolate, thread attachment and the call helper.
 //!
 //! One isolate is created on first use and never torn down: tear-down waits for every Java thread and can hang. A
 //! thread is attached on its first SDK call and detached by a thread-local guard when it exits, unless the process is
 //! exiting.
 
+use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{CStr, c_char, c_int};
 use std::ptr;
@@ -28,10 +29,10 @@ unsafe impl Sync for Isolate {}
 /// The result of `graal_create_isolate`; a failure is kept and returned on every later call, never retried.
 static ISOLATE: OnceLock<std::result::Result<Isolate, i32>> = OnceLock::new();
 
-/// Set by the `atexit` handler: from then on nothing calls the SDK from destructors (KTD10).
+/// Set by the `atexit` handler: from then on nothing calls the SDK from destructors.
 static EXITING: AtomicBool = AtomicBool::new(false);
 
-/// Set by [`crate::system::shutdown`]: from then on nothing new can be created (KTD10).
+/// Set by [`crate::system::shutdown`]: from then on nothing new can be created.
 static SHUT_DOWN: AtomicBool = AtomicBool::new(false);
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -86,9 +87,9 @@ struct Guard;
 impl Drop for Guard {
     fn drop(&mut self) {
         let thread = THREAD.replace(ptr::null_mut());
-        if STATE.replace(State::Gone) == State::Owned && !exiting() {
+        if STATE.replace(State::Gone) == State::Owned {
             // SAFETY: `thread` was attached by this crate on this thread and is not used after this.
-            unsafe { sys::graal_detach_thread(thread) };
+            unsafe { detach(thread) };
         }
     }
 }
@@ -154,7 +155,6 @@ fn own(thread: Thread) -> bool {
 
 /// Runs `f` with the isolate thread of the calling thread, attaching it if needed.
 pub(crate) fn with_thread<R>(f: impl FnOnce(Thread) -> R) -> Result<R> {
-    let isolate = isolate()?;
     let callback = CALLBACK_THREAD.get();
     if !callback.is_null() {
         return Ok(f(callback));
@@ -162,6 +162,7 @@ pub(crate) fn with_thread<R>(f: impl FnOnce(Thread) -> R) -> Result<R> {
     if STATE.get() == State::Owned {
         return Ok(f(THREAD.get()));
     }
+    let isolate = isolate()?;
     // SAFETY: `isolate` is a live isolate.
     let current = unsafe { sys::graal_get_current_thread(isolate) };
     if !current.is_null() {
@@ -179,11 +180,21 @@ pub(crate) fn with_thread<R>(f: impl FnOnce(Thread) -> R) -> Result<R> {
     }
     // The guard is gone (we run in another thread-local's destructor): attach for this call only.
     let result = f(thread);
+    // SAFETY: `thread` was attached above on this thread and is not used after this.
+    unsafe { detach(thread) };
+    Ok(result)
+}
+
+/// Detaches `thread` unless the process is exiting.
+///
+/// # Safety
+///
+/// `thread` must have been attached by this crate on the calling thread and must not be used afterwards.
+unsafe fn detach(thread: Thread) {
     if !exiting() {
-        // SAFETY: `thread` was attached above on this thread and is not used after this.
+        // SAFETY: guaranteed by the caller.
         unsafe { sys::graal_detach_thread(thread) };
     }
-    Ok(result)
 }
 
 /// Runs an SDK function that returns `0` on success and `-1` with a thread exception on failure.
@@ -246,35 +257,32 @@ unsafe fn copy_exception(exception: *const sys::dxfg_v4_exception_t, depth: usiz
     // SAFETY: the strings are NULL or NUL-terminated strings of the live exception.
     unsafe {
         JavaException::new(
-            string(e.class_name),
-            string(e.message),
-            string(e.print_stack_trace),
+            string(e.class_name).into_owned(),
+            string(e.message).into_owned(),
+            string(e.print_stack_trace).into_owned(),
             cause,
         )
     }
 }
 
-/// Copies an SDK string lossily; NULL becomes empty.
+/// Reads an SDK string; NULL becomes empty, invalid UTF-8 is replaced.
 ///
 /// # Safety
 ///
-/// `s` must be NULL or a NUL-terminated string.
-pub(crate) unsafe fn string(s: *const c_char) -> String {
+/// `s` must be NULL or a NUL-terminated string that outlives `'a`.
+pub(crate) unsafe fn string<'a>(s: *const c_char) -> Cow<'a, str> {
     if s.is_null() {
-        String::new()
+        Cow::Borrowed("")
     } else {
         // SAFETY: the caller guarantees a NUL-terminated string.
-        unsafe { CStr::from_ptr(s) }.to_string_lossy().into_owned()
+        unsafe { CStr::from_ptr(s) }.to_string_lossy()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn set_property(key: &str, value: &str) -> Result<()> {
-        crate::system::set_property(key, value)
-    }
+    use crate::system::set_property;
 
     #[test]
     fn threads_share_one_isolate() {

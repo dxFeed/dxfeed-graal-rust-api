@@ -1,10 +1,9 @@
-//! Market events: borrowed views passed to listeners and owned values for publishing (KTD9).
+//! Market events: borrowed views passed to listeners and owned values for publishing.
 
 mod quote;
 mod trade;
 
-use std::borrow::Cow;
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CString, c_char};
 use std::marker::PhantomData;
 
 use dxfeed_graal_sys as sys;
@@ -64,6 +63,15 @@ pub enum Event {
     Quote(Quote),
     /// A trade.
     Trade(Trade),
+}
+
+impl Event {
+    fn symbol(&self) -> &str {
+        match self {
+            Event::Quote(q) => &q.symbol,
+            Event::Trade(t) => &t.symbol,
+        }
+    }
 }
 
 impl From<Quote> for Event {
@@ -130,20 +138,6 @@ impl<'a> Iterator for Events<'a> {
 
 impl ExactSizeIterator for Events<'_> {}
 
-/// The symbol of an SDK event; empty if NULL, lossy if not UTF-8.
-///
-/// # Safety
-///
-/// `symbol` must be NULL or a NUL-terminated string that outlives `'a`.
-unsafe fn symbol<'a>(symbol: *const c_char) -> Cow<'a, str> {
-    if symbol.is_null() {
-        Cow::Borrowed("")
-    } else {
-        // SAFETY: the caller guarantees a NUL-terminated string.
-        unsafe { CStr::from_ptr(symbol) }.to_string_lossy()
-    }
-}
-
 /// A Java `char` exchange code from the SDK.
 fn exchange_code(code: i16) -> char {
     char::from_u32(code as u16 as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
@@ -173,17 +167,10 @@ impl SysEvents {
         let mut symbols = Vec::with_capacity(events.len());
         let mut sys_events = Vec::with_capacity(events.len());
         for event in events {
-            let (symbol, sys_event) = match event {
-                Event::Quote(q) => {
-                    let symbol = c_string(&q.symbol, "event symbol")?;
-                    let raw = q.to_sys(symbol.as_ptr())?;
-                    (symbol, SysEvent::Quote(raw))
-                }
-                Event::Trade(t) => {
-                    let symbol = c_string(&t.symbol, "event symbol")?;
-                    let raw = t.to_sys(symbol.as_ptr())?;
-                    (symbol, SysEvent::Trade(raw))
-                }
+            let symbol = c_string(event.symbol(), "event symbol")?;
+            let sys_event = match event {
+                Event::Quote(q) => SysEvent::Quote(q.to_sys(symbol.as_ptr())?),
+                Event::Trade(t) => SysEvent::Trade(t.to_sys(symbol.as_ptr())?),
             };
             symbols.push(symbol);
             sys_events.push(sys_event);

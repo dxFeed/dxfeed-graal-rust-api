@@ -1,11 +1,11 @@
-//! Event listeners: the C trampoline and the release thread (KTD8).
+//! Event listeners: the C trampoline and the release thread.
 
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
-use std::sync::{Arc, Mutex, OnceLock, PoisonError};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
@@ -72,17 +72,21 @@ impl Listener {
 
     fn release_now(self) {
         let Listener { handle, state } = self;
-        if handle.release().is_ok() {
-            // SAFETY: the SDK no longer calls the trampoline with `state`, so its reference is ours to drop.
+        // While the process is exiting, the release reports success without calling the SDK, so `exiting` is checked
+        // after it: a release that reached the SDK just before the exit started is then leaked too, which is harmless.
+        if handle.release().is_ok() && !isolate::exiting() {
+            // SAFETY: the SDK released the handle, so it no longer calls the trampoline with `state`; its reference
+            // is ours to drop.
             drop(unsafe { Arc::from_raw(state) });
         }
-        // If the release failed, the SDK may still call the trampoline: its reference is leaked on purpose.
+        // If the release failed or the process is exiting, the SDK may still call the trampoline: its reference is
+        // leaked on purpose.
     }
 }
 
 type Job = Box<dyn FnOnce() + Send>;
 
-static RELEASE_THREAD: OnceLock<Mutex<Sender<Job>>> = OnceLock::new();
+static RELEASE_THREAD: OnceLock<Sender<Job>> = OnceLock::new();
 
 /// Runs `job` on the crate's release thread, started on first use.
 fn release_thread(job: Job) {
@@ -99,10 +103,10 @@ fn release_thread(job: Job) {
                 }
             })
             .expect("cannot start the dxfeed-graal release thread");
-        Mutex::new(sender)
+        sender
     });
     // The receiver lives as long as the process, so sending cannot fail.
-    let _ = sender.lock().unwrap_or_else(PoisonError::into_inner).send(job);
+    let _ = sender.send(job);
 }
 
 /// Waits until the release thread has run the jobs sent before this call, if it was ever started.
@@ -156,7 +160,7 @@ unsafe extern "C" fn trampoline(
             eprintln!("dxfeed-graal: skipped a nested call of an event listener on the thread that runs it");
             return;
         }
-        let mut closure = state.closure.lock().unwrap_or_else(PoisonError::into_inner);
+        let mut closure = crate::lock(&state.closure);
         state.running.store(me, Ordering::Release);
         // SAFETY: the SDK keeps the list alive until this call returns.
         let events = unsafe { Events::new(events) };

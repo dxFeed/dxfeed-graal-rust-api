@@ -1,4 +1,4 @@
-//! Errors of the API (KTD6).
+//! Errors of the API.
 
 use std::ffi::CString;
 use std::fmt;
@@ -63,9 +63,14 @@ impl JavaException {
         }
     }
 
+    /// An exception with only a message, for SDK failures that come without a Java exception.
+    pub(crate) fn from_message(message: &str) -> Self {
+        Self::new(String::new(), message.to_owned(), String::new(), None)
+    }
+
     /// The exception used when the SDK failed to report its own exception.
     pub(crate) fn lost() -> Self {
-        Self::new(String::new(), "exception lost".to_owned(), String::new(), None)
+        Self::from_message("exception lost")
     }
 
     /// The fully qualified Java class name, e.g. `java.lang.IllegalArgumentException`; empty if unknown.

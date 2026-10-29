@@ -255,10 +255,16 @@ fn download_sdk(target: &Target, out_dir: &Path) -> Result<PathBuf> {
 #[cfg(feature = "download")]
 fn download(url: &str, path: &Path) -> std::result::Result<String, Box<dyn std::error::Error>> {
     use std::io::{self, Read, Write};
+    use std::time::Duration;
     use ureq::tls::{RootCerts, TlsConfig};
 
+    // ureq has no timeouts by default, so a stalled connection would hang the build forever. The global limit
+    // assumes the SDK archive downloads within 10 minutes.
     let agent: ureq::Agent = ureq::Agent::config_builder()
         .tls_config(TlsConfig::builder().root_certs(RootCerts::PlatformVerifier).build())
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .timeout_global(Some(Duration::from_secs(10 * 60)))
         .build()
         .into();
     let mut response = agent.get(url).call()?;
