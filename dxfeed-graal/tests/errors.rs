@@ -2,7 +2,7 @@
 
 use std::error::Error as _;
 
-use dxfeed_graal::{Endpoint, Error, Role, system};
+use dxfeed_graal::{DXEndpoint, Error, Role, system};
 
 #[test]
 fn property_round_trip() {
@@ -25,13 +25,13 @@ fn nul_in_property_is_invalid_argument() {
 
 #[test]
 fn nul_in_builder_property_is_invalid_argument() {
-    let result = Endpoint::builder().with_property("a\0b", "1").build();
+    let result = DXEndpoint::new_builder().with_property("a\0b", "1").build();
     assert!(matches!(result, Err(Error::InvalidArgument(_))));
 }
 
 #[test]
 fn connect_to_invalid_address_is_java_exception() {
-    let endpoint = Endpoint::create(Role::Feed).unwrap();
+    let endpoint = DXEndpoint::create_with_role(Role::Feed).unwrap();
     let error = endpoint.connect("not-a-scheme://[").unwrap_err();
     let Error::Java(e) = &error else {
         panic!("expected a Java exception, got {error:?}");

@@ -13,7 +13,7 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::{Endpoint, Error, EventType, ManualExecutor, Role, Subscription, live_handles, system};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, EventType, ManualExecutor, Role, live_handles, system};
 use support::{Hub, collect, quote, quote_with_bid};
 
 /// Set for the child processes; the scenarios do nothing without it.
@@ -66,18 +66,14 @@ fn is_child() -> bool {
 }
 
 /// A feed endpoint connected to a local socket, with a subscription and a listener.
-fn connected() -> (TcpListener, Endpoint, Subscription) {
+fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription) {
     let peer = TcpListener::bind("127.0.0.1:0").unwrap();
-    let endpoint = Endpoint::create(Role::Feed).unwrap();
+    let endpoint = DXEndpoint::create_with_role(Role::Feed).unwrap();
     endpoint
         .connect(&format!("127.0.0.1:{}", peer.local_addr().unwrap().port()))
         .unwrap();
-    let subscription = endpoint
-        .feed()
-        .unwrap()
-        .create_subscription(&[EventType::Quote])
-        .unwrap();
-    subscription.add_listener(|_| {}).unwrap();
+    let subscription = endpoint.feed().create_subscription(&[EventType::Quote]).unwrap();
+    subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
     // Let the endpoint connect, so its connection threads run.
     let _ = peer.accept();
@@ -119,12 +115,15 @@ fn child_shutdown_stops_delivery_and_creation() {
     stop.store(true, Ordering::Release);
     pump.join().unwrap();
     system::shutdown().unwrap();
-    let _ = hub.publisher.publish(&[quote_with_bid("AAPL", 2.0).into()]);
+    let _ = hub.publisher.publish_events(&[quote_with_bid("AAPL", 2.0).into()]);
     let _ = hub.executor.process_all_pending();
     assert!(events.try_recv().is_err());
-    assert!(matches!(Endpoint::create(Role::LocalHub), Err(Error::ShutDown)));
+    assert!(matches!(
+        DXEndpoint::create_with_role(Role::LocalHub),
+        Err(Error::ShutDown)
+    ));
     assert!(matches!(ManualExecutor::new(), Err(Error::ShutDown)));
-    assert!(matches!(subscription.add_listener(|_| {}), Err(Error::ShutDown)));
+    assert!(matches!(subscription.add_event_listener(|_| {}), Err(Error::ShutDown)));
 
     subscription.close().unwrap();
     hub.endpoint.close().unwrap();
@@ -148,7 +147,7 @@ fn child_shutdown_in_listener_is_refused() {
     let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
     let (sender, results) = mpsc::channel();
     subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             let _ = sender.send(system::shutdown());
         })
         .unwrap();
@@ -191,13 +190,13 @@ fn child_exit_during_callback() {
     let (started, wait_started) = mpsc::channel();
     let (_release, blocked) = mpsc::channel::<()>();
     subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             let _ = started.send(());
             let _ = blocked.recv();
         })
         .unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     wait_started.recv_timeout(Duration::from_secs(10)).unwrap();
     process::exit(0);
 }

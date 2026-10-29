@@ -11,7 +11,7 @@ use crate::isolate::call;
 /// An executor that runs the tasks of an endpoint, listener calls included, only inside
 /// [`process_all_pending`](Self::process_all_pending), on the calling thread.
 ///
-/// Pass it to [`EndpointBuilder::with_executor`](crate::EndpointBuilder::with_executor). Useful for tests and for
+/// Pass it to [`DXEndpointBuilder::with_executor`](crate::DXEndpointBuilder::with_executor). Useful for tests and for
 /// applications that deliver events on a thread of their own. Clones share one executor.
 ///
 /// [`system::shutdown`](crate::system::shutdown) waits for the tasks of every endpoint: while it runs, another thread

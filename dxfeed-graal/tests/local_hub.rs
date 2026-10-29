@@ -8,7 +8,7 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::{Endpoint, Error, Event, EventType, ManualExecutor, Role, Subscription};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, Event, EventType, ManualExecutor, Role};
 use support::{Hub, collect, quote, quote_with_bid, trade};
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
@@ -39,14 +39,14 @@ fn received(receiver: &Receiver<Event>) -> Vec<Event> {
 #[test]
 fn local_hub_builds() {
     let hub = Hub::new();
-    assert_eq!(hub.endpoint.role().unwrap(), Role::LocalHub);
+    assert_eq!(hub.endpoint.role(), Role::LocalHub);
     hub.executor.process_all_pending().unwrap();
 }
 
 #[test]
 fn create_with_role() {
     assert_eq!(
-        Endpoint::create(Role::Publisher).unwrap().role().unwrap(),
+        DXEndpoint::create_with_role(Role::Publisher).unwrap().role(),
         Role::Publisher
     );
 }
@@ -62,7 +62,7 @@ fn close_then_drop() {
 fn endpoint_moves_to_another_thread() {
     let endpoint = Hub::new().endpoint;
     std::thread::spawn(move || {
-        assert_eq!(endpoint.role().unwrap(), Role::LocalHub);
+        assert_eq!(endpoint.role(), Role::LocalHub);
         drop(endpoint);
     })
     .join()
@@ -70,13 +70,109 @@ fn endpoint_moves_to_another_thread() {
 }
 
 #[test]
+fn create_makes_a_feed_endpoint() {
+    let endpoint = DXEndpoint::create().unwrap();
+    assert_eq!(endpoint.role(), Role::Feed);
+}
+
+#[test]
+fn connect_chains() {
+    let endpoint = DXEndpoint::create().unwrap();
+    // The connection is made in the background, so an address that refuses connections is enough.
+    endpoint.connect("127.0.0.1:1").unwrap().disconnect().unwrap();
+}
+
+#[test]
+fn feed_and_publisher_keep_the_endpoint_open() {
+    let executor = ManualExecutor::new().unwrap();
+    let endpoint = DXEndpoint::new_builder()
+        .with_role(Role::LocalHub)
+        .with_name("chain-hub")
+        .with_executor(&executor)
+        .build()
+        .unwrap();
+    let publisher = endpoint.publisher();
+    let feed = endpoint.feed();
+    drop(endpoint);
+    let subscription = feed.create_subscription(&[EventType::Quote]).unwrap();
+    drop(feed);
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    publisher.publish_events(&[quote("AAPL").into()]).unwrap();
+    executor.process_all_pending().unwrap();
+    assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
+}
+
+#[test]
+fn java_style_chain_compiles_and_works() {
+    let subscription = DXEndpoint::new_builder()
+        .with_role(Role::LocalHub)
+        .build()
+        .unwrap()
+        .feed()
+        .create_subscription(&[EventType::Quote])
+        .unwrap();
+    subscription.add_event_listener(|_| {}).unwrap();
+    subscription.add_symbols(["AAPL"]).unwrap();
+}
+
+#[test]
+fn close_and_await_termination_delivers_scheduled_events() {
+    let hub = Hub::with_default_executor();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
+    hub.endpoint.close_and_await_termination().unwrap();
+    assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
+    hub.endpoint.close_and_await_termination().unwrap();
+    hub.endpoint.close().unwrap();
+}
+
+#[test]
+fn close_and_await_termination_is_refused_in_a_listener() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let endpoint = hub.endpoint.clone();
+    let (sender, results) = mpsc::channel();
+    subscription
+        .add_event_listener(move |_| {
+            let _ = sender.send(endpoint.close_and_await_termination());
+        })
+        .unwrap();
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    assert!(matches!(results.try_recv(), Ok(Err(Error::InCallback))));
+}
+
+#[test]
+fn symbols_from_any_iterable() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL", "IBM"]).unwrap();
+    subscription.add_symbols(vec![String::from("MSFT")]).unwrap();
+    subscription.add_symbols(std::iter::once("GOOG")).unwrap();
+    subscription.remove_symbols(&["IBM"]).unwrap();
+    hub.publish_and_process(&["AAPL", "IBM", "MSFT", "GOOG"].map(|s| quote(s).into()));
+    let symbols: Vec<String> = received(&events)
+        .into_iter()
+        .map(|event| match event {
+            Event::Quote(quote) => quote.symbol,
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect();
+    assert_eq!(symbols, ["AAPL", "MSFT", "GOOG"]);
+}
+
+#[test]
 fn types_are_send_and_sync() {
     fn send_sync<T: Send + Sync>() {}
-    send_sync::<Endpoint>();
-    send_sync::<dxfeed_graal::Feed>();
-    send_sync::<dxfeed_graal::Publisher>();
+    send_sync::<DXEndpoint>();
+    send_sync::<dxfeed_graal::DXFeed>();
+    send_sync::<dxfeed_graal::DXPublisher>();
     send_sync::<ManualExecutor>();
-    send_sync::<Subscription>();
+    send_sync::<DXFeedSubscription>();
 }
 
 #[test]
@@ -87,17 +183,17 @@ fn symbols_and_listeners() {
         .create_subscription(&[EventType::Quote, EventType::Trade])
         .unwrap();
     // Listeners go before symbols: the SDK refuses a listener for a subscription that has symbols.
-    let id = subscription.add_listener(|_| {}).unwrap();
+    let id = subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL", "IBM"]).unwrap();
     subscription.remove_symbols(&["IBM"]).unwrap();
     assert!(matches!(
         subscription.add_symbols(&["A\0B"]),
         Err(Error::InvalidArgument(_))
     ));
-    assert!(subscription.add_listener(|_| {}).is_err());
-    subscription.remove_listener(id).unwrap();
+    assert!(subscription.add_event_listener(|_| {}).is_err());
+    subscription.remove_event_listener(id).unwrap();
     assert!(matches!(
-        subscription.remove_listener(id),
+        subscription.remove_event_listener(id),
         Err(Error::InvalidArgument(_))
     ));
     assert!(matches!(
@@ -146,7 +242,7 @@ fn invalid_events_are_rejected() {
     ];
     for event in events {
         assert!(
-            matches!(hub.publisher.publish(&[event]), Err(Error::InvalidArgument(_))),
+            matches!(hub.publisher.publish_events(&[event]), Err(Error::InvalidArgument(_))),
             "an invalid event was accepted"
         );
     }
@@ -197,7 +293,7 @@ fn panic_in_listener_keeps_it_active() {
     let calls = Arc::new(AtomicUsize::new(0));
     let counter = calls.clone();
     subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             if counter.fetch_add(1, Ordering::SeqCst) == 0 {
                 panic!("first batch");
             }
@@ -212,12 +308,12 @@ fn panic_in_listener_keeps_it_active() {
 #[test]
 fn subscription_dropped_in_own_listener() {
     let hub = Hub::new();
-    let slot: Arc<Mutex<Option<Subscription>>> = Arc::default();
+    let slot: Arc<Mutex<Option<DXFeedSubscription>>> = Arc::default();
     let calls = Arc::new(AtomicUsize::new(0));
     let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
     let (s, c) = (slot.clone(), calls.clone());
     subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             c.fetch_add(1, Ordering::SeqCst);
             let own = s.lock().unwrap().take();
             drop(own);
@@ -239,23 +335,23 @@ fn remove_listener_waits_for_running_call() {
     let finished = Arc::new(AtomicBool::new(false));
     let (b, f) = (started.clone(), finished.clone());
     let id = subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             b.wait();
             std::thread::sleep(Duration::from_millis(300));
             f.store(true, Ordering::SeqCst);
         })
         .unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     let processor = {
         let hub = hub.clone();
         std::thread::spawn(move || hub.executor.process_all_pending().unwrap())
     };
     started.wait();
-    subscription.remove_listener(id).unwrap();
+    subscription.remove_event_listener(id).unwrap();
     assert!(
         finished.load(Ordering::SeqCst),
-        "remove_listener returned while the call was running"
+        "remove_event_listener returned while the call was running"
     );
     processor.join().unwrap();
 }
@@ -267,13 +363,13 @@ fn concurrent_processing_delivers_each_event_once() {
     let count = Arc::new(AtomicUsize::new(0));
     let c = count.clone();
     subscription
-        .add_listener(move |events| _ = c.fetch_add(events.len(), Ordering::SeqCst))
+        .add_event_listener(move |events| _ = c.fetch_add(events.len(), Ordering::SeqCst))
         .unwrap();
     let symbols: Vec<String> = (0..200).map(|i| format!("S{i}")).collect();
     subscription.add_symbols(&symbols).unwrap();
     let events: Vec<Event> = symbols.iter().map(|s| quote(s).into()).collect();
     for chunk in events.chunks(10) {
-        hub.publisher.publish(chunk).unwrap();
+        hub.publisher.publish_events(chunk).unwrap();
     }
     let threads: Vec<_> = (0..2)
         .map(|_| {
@@ -299,7 +395,7 @@ fn processing_from_listener_does_not_nest_calls() {
     );
     let (h, c, i, n) = (Arc::downgrade(&hub), calls.clone(), inside.clone(), nested.clone());
     subscription
-        .add_listener(move |_| {
+        .add_event_listener(move |_| {
             if i.swap(true, Ordering::SeqCst) {
                 n.store(true, Ordering::SeqCst);
             }
@@ -322,14 +418,14 @@ fn processing_from_listener_does_not_nest_calls() {
 #[test]
 fn listeners_drop_each_other_without_deadlock() {
     let hub = Hub::with_default_executor();
-    let slots: [Arc<Mutex<Option<Subscription>>>; 2] = [Arc::default(), Arc::default()];
+    let slots: [Arc<Mutex<Option<DXFeedSubscription>>>; 2] = [Arc::default(), Arc::default()];
     let started: Arc<[AtomicBool; 2]> = Arc::default();
     let (done, wait) = mpsc::channel();
     for i in 0..2 {
         let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
         let (other, started, done) = (slots[1 - i].clone(), started.clone(), done.clone());
         subscription
-            .add_listener(move |_| {
+            .add_event_listener(move |_| {
                 // Wait a little for the other listener, so both drop each other while both run, if the executor
                 // runs them on two threads.
                 started[i].store(true, Ordering::SeqCst);
@@ -345,7 +441,7 @@ fn listeners_drop_each_other_without_deadlock() {
         subscription.add_symbols(&["AAPL"]).unwrap();
         *slots[i].lock().unwrap() = Some(subscription);
     }
-    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     wait.recv_timeout(Duration::from_secs(10)).expect("no listener ran");
     let _ = wait.recv_timeout(Duration::from_secs(2));
     // Whatever the listeners left is dropped here; neither must hang.
@@ -360,7 +456,9 @@ fn listeners_drop_each_other_without_deadlock() {
     });
     cleanup.recv_timeout(Duration::from_secs(10)).expect("deadlock");
     while wait.recv_timeout(Duration::from_millis(500)).is_ok() {}
-    hub.publisher.publish(&[quote_with_bid("AAPL", 2.0).into()]).unwrap();
+    hub.publisher
+        .publish_events(&[quote_with_bid("AAPL", 2.0).into()])
+        .unwrap();
     assert!(
         wait.recv_timeout(Duration::from_millis(500)).is_err(),
         "a dropped subscription still receives"
@@ -371,9 +469,9 @@ fn listeners_drop_each_other_without_deadlock() {
 fn hub_with_pending_tasks_drops_quickly() {
     let hub = Hub::new();
     let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
-    subscription.add_listener(|_| {}).unwrap();
+    subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
-    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     let (sender, receiver) = mpsc::channel();
     std::thread::spawn(move || {
         drop(subscription);

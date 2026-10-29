@@ -4,7 +4,7 @@
 
 use std::process::ExitCode;
 
-use dxfeed_graal::{Endpoint, EventRef, EventType, Role, system};
+use dxfeed_graal::{DXEndpoint, EventRef, EventType, Role, system};
 
 fn main() -> ExitCode {
     let mut args = std::env::args().skip(1);
@@ -20,10 +20,10 @@ fn main() -> ExitCode {
 }
 
 fn run(symbol: &str, address: &str) -> dxfeed_graal::Result<()> {
-    let endpoint = Endpoint::create(Role::Feed)?;
-    let subscription = endpoint.feed()?.create_subscription(&[EventType::Quote])?;
+    let endpoint = DXEndpoint::create_with_role(Role::Feed)?;
+    let subscription = endpoint.feed().create_subscription(&[EventType::Quote])?;
     // Listeners go before symbols, so the first quotes are not missed.
-    subscription.add_listener(|events| {
+    subscription.add_event_listener(|events| {
         for event in events {
             if let EventRef::Quote(q) = event {
                 println!(

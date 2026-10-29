@@ -6,14 +6,14 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::{Endpoint, Event, Feed, ManualExecutor, Publisher, Role, Subscription};
+use dxfeed_graal::{DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, ManualExecutor, Role};
 
 /// A `LOCAL_HUB` endpoint with a name unique in this process, its manual executor, feed and publisher.
 pub struct Hub {
-    pub endpoint: Endpoint,
+    pub endpoint: DXEndpoint,
     pub executor: ManualExecutor,
-    pub feed: Feed,
-    pub publisher: Publisher,
+    pub feed: DXFeed,
+    pub publisher: DXPublisher,
 }
 
 impl Hub {
@@ -28,15 +28,15 @@ impl Hub {
 
     fn with_executor(executor: Option<ManualExecutor>) -> Self {
         static NEXT: AtomicUsize = AtomicUsize::new(0);
-        let mut builder = Endpoint::builder()
+        let mut builder = DXEndpoint::new_builder()
             .with_role(Role::LocalHub)
             .with_name(&format!("test-hub-{}", NEXT.fetch_add(1, Ordering::Relaxed)));
         if let Some(executor) = &executor {
             builder = builder.with_executor(executor);
         }
         let endpoint = builder.build().unwrap();
-        let feed = endpoint.feed().unwrap();
-        let publisher = endpoint.publisher().unwrap();
+        let feed = endpoint.feed();
+        let publisher = endpoint.publisher();
         // An unused executor for default-executor hubs keeps the fields uniform.
         let executor = executor.unwrap_or_else(|| ManualExecutor::new().unwrap());
         Hub {
@@ -49,16 +49,16 @@ impl Hub {
 
     /// Publishes `events` and runs the resulting listener calls on this thread.
     pub fn publish_and_process(&self, events: &[Event]) {
-        self.publisher.publish(events).unwrap();
+        self.publisher.publish_events(events).unwrap();
         self.executor.process_all_pending().unwrap();
     }
 }
 
 /// Adds a listener that sends copies of the received events to the returned channel; assertions belong in the test.
-pub fn collect(subscription: &Subscription) -> Receiver<Event> {
+pub fn collect(subscription: &DXFeedSubscription) -> Receiver<Event> {
     let (sender, receiver) = mpsc::channel();
     subscription
-        .add_listener(move |events| {
+        .add_event_listener(move |events| {
             for event in events {
                 if let Some(event) = event.to_owned() {
                     let _ = sender.send(event);

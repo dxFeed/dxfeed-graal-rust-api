@@ -1,22 +1,32 @@
 //! The feed of an endpoint.
 
+use std::sync::Arc;
+
 use dxfeed_graal_sys as sys;
 
+use crate::endpoint::EndpointState;
 use crate::error::{Error, Result};
 use crate::event::EventType;
 use crate::handle::Handle;
-use crate::subscription::Subscription;
+use crate::subscription::DXFeedSubscription;
 
-/// The feed of an [`Endpoint`](crate::Endpoint): creates subscriptions to events.
-pub struct Feed {
-    pub(crate) handle: Handle<sys::dxfg_v4_feed_t>,
+/// The feed of a [`DXEndpoint`](crate::DXEndpoint): creates subscriptions to events (`DXFeed`).
+///
+/// It keeps its endpoint open, as do its subscriptions; cloning it is cheap.
+#[derive(Clone)]
+pub struct DXFeed {
+    endpoint: Arc<EndpointState>,
 }
 
-impl Feed {
+impl DXFeed {
+    pub(crate) fn new(endpoint: Arc<EndpointState>) -> Self {
+        DXFeed { endpoint }
+    }
+
     /// Creates a subscription to events of `types`, attached to this feed.
     ///
     /// Returns [`Error::InvalidArgument`] if `types` is empty.
-    pub fn create_subscription(&self, types: &[EventType]) -> Result<Subscription> {
+    pub fn create_subscription(&self, types: &[EventType]) -> Result<DXFeedSubscription> {
         if types.is_empty() {
             return Err(Error::InvalidArgument(
                 "a subscription needs at least one event type".into(),
@@ -28,11 +38,11 @@ impl Feed {
             size: pointers.len() as i32,
             elements: pointers.as_mut_ptr(),
         };
-        let feed = self.handle.as_ptr();
+        let feed = self.endpoint.feed.as_ptr();
         // SAFETY: the feed and the list are live; the SDK only reads the list. The out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe {
             sys::dxfg_v4_DXFeed_createSubscriptionWithEventTypes(t, feed, &mut list, out)
         })?;
-        Ok(Subscription::new(handle))
+        Ok(DXFeedSubscription::new(handle, self.clone()))
     }
 }

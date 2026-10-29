@@ -5,20 +5,20 @@
 //! # Example
 //!
 //! ```no_run
-//! use dxfeed_graal::{Endpoint, EventRef, EventType, Role};
+//! use dxfeed_graal::{DXEndpoint, EventRef, EventType};
 //!
 //! fn main() -> dxfeed_graal::Result<()> {
-//!     let endpoint = Endpoint::create(Role::Feed)?;
+//!     let endpoint = DXEndpoint::create()?;
 //!     endpoint.connect("demo.dxfeed.com:7300")?;
-//!     let subscription = endpoint.feed()?.create_subscription(&[EventType::Quote])?;
-//!     subscription.add_listener(|events| {
+//!     let subscription = endpoint.feed().create_subscription(&[EventType::Quote])?;
+//!     subscription.add_event_listener(|events| {
 //!         for event in events {
 //!             if let EventRef::Quote(quote) = event {
 //!                 println!("{quote:?}");
 //!             }
 //!         }
 //!     })?;
-//!     subscription.add_symbols(&["AAPL"])?;
+//!     subscription.add_symbols(["AAPL"])?;
 //!     std::thread::sleep(std::time::Duration::from_secs(10));
 //!     Ok(())
 //! }
@@ -35,7 +35,7 @@
 //! [`ManualExecutor::process_all_pending`]. The calls of one listener do not overlap. The events are valid during
 //! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and printed to stderr.
 //!
-//! Add listeners before symbols. Removing a listener or dropping its [`Subscription`] waits for its running calls,
+//! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running calls,
 //! except inside a callback, so do not hold a lock that a closure takes while doing that from another thread.
 //!
 //! # Errors
@@ -66,15 +66,15 @@ mod publisher;
 mod subscription;
 pub mod system;
 
-pub use endpoint::{Endpoint, EndpointBuilder, Role};
+pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role};
 pub use error::{Error, JavaException, Result};
 pub use event::{Event, EventRef, EventType, Events};
 pub use executor::ManualExecutor;
-pub use feed::Feed;
+pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
-pub use publisher::Publisher;
-pub use subscription::{ListenerId, Subscription};
+pub use publisher::DXPublisher;
+pub use subscription::{DXFeedSubscription, ListenerId};
 
 /// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {

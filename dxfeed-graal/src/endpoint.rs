@@ -1,15 +1,16 @@
 //! Endpoints: connections to data sources and hubs.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
 use crate::executor::ManualExecutor;
-use crate::feed::Feed;
+use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
-use crate::publisher::Publisher;
+use crate::publisher::DXPublisher;
 
 /// The role of an endpoint (`DXEndpoint.Role`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -54,19 +55,19 @@ impl Role {
     }
 }
 
-/// Builds an [`Endpoint`]; see [`Endpoint::builder`].
+/// Builds a [`DXEndpoint`]; see [`DXEndpoint::new_builder`].
 ///
 /// The settings are checked and passed to the SDK by [`build`](Self::build).
 #[derive(Clone, Default)]
 #[must_use]
-pub struct EndpointBuilder {
+pub struct DXEndpointBuilder {
     role: Option<Role>,
     name: Option<String>,
     properties: Vec<(String, String)>,
     executor: Option<ManualExecutor>,
 }
 
-impl EndpointBuilder {
+impl DXEndpointBuilder {
     /// Sets the role; the default is [`Role::Feed`].
     pub fn with_role(mut self, role: Role) -> Self {
         self.role = Some(role);
@@ -96,7 +97,7 @@ impl EndpointBuilder {
     /// Creates the endpoint.
     ///
     /// Returns [`Error::InvalidArgument`] if a name or property contains a NUL byte.
-    pub fn build(self) -> Result<Endpoint> {
+    pub fn build(self) -> Result<DXEndpoint> {
         let name = self.name.as_deref().map(|n| c_string(n, "endpoint name")).transpose()?;
         let properties = self
             .properties
@@ -126,95 +127,156 @@ impl EndpointBuilder {
         }
         // SAFETY: the builder is live and the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_Builder_build(t, b, out) })?;
-        Ok(Endpoint::new(handle))
+        DXEndpoint::new(handle)
+    }
+}
+
+/// What an endpoint, its feed and its publisher share; the endpoint is closed when the last of them is dropped.
+pub(crate) struct EndpointState {
+    endpoint: Handle<sys::dxfg_v4_endpoint_t>,
+    pub(crate) feed: Handle<sys::dxfg_v4_feed_t>,
+    pub(crate) publisher: Handle<sys::dxfg_v4_publisher_t>,
+    role: Role,
+    closed: AtomicBool,
+}
+
+impl EndpointState {
+    fn close(&self) -> Result<()> {
+        if self.closed.swap(true, Ordering::AcqRel) {
+            return Ok(());
+        }
+        let e = self.endpoint.as_ptr();
+        // SAFETY: the endpoint is live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) })
+    }
+}
+
+impl Drop for EndpointState {
+    fn drop(&mut self) {
+        if !isolate::exiting() {
+            let _ = self.close();
+        }
     }
 }
 
 /// A connection to a data source or a local hub (`DXEndpoint`).
 ///
-/// Dropping the endpoint closes it, without waiting for the notifications already scheduled.
-pub struct Endpoint {
-    handle: Handle<sys::dxfg_v4_endpoint_t>,
-    closed: AtomicBool,
+/// An endpoint, its [`DXFeed`], its [`DXPublisher`] and the subscriptions of the feed share it: cloning any of them is
+/// cheap, and the endpoint stays open while one of them lives. Dropping the last one closes the endpoint, without
+/// waiting for the notifications already scheduled. A chain such as
+/// `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();` therefore keeps the endpoint open.
+#[derive(Clone)]
+pub struct DXEndpoint {
+    state: Arc<EndpointState>,
 }
 
-impl Endpoint {
-    fn new(handle: Handle<sys::dxfg_v4_endpoint_t>) -> Self {
-        Endpoint {
-            handle,
-            closed: AtomicBool::new(false),
-        }
+impl std::fmt::Debug for DXEndpoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DXEndpoint")
+            .field("role", &self.state.role)
+            .field("closed", &self.state.closed.load(Ordering::Acquire))
+            .finish()
+    }
+}
+
+impl DXEndpoint {
+    /// Takes ownership of a new endpoint and gets its role, feed and publisher, which every endpoint has.
+    pub(crate) fn new(endpoint: Handle<sys::dxfg_v4_endpoint_t>) -> Result<Self> {
+        let e = endpoint.as_ptr();
+        let mut role = sys::DXFG_ENDPOINT_ROLE_FEED;
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getRole(t, e, &mut role) })?;
+        // SAFETY: as above.
+        let feed = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getFeed(t, e, out) })?;
+        // SAFETY: as above.
+        let publisher = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getPublisher(t, e, out) })?;
+        Ok(DXEndpoint {
+            state: Arc::new(EndpointState {
+                endpoint,
+                feed,
+                publisher,
+                role: Role::from_sys(role)?,
+                closed: AtomicBool::new(false),
+            }),
+        })
     }
 
     /// Returns a builder for an endpoint.
-    pub fn builder() -> EndpointBuilder {
-        EndpointBuilder::default()
+    #[doc(alias = "newBuilder")]
+    pub fn new_builder() -> DXEndpointBuilder {
+        DXEndpointBuilder::default()
+    }
+
+    /// Creates an endpoint with the [`Role::Feed`] role and default settings.
+    pub fn create() -> Result<Self> {
+        Self::create_with_role(Role::Feed)
     }
 
     /// Creates an endpoint with `role` and default settings.
-    pub fn create(role: Role) -> Result<Self> {
+    #[doc(alias = "create")]
+    pub fn create_with_role(role: Role) -> Result<Self> {
         // SAFETY: the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_createWithRole(t, role.to_sys(), out) })?;
-        Ok(Endpoint::new(handle))
+        Self::new(handle)
     }
 
     /// Connects to `address`, e.g. `demo.dxfeed.com:7300`; the connection is made in the background.
-    pub fn connect(&self, address: &str) -> Result<()> {
+    ///
+    /// Returns the endpoint, so that calls chain.
+    pub fn connect(&self, address: &str) -> Result<&Self> {
         let address = c_string(address, "address")?;
-        let e = self.handle.as_ptr();
+        let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live and the address is NUL-terminated.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_connect(t, e, address.as_ptr()) })
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_connect(t, e, address.as_ptr()) })?;
+        Ok(self)
     }
 
     /// Disconnects; the endpoint can connect again.
     pub fn disconnect(&self) -> Result<()> {
-        let e = self.handle.as_ptr();
+        let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
         call(|t| unsafe { sys::dxfg_v4_DXEndpoint_disconnect(t, e) })
     }
 
-    /// Closes the endpoint; it cannot be used afterwards. Closing again does nothing.
+    /// Closes the endpoint for all its handles; it cannot be used afterwards. Closing again does nothing.
     ///
-    /// Notifications already scheduled may still be delivered after it returns.
+    /// Notifications already scheduled may still be delivered after it returns; see
+    /// [`close_and_await_termination`](Self::close_and_await_termination).
     pub fn close(&self) -> Result<()> {
-        if self.closed.swap(true, Ordering::AcqRel) {
-            return Ok(());
+        self.state.close()
+    }
+
+    /// Closes the endpoint and waits until the notifications already scheduled are delivered. Calling it again, or
+    /// after [`close`](Self::close), only waits.
+    ///
+    /// Inside a listener it returns [`Error::InCallback`]: it would wait for the notification that is running. With a
+    /// [`ManualExecutor`], keep processing the executor from another thread until it returns.
+    #[doc(alias = "closeAndAwaitTermination")]
+    pub fn close_and_await_termination(&self) -> Result<()> {
+        if isolate::in_callback() {
+            return Err(Error::InCallback);
         }
-        let e = self.handle.as_ptr();
+        self.state.closed.store(true, Ordering::Release);
+        let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) })
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_closeAndAwaitTermination(t, e) })
     }
 
     /// The role of the endpoint.
-    pub fn role(&self) -> Result<Role> {
-        let e = self.handle.as_ptr();
-        let mut role = sys::DXFG_ENDPOINT_ROLE_FEED;
-        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getRole(t, e, &mut role) })?;
-        Role::from_sys(role)
+    #[doc(alias = "getRole")]
+    pub fn role(&self) -> Role {
+        self.state.role
     }
 
-    /// The feed of the endpoint.
-    pub fn feed(&self) -> Result<Feed> {
-        let e = self.handle.as_ptr();
-        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
-        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getFeed(t, e, out) })?;
-        Ok(Feed { handle })
+    /// The feed of the endpoint; it keeps the endpoint open.
+    #[doc(alias = "getFeed")]
+    pub fn feed(&self) -> DXFeed {
+        DXFeed::new(self.state.clone())
     }
 
-    /// The publisher of the endpoint.
-    pub fn publisher(&self) -> Result<Publisher> {
-        let e = self.handle.as_ptr();
-        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
-        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getPublisher(t, e, out) })?;
-        Ok(Publisher { handle })
-    }
-}
-
-impl Drop for Endpoint {
-    fn drop(&mut self) {
-        if !isolate::exiting() {
-            let _ = self.close();
-        }
+    /// The publisher of the endpoint; it keeps the endpoint open.
+    #[doc(alias = "getPublisher")]
+    pub fn publisher(&self) -> DXPublisher {
+        DXPublisher::new(self.state.clone())
     }
 }

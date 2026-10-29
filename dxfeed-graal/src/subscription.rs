@@ -7,29 +7,33 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
 use crate::event::Events;
+use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::Listener;
 
-/// Identifies a listener added by [`Subscription::add_listener`].
+/// Identifies a listener added by [`DXFeedSubscription::add_event_listener`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ListenerId(u64);
 
-/// A subscription of a [`Feed`](crate::Feed) to events of some types for some symbols (`DXFeedSubscription`).
+/// A subscription of a [`DXFeed`] to events of some types for some symbols (`DXFeedSubscription`).
 ///
 /// Dropping it removes and releases its listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its
-/// listeners, so do not hold a lock their closures take while dropping it.
-pub struct Subscription {
+/// listeners, so do not hold a lock their closures take while dropping it. It keeps its feed's endpoint open.
+pub struct DXFeedSubscription {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, Listener)>>,
+    // Dropped last: it may close the endpoint.
+    _feed: DXFeed,
 }
 
-impl Subscription {
-    pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_t>) -> Self {
-        Subscription {
+impl DXFeedSubscription {
+    pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_t>, feed: DXFeed) -> Self {
+        DXFeedSubscription {
             handle,
             listeners: Mutex::new(Vec::new()),
+            _feed: feed,
         }
     }
 
@@ -38,7 +42,8 @@ impl Subscription {
     /// Add listeners before symbols, so the first events are not missed. A panic in `f` is caught and printed to
     /// stderr; the listener stays active. The events are valid during the call only: copy what you keep with
     /// `to_owned()`.
-    pub fn add_listener(&self, f: impl FnMut(Events<'_>) + Send + 'static) -> Result<ListenerId> {
+    #[doc(alias = "addEventListener")]
+    pub fn add_event_listener(&self, f: impl FnMut(Events<'_>) + Send + 'static) -> Result<ListenerId> {
         static NEXT: AtomicU64 = AtomicU64::new(1);
         let listener = Listener::new(Box::new(f))?;
         let (s, l) = (self.handle.as_ptr(), listener.as_ptr());
@@ -56,7 +61,8 @@ impl Subscription {
     /// listener, it returns at once and the listener is released in the background.
     ///
     /// Returns [`Error::InvalidArgument`] if the listener is not in this subscription.
-    pub fn remove_listener(&self, id: ListenerId) -> Result<()> {
+    #[doc(alias = "removeEventListener")]
+    pub fn remove_event_listener(&self, id: ListenerId) -> Result<()> {
         let listener = {
             let mut listeners = self.lock();
             let index = listeners
@@ -68,8 +74,9 @@ impl Subscription {
         self.remove(listener)
     }
 
-    /// Adds symbols, e.g. `["AAPL", "IBM"]`.
-    pub fn add_symbols<S: AsRef<str>>(&self, symbols: &[S]) -> Result<()> {
+    /// Adds symbols: any iterable of strings, e.g. `["AAPL", "IBM"]`, a `Vec<String>` or `std::iter::once("AAPL")`.
+    #[doc(alias = "addSymbols")]
+    pub fn add_symbols(&self, symbols: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
         let s = self.handle.as_ptr();
         with_symbols(symbols, |list| {
             // SAFETY: the subscription and the list are live.
@@ -77,8 +84,9 @@ impl Subscription {
         })
     }
 
-    /// Removes symbols.
-    pub fn remove_symbols<S: AsRef<str>>(&self, symbols: &[S]) -> Result<()> {
+    /// Removes symbols; takes the same iterables as [`add_symbols`](Self::add_symbols).
+    #[doc(alias = "removeSymbols")]
+    pub fn remove_symbols(&self, symbols: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
         let s = self.handle.as_ptr();
         with_symbols(symbols, |list| {
             // SAFETY: the subscription and the list are live.
@@ -107,7 +115,7 @@ impl Subscription {
     }
 }
 
-impl Drop for Subscription {
+impl Drop for DXFeedSubscription {
     fn drop(&mut self) {
         if isolate::exiting() {
             // The process is exiting: no SDK calls from destructors. The listeners are dropped without being released,
@@ -123,12 +131,12 @@ impl Drop for Subscription {
 }
 
 /// Calls `f` with an SDK list of string symbols.
-fn with_symbols<S: AsRef<str>>(
-    symbols: &[S],
+fn with_symbols(
+    symbols: impl IntoIterator<Item: AsRef<str>>,
     f: impl FnOnce(*mut sys::dxfg_v4_symbol_list) -> Result<()>,
 ) -> Result<()> {
     let strings = symbols
-        .iter()
+        .into_iter()
         .map(|s| c_string(s.as_ref(), "symbol"))
         .collect::<Result<Vec<_>>>()?;
     let mut structs: Vec<sys::dxfg_string_symbol_t> = strings
