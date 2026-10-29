@@ -28,6 +28,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Usage](#usage)
   * [Threads and Listeners](#threads-and-listeners)
   * [Shutdown and Exit](#shutdown-and-exit)
+- [Samples](#samples)
 - [Current State](#current-state)
 - [Development](#development)
 - [License](#license)
@@ -158,6 +159,16 @@ fn main() -> dxfeed_graal::Result<()> {
   called from a listener (`Error::InCallback`). While it runs, an endpoint on a `ManualExecutor` needs another thread
   calling `process_all_pending`.
 - Only executables are supported: a Rust `cdylib` loaded as a DLL is not.
+
+## Samples
+
+- [print_quotes](dxfeed-graal/examples/print_quotes.rs) prints the quotes of a symbol until Enter is pressed:
+
+  ```bash
+  cargo run --example print_quotes -- [SYMBOL] [ADDRESS]
+  ```
+
+  The defaults are `AAPL` and `demo.dxfeed.com:7300`.
 
 ## Current State
 
