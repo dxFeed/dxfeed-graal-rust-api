@@ -28,24 +28,16 @@ impl Display for JavaDouble {
         if a == 0.0 {
             return f.write_str("0.0");
         }
+        if (1e-3..1e7).contains(&a) {
+            // Rust prints the same shortest digits without an exponent, but no `.0` for whole numbers.
+            let plain = a.to_string();
+            f.write_str(&plain)?;
+            return if plain.contains('.') { Ok(()) } else { f.write_str(".0") };
+        }
         let (digits, exponent) = java_digits(a);
         let (first, rest) = digits.split_at(1);
-        if (1e-3..1e7).contains(&a) {
-            if exponent < 0 {
-                let zeros = (-exponent - 1) as usize;
-                write!(f, "0.{}{digits}", "0".repeat(zeros))
-            } else {
-                let point = exponent as usize + 1;
-                if digits.len() > point {
-                    write!(f, "{}.{}", &digits[..point], &digits[point..])
-                } else {
-                    write!(f, "{digits}{}.0", "0".repeat(point - digits.len()))
-                }
-            }
-        } else {
-            let rest = if rest.is_empty() { "0" } else { rest };
-            write!(f, "{first}.{rest}E{exponent}")
-        }
+        let rest = if rest.is_empty() { "0" } else { rest };
+        write!(f, "{first}.{rest}E{exponent}")
     }
 }
 
@@ -89,8 +81,26 @@ impl Display for JavaChar {
 ///
 /// While the process exits, or if the SDK fails, the time prints as its decimal milliseconds.
 pub(super) struct Time {
-    pub(super) millis: i64,
-    pub(super) with_millis: bool,
+    millis: i64,
+    with_millis: bool,
+}
+
+impl Time {
+    /// A time printed to the millisecond (`TimeFormat.DEFAULT.withMillis()`).
+    pub(super) fn millis(millis: i64) -> Self {
+        Time {
+            millis,
+            with_millis: true,
+        }
+    }
+
+    /// A time printed to the second (`TimeFormat.DEFAULT`).
+    pub(super) fn seconds(millis: i64) -> Self {
+        Time {
+            millis,
+            with_millis: false,
+        }
+    }
 }
 
 impl Display for Time {
@@ -120,24 +130,16 @@ unsafe impl Sync for TimeFormats {}
 fn time_formats() -> Option<&'static TimeFormats> {
     static FORMATS: OnceLock<TimeFormats> = OnceLock::new();
     static INIT: Mutex<()> = Mutex::new(());
-    if let Some(formats) = FORMATS.get() {
-        return Some(formats);
-    }
-    // A failed call leaves the cell empty, so that the next call tries again.
-    let _init = crate::lock(&INIT);
-    if let Some(formats) = FORMATS.get() {
-        return Some(formats);
-    }
-    let mut default = ptr::null_mut();
-    // SAFETY: the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
-    let mut with_millis = ptr::null_mut();
-    // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut with_millis) }).ok()?;
-    if default.is_null() || with_millis.is_null() {
-        return None;
-    }
-    Some(FORMATS.get_or_init(|| TimeFormats { default, with_millis }))
+    let init = || {
+        let mut default = ptr::null_mut();
+        // SAFETY: the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
+        let mut with_millis = ptr::null_mut();
+        // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut with_millis) }).ok()?;
+        (!default.is_null() && !with_millis.is_null()).then_some(TimeFormats { default, with_millis })
+    };
+    crate::get_or_try_init(&FORMATS, &INIT, || init().ok_or(())).ok()
 }
 
 fn format_time(millis: i64, with_millis: bool) -> Option<String> {
@@ -223,6 +225,9 @@ mod tests {
             (5e-324, "4.9E-324"),
             (f64::MAX, "1.7976931348623157E308"),
             (1e21, "1.0E21"),
+            (0.1 + 0.2, "0.30000000000000004"),
+            (1234567.125, "1234567.125"),
+            (0.00123, "0.00123"),
         ];
         for (value, java) in cases {
             assert_eq!(JavaDouble(value).to_string(), java, "{value:?}");
@@ -272,13 +277,7 @@ mod tests {
 
     #[test]
     fn zero_time_needs_no_sdk() {
-        assert_eq!(
-            Time {
-                millis: 0,
-                with_millis: true
-            }
-            .to_string(),
-            "0"
-        );
+        assert_eq!(Time::millis(0).to_string(), "0");
+        assert_eq!(Time::seconds(0).to_string(), "0");
     }
 }

@@ -6,21 +6,7 @@ use std::sync::mpsc;
 
 use dxfeed_graal::event::{Quote, Trade};
 use dxfeed_graal::{Event, EventRef, EventType};
-use support::{Hub, quote};
-
-/// Whether `text` is a time of `TimeFormat.DEFAULT` (`yyyyMMdd-HHmmss`), with `.SSS` milliseconds if `with_millis`.
-fn is_time(text: &str, with_millis: bool) -> bool {
-    let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
-    let (seconds, millis) = match text.split_once('.') {
-        Some((seconds, millis)) if with_millis => (seconds, Some(millis)),
-        None if !with_millis => (text, None),
-        _ => return false,
-    };
-    let date_time = seconds
-        .split_once('-')
-        .is_some_and(|(d, t)| digits(d, 8) && digits(t, 6));
-    date_time && millis.is_none_or(|m| digits(m, 3))
-}
+use support::{Hub, is_time, quote};
 
 /// The value of `name=` in the text of an event.
 fn field<'a>(text: &'a str, name: &str) -> &'a str {

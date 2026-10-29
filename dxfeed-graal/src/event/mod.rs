@@ -262,6 +262,12 @@ impl<'a, E: SubscriptionItem> Iterator for Events<'a, E> {
 
 impl ExactSizeIterator for Events<'_, Event> {}
 
+/// The bits of the sequence at the bottom of the Java `timeSequence` fields; the milliseconds of the time are above it.
+const SEQUENCE_BITS: u32 = 22;
+const SEQUENCE_MASK: i32 = (1 << SEQUENCE_BITS) - 1;
+/// The milliseconds of the time in a `timeSequence` shifted right by [`SEQUENCE_BITS`].
+const MILLIS_MASK: i64 = 0x3FF;
+
 /// A Java `char` exchange code from the SDK.
 fn exchange_code(code: i16) -> char {
     char::from_u32(code as u16 as u32).unwrap_or(char::REPLACEMENT_CHARACTER)

@@ -19,8 +19,8 @@ pub struct ListenerId(u64);
 
 /// A subscription of a [`DXFeed`] to events for some symbols (`DXFeedSubscription`).
 ///
-/// `E` is what its listeners receive: [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade) for a subscription created
-/// with [`DXFeed::create_subscription`], [`Event`] for one created with
+/// `E` is what its listeners receive: [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade) for a
+/// subscription created with [`DXFeed::create_subscription`], [`Event`] for one created with
 /// [`DXFeed::create_subscription_with_types`].
 ///
 /// Dropping it removes and releases its listeners, then closes it. A listener's closure is not called after the
@@ -47,9 +47,9 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     /// Adds a listener; `f` is called with each batch of received events, on a thread of the endpoint's executor.
     ///
     /// The batch iterates `&QuoteRef` for a subscription to quotes, `&TradeRef` for one to trades and
-    /// [`EventRef`](crate::EventRef) for an untyped one. Add listeners before symbols, so the first events are not missed. A panic in `f` is caught and printed to
-    /// stderr; the listener stays active. The events are valid during the call only: copy what you keep with
-    /// `to_owned()`.
+    /// [`EventRef`](crate::EventRef) for an untyped one. Add listeners before symbols, so the first events are not
+    /// missed. A panic in `f` is caught and printed to stderr; the listener stays active. The events are valid during
+    /// the call only: copy what you keep with `to_owned()`.
     #[doc(alias = "addEventListener")]
     pub fn add_event_listener(&self, mut f: impl FnMut(Events<'_, E>) + Send + 'static) -> Result<ListenerId> {
         static NEXT: AtomicU64 = AtomicU64::new(1);

@@ -6,7 +6,7 @@ use std::ffi::c_char;
 use dxfeed_graal_sys as sys;
 
 use super::format::{JavaChar, JavaDouble, Time};
-use super::{exchange_code, market_event, sys_exchange_code};
+use super::{SEQUENCE_BITS, SEQUENCE_MASK, exchange_code, market_event, sys_exchange_code};
 use crate::error::Result;
 use crate::isolate::string;
 
@@ -158,12 +158,13 @@ impl Quote {
 
     /// The quote time in milliseconds, as Java's `Quote.getTime` computes it.
     fn time(&self) -> i64 {
-        self.bid_time.max(self.ask_time).div_euclid(1000) * 1000 + i64::from((self.time_millis_sequence as u32) >> 22)
+        self.bid_time.max(self.ask_time).div_euclid(1000) * 1000
+            + i64::from((self.time_millis_sequence as u32) >> SEQUENCE_BITS)
     }
 
     /// The sequence of the quote, as Java's `Quote.getSequence` computes it.
     fn sequence(&self) -> i32 {
-        self.time_millis_sequence & 0x3F_FFFF
+        self.time_millis_sequence & SEQUENCE_MASK
     }
 
     pub(super) fn to_sys(&self, symbol: *const c_char) -> Result<sys::dxfg_quote_t> {
@@ -191,27 +192,15 @@ impl std::fmt::Display for Quote {
             "Quote{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, bidTime={}, bidExchange={}, bidPrice={}, \
              bidSize={}, askTime={}, askExchange={}, askPrice={}, askSize={}}}",
             self.symbol,
-            Time {
-                millis: self.event_time,
-                with_millis: true
-            },
-            Time {
-                millis: self.time(),
-                with_millis: true
-            },
+            Time::millis(self.event_time),
+            Time::millis(self.time()),
             self.time_nano_part,
             self.sequence(),
-            Time {
-                millis: self.bid_time,
-                with_millis: false
-            },
+            Time::seconds(self.bid_time),
             JavaChar(self.bid_exchange_code),
             JavaDouble(self.bid_price),
             JavaDouble(self.bid_size),
-            Time {
-                millis: self.ask_time,
-                with_millis: false
-            },
+            Time::seconds(self.ask_time),
             JavaChar(self.ask_exchange_code),
             JavaDouble(self.ask_price),
             JavaDouble(self.ask_size),

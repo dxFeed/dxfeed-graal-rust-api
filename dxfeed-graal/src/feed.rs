@@ -15,12 +15,12 @@ use crate::subscription::DXFeedSubscription;
 /// It keeps its endpoint open, as do its subscriptions; cloning it is cheap.
 #[derive(Clone)]
 pub struct DXFeed {
-    endpoint: Arc<EndpointState>,
+    state: Arc<EndpointState>,
 }
 
 impl DXFeed {
-    pub(crate) fn new(endpoint: Arc<EndpointState>) -> Self {
-        DXFeed { endpoint }
+    pub(crate) fn new(state: Arc<EndpointState>) -> Self {
+        DXFeed { state }
     }
 
     /// Returns the feed of the default endpoint of the process, [`DXEndpoint::get_instance`] (`DXFeed.getInstance()`).
@@ -37,8 +37,8 @@ impl DXFeed {
         Ok(INSTANCE.get_or_init(|| feed))
     }
 
-    /// Creates a subscription to events of type `E`, [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade), attached to
-    /// this feed; its listeners receive `&QuoteRef` or `&TradeRef`.
+    /// Creates a subscription to events of type `E`, [`Quote`](crate::event::Quote) or
+    /// [`Trade`](crate::event::Trade), attached to this feed; its listeners receive `&QuoteRef` or `&TradeRef`.
     ///
     /// ```no_run
     /// # fn main() -> dxfeed_graal::Result<()> {
@@ -64,7 +64,7 @@ impl DXFeed {
     /// ```
     #[doc(alias = "createSubscription")]
     pub fn create_subscription<E: EventKind>(&self) -> Result<DXFeedSubscription<E>> {
-        let feed = self.endpoint.feed.as_ptr();
+        let feed = self.state.feed.as_ptr();
         // SAFETY: the feed is live and the out-pointer is valid for writes.
         let handle =
             Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeed_createSubscription(t, feed, E::TYPE.to_sys(), out) })?;
@@ -88,7 +88,7 @@ impl DXFeed {
             size: pointers.len() as i32,
             elements: pointers.as_mut_ptr(),
         };
-        let feed = self.endpoint.feed.as_ptr();
+        let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the list are live; the SDK only reads the list. The out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe {
             sys::dxfg_v4_DXFeed_createSubscriptionWithEventTypes(t, feed, &mut list, out)

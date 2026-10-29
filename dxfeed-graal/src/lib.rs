@@ -61,8 +61,8 @@
 //! [`ManualExecutor::process_all_pending`]. The calls of one listener do not overlap. The events are valid during
 //! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and printed to stderr.
 //!
-//! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running calls,
-//! except inside a callback, so do not hold a lock that a closure takes while doing that from another thread.
+//! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running
+//! calls, except inside a callback, so do not hold a lock that a closure takes while doing that from another thread.
 //!
 //! # Errors
 //!
@@ -109,4 +109,22 @@ pub use subscription::{DXFeedSubscription, ListenerId};
 /// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// Returns the value of `cell`, setting it to the result of `init` under `guard` if it is empty. A failed `init` leaves
+/// the cell empty, so that the next call tries again.
+fn get_or_try_init<'a, T, E>(
+    cell: &'a std::sync::OnceLock<T>,
+    guard: &std::sync::Mutex<()>,
+    init: impl FnOnce() -> std::result::Result<T, E>,
+) -> std::result::Result<&'a T, E> {
+    if let Some(value) = cell.get() {
+        return Ok(value);
+    }
+    let _guard = lock(guard);
+    if let Some(value) = cell.get() {
+        return Ok(value);
+    }
+    let value = init()?;
+    Ok(cell.get_or_init(|| value))
 }

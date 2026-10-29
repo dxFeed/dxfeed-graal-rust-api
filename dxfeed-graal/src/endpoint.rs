@@ -230,24 +230,17 @@ impl DXEndpoint {
     pub fn get_instance() -> Result<&'static DXEndpoint> {
         static INSTANCE: OnceLock<DXEndpoint> = OnceLock::new();
         static INIT: Mutex<()> = Mutex::new(());
-        if let Some(endpoint) = INSTANCE.get() {
-            return Ok(endpoint);
-        }
-        // A failed call leaves the cell empty, so that the next call tries again.
-        let _init = crate::lock(&INIT);
-        if let Some(endpoint) = INSTANCE.get() {
-            return Ok(endpoint);
-        }
-        // The SDK applies its defaults of the QD properties and registers the default endpoint, so that `shutdown`
-        // closes it, only for the default feed: get the feed first.
-        // SAFETY: the out-pointer is valid for writes.
-        drop(Handle::create(|t, out| unsafe {
-            sys::dxfg_v4_DXFeed_getInstance(t, out)
-        })?);
-        // SAFETY: as above.
-        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getInstance(t, out) })?;
-        let endpoint = Self::new(handle)?;
-        Ok(INSTANCE.get_or_init(|| endpoint))
+        crate::get_or_try_init(&INSTANCE, &INIT, || {
+            // The SDK applies its defaults of the QD properties and registers the default endpoint, so that `shutdown`
+            // closes it, only for the default feed: get the feed first.
+            // SAFETY: the out-pointer is valid for writes.
+            drop(Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_DXFeed_getInstance(t, out)
+            })?);
+            // SAFETY: as above.
+            let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getInstance(t, out) })?;
+            Self::new(handle)
+        })
     }
 
     /// Connects to `address`, e.g. `demo.dxfeed.com:7300`; the connection is made in the background.

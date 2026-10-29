@@ -6,7 +6,7 @@ use std::ffi::c_char;
 use dxfeed_graal_sys as sys;
 
 use super::format::{JavaChar, JavaDouble, Time, direction, extended_trading_hours, year_month_day};
-use super::{exchange_code, market_event, sys_exchange_code};
+use super::{MILLIS_MASK, SEQUENCE_BITS, SEQUENCE_MASK, exchange_code, market_event, sys_exchange_code};
 use crate::error::Result;
 use crate::isolate::string;
 
@@ -171,12 +171,12 @@ impl Trade {
 
     /// The trade time in milliseconds, as Java's `TradeBase.getTime` computes it.
     fn time(&self) -> i64 {
-        (self.time_sequence >> 32) * 1000 + ((self.time_sequence >> 22) & 0x3FF)
+        (self.time_sequence >> 32) * 1000 + ((self.time_sequence >> SEQUENCE_BITS) & MILLIS_MASK)
     }
 
     /// The sequence of the trade, as Java's `TradeBase.getSequence` computes it.
     fn sequence(&self) -> i32 {
-        self.time_sequence as i32 & 0x3F_FFFF
+        self.time_sequence as i32 & SEQUENCE_MASK
     }
 
     pub(super) fn to_sys(&self, symbol: *const c_char) -> Result<sys::dxfg_trade_t> {
@@ -204,17 +204,11 @@ impl std::fmt::Display for Trade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Trade{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, exchange={}, price={}, change={}, size={}, \
-             day={}, dayVolume={}, dayTurnover={}, direction={}, ETH={}}}",
+            "Trade{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, exchange={}, price={}, change={}, \
+             size={}, day={}, dayVolume={}, dayTurnover={}, direction={}, ETH={}}}",
             self.symbol,
-            Time {
-                millis: self.event_time,
-                with_millis: true
-            },
-            Time {
-                millis: self.time(),
-                with_millis: true
-            },
+            Time::millis(self.event_time),
+            Time::millis(self.time()),
             self.time_nano_part,
             self.sequence(),
             JavaChar(self.exchange_code),

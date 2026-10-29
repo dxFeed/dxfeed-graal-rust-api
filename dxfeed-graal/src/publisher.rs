@@ -14,12 +14,12 @@ use crate::isolate::call;
 /// It keeps its endpoint open; cloning it is cheap.
 #[derive(Clone)]
 pub struct DXPublisher {
-    endpoint: Arc<EndpointState>,
+    state: Arc<EndpointState>,
 }
 
 impl DXPublisher {
-    pub(crate) fn new(endpoint: Arc<EndpointState>) -> Self {
-        DXPublisher { endpoint }
+    pub(crate) fn new(state: Arc<EndpointState>) -> Self {
+        DXPublisher { state }
     }
 
     /// Publishes `events`. The endpoint's own feed receives them for the symbols it is subscribed to; a connected
@@ -28,7 +28,7 @@ impl DXPublisher {
     pub fn publish_events(&self, events: &[Event]) -> Result<()> {
         let mut sys_events = SysEvents::new(events)?;
         let mut list = sys_events.list();
-        let p = self.endpoint.publisher.as_ptr();
+        let p = self.state.publisher.as_ptr();
         // SAFETY: the publisher and the list are live; the SDK only reads the list and the events.
         call(|t| unsafe { sys::dxfg_v4_DXPublisher_publishEvents(t, p, &mut list) })
     }

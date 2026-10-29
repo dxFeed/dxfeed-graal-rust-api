@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::Quote;
 use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, ManualExecutor, Role, live_handles, system};
-use support::{Hub, collect, quote, quote_with_bid};
+use support::{Hub, collect, is_time, quote, quote_with_bid};
 
 /// Set for the child processes; the scenarios do nothing without it.
 const CHILD: &str = "DXFEED_GRAAL_TEST_CHILD";
@@ -165,11 +165,7 @@ fn display_after_shutdown() {
         .find_map(|line| line.strip_prefix("eventTime="))
         .unwrap_or_else(|| panic!("no time printed\n{stderr}"));
     // The SDK formats the time, or the time prints as its milliseconds if the SDK refuses.
-    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
-    let formatted = event_time
-        .split_once(['-', '.'])
-        .is_some_and(|(date, _)| date.len() == 8 && digits(date))
-        && event_time.ends_with(".123");
+    let formatted = is_time(event_time, true) && event_time.ends_with(".123");
     assert!(formatted || event_time == "1700000000123", "{event_time}");
 }
 
