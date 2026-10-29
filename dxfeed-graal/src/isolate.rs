@@ -46,6 +46,35 @@ thread_local! {
     static THREAD: Cell<Thread> = const { Cell::new(ptr::null_mut()) };
     static STATE: Cell<State> = const { Cell::new(State::Unattached) };
     static GUARD: Guard = const { Guard };
+    // The isolate thread passed to the running listener callback, and how deeply callbacks are nested.
+    static CALLBACK_THREAD: Cell<Thread> = const { Cell::new(ptr::null_mut()) };
+    static CALLBACK_DEPTH: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Marks the calling thread as running a listener callback on `thread` until dropped.
+pub(crate) struct CallbackScope {
+    previous: Thread,
+}
+
+impl CallbackScope {
+    pub(crate) fn enter(thread: Thread) -> Self {
+        CALLBACK_DEPTH.set(CALLBACK_DEPTH.get() + 1);
+        CallbackScope {
+            previous: CALLBACK_THREAD.replace(thread),
+        }
+    }
+}
+
+impl Drop for CallbackScope {
+    fn drop(&mut self) {
+        CALLBACK_THREAD.set(self.previous);
+        CALLBACK_DEPTH.set(CALLBACK_DEPTH.get() - 1);
+    }
+}
+
+/// Whether the calling thread is running a listener callback.
+pub(crate) fn in_callback() -> bool {
+    CALLBACK_DEPTH.get() > 0
 }
 
 /// Detaches the thread the crate attached when the thread exits.
@@ -109,6 +138,10 @@ fn own(thread: Thread) -> bool {
 /// Runs `f` with the isolate thread of the calling thread, attaching it if needed.
 pub(crate) fn with_thread<R>(f: impl FnOnce(Thread) -> R) -> Result<R> {
     let isolate = isolate()?;
+    let callback = CALLBACK_THREAD.get();
+    if !callback.is_null() {
+        return Ok(f(callback));
+    }
     if STATE.get() == State::Owned {
         return Ok(f(THREAD.get()));
     }

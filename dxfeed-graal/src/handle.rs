@@ -37,7 +37,9 @@ sdk_handle!(
     sys::dxfg_v4_endpoint_builder_t,
     sys::dxfg_v4_feed_t,
     sys::dxfg_v4_publisher_t,
-    sys::dxfg_v4_executor_t
+    sys::dxfg_v4_executor_t,
+    sys::dxfg_v4_subscription_t,
+    sys::dxfg_v4_feed_event_listener_t
 );
 
 static LIVE: AtomicUsize = AtomicUsize::new(0);
@@ -79,16 +81,28 @@ impl<T: SdkHandle> Handle<T> {
     pub(crate) fn as_ptr(&self) -> *mut T {
         self.0.as_ptr()
     }
+
+    /// Releases the handle now and reports whether the SDK released it.
+    pub(crate) fn release(self) -> Result<()> {
+        let this = std::mem::ManuallyDrop::new(self);
+        this.release_now()
+    }
+
+    fn release_now(&self) -> Result<()> {
+        LIVE.fetch_sub(1, Ordering::SeqCst);
+        if isolate::exiting() {
+            // The process is exiting: leak the handle rather than call the SDK from an exit path.
+            return Ok(());
+        }
+        let handler = self.as_ptr();
+        // SAFETY: the handle is live and released once.
+        call(|t| unsafe { sys::dxfg_v4_JavaObjectHandler_release(t, T::handler(handler)) })
+    }
 }
 
 impl<T: SdkHandle> Drop for Handle<T> {
     fn drop(&mut self) {
-        LIVE.fetch_sub(1, Ordering::SeqCst);
-        if isolate::exiting() {
-            // The process is exiting: leak the handle rather than call the SDK from an exit path.
-            return;
-        }
-        // SAFETY: the handle is live and released once; errors are cleared by `call`.
-        let _ = call(|t| unsafe { sys::dxfg_v4_JavaObjectHandler_release(t, T::handler(self.as_ptr())) });
+        // Errors are cleared by `call`; a failed release leaks the Java object.
+        let _ = self.release_now();
     }
 }

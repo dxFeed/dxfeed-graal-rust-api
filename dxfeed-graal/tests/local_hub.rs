@@ -1,29 +1,56 @@
-//! Endpoints with the `LOCAL_HUB` role: no network needed.
+//! Endpoints, subscriptions, listeners and publishing over `LOCAL_HUB` endpoints: no network needed.
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+mod support;
 
-use dxfeed_graal::{Endpoint, ManualExecutor, Role};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver};
+use std::sync::{Arc, Barrier, Mutex};
+use std::time::Duration;
 
-/// Builds a `LOCAL_HUB` endpoint with a name unique in this process and its own manual executor.
-fn local_hub() -> (Endpoint, ManualExecutor) {
-    static NEXT: AtomicUsize = AtomicUsize::new(0);
-    let executor = ManualExecutor::new().unwrap();
-    let endpoint = Endpoint::builder()
-        .with_role(Role::LocalHub)
-        .with_name(&format!("local-hub-{}", NEXT.fetch_add(1, Ordering::Relaxed)))
-        .with_executor(&executor)
-        .build()
-        .unwrap();
-    (endpoint, executor)
+use dxfeed_graal::event::{Quote, Trade};
+use dxfeed_graal::{Endpoint, Error, Event, EventType, ManualExecutor, Role, Subscription};
+use support::{Hub, collect};
+
+fn quote(symbol: &str) -> Quote {
+    Quote {
+        event_time: 0,
+        bid_time: 1_700_000_000_000,
+        bid_exchange_code: 'Q',
+        bid_price: 189.5,
+        bid_size: 100.0,
+        ask_time: 1_700_000_000_000,
+        ask_exchange_code: 'N',
+        ask_price: 189.75,
+        ask_size: 200.0,
+        ..Quote::new(symbol)
+    }
+}
+
+fn trade(symbol: &str) -> Trade {
+    Trade {
+        time_sequence: 1_700_000_000_000 << 22,
+        exchange_code: 'Q',
+        price: 190.25,
+        change: 0.5,
+        size: 300.0,
+        day_id: 19_675,
+        day_volume: 1_000_000.0,
+        day_turnover: 190_000_000.0,
+        flags: 4,
+        trade_id: 42,
+        ..Trade::new(symbol)
+    }
+}
+
+fn received(receiver: &Receiver<Event>) -> Vec<Event> {
+    receiver.try_iter().collect()
 }
 
 #[test]
 fn local_hub_builds() {
-    let (endpoint, executor) = local_hub();
-    assert_eq!(endpoint.role().unwrap(), Role::LocalHub);
-    endpoint.feed().unwrap();
-    endpoint.publisher().unwrap();
-    executor.process_all_pending().unwrap();
+    let hub = Hub::new();
+    assert_eq!(hub.endpoint.role().unwrap(), Role::LocalHub);
+    hub.executor.process_all_pending().unwrap();
 }
 
 #[test]
@@ -36,14 +63,14 @@ fn create_with_role() {
 
 #[test]
 fn close_then_drop() {
-    let (endpoint, _executor) = local_hub();
-    endpoint.close().unwrap();
-    endpoint.close().unwrap();
+    let hub = Hub::new();
+    hub.endpoint.close().unwrap();
+    hub.endpoint.close().unwrap();
 }
 
 #[test]
 fn endpoint_moves_to_another_thread() {
-    let (endpoint, _executor) = local_hub();
+    let endpoint = Hub::new().endpoint;
     std::thread::spawn(move || {
         assert_eq!(endpoint.role().unwrap(), Role::LocalHub);
         drop(endpoint);
@@ -59,4 +86,317 @@ fn types_are_send_and_sync() {
     send_sync::<dxfeed_graal::Feed>();
     send_sync::<dxfeed_graal::Publisher>();
     send_sync::<ManualExecutor>();
+    send_sync::<Subscription>();
+}
+
+#[test]
+fn symbols_and_listeners() {
+    let hub = Hub::new();
+    let subscription = hub
+        .feed
+        .create_subscription(&[EventType::Quote, EventType::Trade])
+        .unwrap();
+    // Listeners go before symbols: the SDK refuses a listener for a subscription that has symbols.
+    let id = subscription.add_listener(|_| {}).unwrap();
+    subscription.add_symbols(&["AAPL", "IBM"]).unwrap();
+    subscription.remove_symbols(&["IBM"]).unwrap();
+    assert!(matches!(
+        subscription.add_symbols(&["A\0B"]),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(subscription.add_listener(|_| {}).is_err());
+    subscription.remove_listener(id).unwrap();
+    assert!(matches!(
+        subscription.remove_listener(id),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        hub.feed.create_subscription(&[]),
+        Err(Error::InvalidArgument(_))
+    ));
+    subscription.close().unwrap();
+}
+
+#[test]
+fn quote_round_trip() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    assert_eq!(received(&events), vec![Event::Quote(quote("AAPL"))]);
+}
+
+#[test]
+fn trade_round_trip() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Trade]).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publish_and_process(&[trade("AAPL").into()]);
+    let got = received(&events);
+    let [Event::Trade(t)] = got.as_slice() else {
+        panic!("expected one trade, got {got:?}");
+    };
+    let sent = trade("AAPL");
+    assert_eq!(
+        (t.price, t.size, t.day_volume, t.trade_id, t.flags),
+        (sent.price, sent.size, sent.day_volume, 42, 4)
+    );
+    assert_eq!(t.symbol, "AAPL");
+}
+
+#[test]
+fn quote_and_trade_in_order() {
+    let hub = Hub::new();
+    let subscription = hub
+        .feed
+        .create_subscription(&[EventType::Quote, EventType::Trade])
+        .unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(&["IBM"]).unwrap();
+    hub.publish_and_process(&[quote("IBM").into(), trade("IBM").into()]);
+    let got = received(&events);
+    assert!(matches!(got.as_slice(), [Event::Quote(_), Event::Trade(_)]), "{got:?}");
+}
+
+#[test]
+fn unsubscribed_symbol_is_not_delivered() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("MSFT").into()]);
+    assert!(received(&events).is_empty());
+}
+
+#[test]
+fn hubs_are_isolated() {
+    // Run in parallel with the other tests that publish AAPL: each hub sees only its own events.
+    for _ in 0..20 {
+        let hub = Hub::new();
+        let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+        let events = collect(&subscription);
+        subscription.add_symbols(&["AAPL"]).unwrap();
+        let mine = Quote {
+            bid_price: 1.0,
+            ..quote("AAPL")
+        };
+        hub.publish_and_process(&[mine.clone().into()]);
+        assert_eq!(received(&events), vec![Event::Quote(mine)]);
+    }
+}
+
+#[test]
+fn panic_in_listener_keeps_it_active() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let counter = calls.clone();
+    subscription
+        .add_listener(move |_| {
+            if counter.fetch_add(1, Ordering::SeqCst) == 0 {
+                panic!("first batch");
+            }
+        })
+        .unwrap();
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    hub.publish_and_process(&[Quote {
+        bid_price: 1.0,
+        ..quote("AAPL")
+    }
+    .into()]);
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+}
+
+#[test]
+fn subscription_dropped_in_own_listener() {
+    let hub = Hub::new();
+    let slot: Arc<Mutex<Option<Subscription>>> = Arc::default();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let (s, c) = (slot.clone(), calls.clone());
+    subscription
+        .add_listener(move |_| {
+            c.fetch_add(1, Ordering::SeqCst);
+            let own = s.lock().unwrap().take();
+            drop(own);
+        })
+        .unwrap();
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    *slot.lock().unwrap() = Some(subscription);
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    // A changed quote: an identical one would not be delivered anyway.
+    hub.publish_and_process(&[Quote {
+        bid_price: 1.0,
+        ..quote("AAPL")
+    }
+    .into()]);
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert!(slot.lock().unwrap().is_none());
+}
+
+#[test]
+fn remove_listener_waits_for_running_call() {
+    let hub = Arc::new(Hub::new());
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let started = Arc::new(Barrier::new(2));
+    let finished = Arc::new(AtomicBool::new(false));
+    let (b, f) = (started.clone(), finished.clone());
+    let id = subscription
+        .add_listener(move |_| {
+            b.wait();
+            std::thread::sleep(Duration::from_millis(300));
+            f.store(true, Ordering::SeqCst);
+        })
+        .unwrap();
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    let processor = {
+        let hub = hub.clone();
+        std::thread::spawn(move || hub.executor.process_all_pending().unwrap())
+    };
+    started.wait();
+    subscription.remove_listener(id).unwrap();
+    assert!(
+        finished.load(Ordering::SeqCst),
+        "remove_listener returned while the call was running"
+    );
+    processor.join().unwrap();
+}
+
+#[test]
+fn concurrent_processing_delivers_each_event_once() {
+    let hub = Arc::new(Hub::new());
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let count = Arc::new(AtomicUsize::new(0));
+    let c = count.clone();
+    subscription
+        .add_listener(move |events| _ = c.fetch_add(events.len(), Ordering::SeqCst))
+        .unwrap();
+    let symbols: Vec<String> = (0..200).map(|i| format!("S{i}")).collect();
+    subscription.add_symbols(&symbols).unwrap();
+    let events: Vec<Event> = symbols.iter().map(|s| quote(s).into()).collect();
+    for chunk in events.chunks(10) {
+        hub.publisher.publish(chunk).unwrap();
+    }
+    let threads: Vec<_> = (0..2)
+        .map(|_| {
+            let hub = hub.clone();
+            std::thread::spawn(move || hub.executor.process_all_pending().unwrap())
+        })
+        .collect();
+    for thread in threads {
+        thread.join().unwrap();
+    }
+    hub.executor.process_all_pending().unwrap();
+    assert_eq!(count.load(Ordering::SeqCst), 200);
+}
+
+#[test]
+fn processing_from_listener_does_not_nest_calls() {
+    let hub = Arc::new(Hub::new());
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    let (calls, inside, nested) = (
+        Arc::new(AtomicUsize::new(0)),
+        Arc::new(AtomicBool::new(false)),
+        Arc::new(AtomicBool::new(false)),
+    );
+    let (h, c, i, n) = (Arc::downgrade(&hub), calls.clone(), inside.clone(), nested.clone());
+    subscription
+        .add_listener(move |_| {
+            if i.swap(true, Ordering::SeqCst) {
+                n.store(true, Ordering::SeqCst);
+            }
+            if c.fetch_add(1, Ordering::SeqCst) == 0
+                && let Some(hub) = h.upgrade()
+            {
+                // The SDK serializes the calls of a subscription: this quote comes in a second call after this one.
+                hub.publish_and_process(&[Quote {
+                    bid_price: 1.0,
+                    ..quote("AAPL")
+                }
+                .into()]);
+            }
+            i.store(false, Ordering::SeqCst);
+        })
+        .unwrap();
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into()]);
+    hub.executor.process_all_pending().unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 2);
+    assert!(!nested.load(Ordering::SeqCst));
+}
+
+#[test]
+fn listeners_drop_each_other_without_deadlock() {
+    let hub = Hub::with_default_executor();
+    let slots: [Arc<Mutex<Option<Subscription>>>; 2] = [Arc::default(), Arc::default()];
+    let started: Arc<[AtomicBool; 2]> = Arc::default();
+    let (done, wait) = mpsc::channel();
+    for i in 0..2 {
+        let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+        let (other, started, done) = (slots[1 - i].clone(), started.clone(), done.clone());
+        subscription
+            .add_listener(move |_| {
+                // Wait a little for the other listener, so both drop each other while both run, if the executor
+                // runs them on two threads.
+                started[i].store(true, Ordering::SeqCst);
+                let until = std::time::Instant::now() + Duration::from_secs(1);
+                while !started[1 - i].load(Ordering::SeqCst) && std::time::Instant::now() < until {
+                    std::thread::yield_now();
+                }
+                let taken = other.lock().unwrap().take();
+                drop(taken);
+                let _ = done.send(i);
+            })
+            .unwrap();
+        subscription.add_symbols(&["AAPL"]).unwrap();
+        *slots[i].lock().unwrap() = Some(subscription);
+    }
+    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    wait.recv_timeout(Duration::from_secs(10)).expect("no listener ran");
+    let _ = wait.recv_timeout(Duration::from_secs(2));
+    // Whatever the listeners left is dropped here; neither must hang.
+    let (cleaned, cleanup) = mpsc::channel();
+    let remaining = slots.clone();
+    std::thread::spawn(move || {
+        for slot in remaining {
+            let taken = slot.lock().unwrap().take();
+            drop(taken);
+        }
+        cleaned.send(()).unwrap();
+    });
+    cleanup.recv_timeout(Duration::from_secs(10)).expect("deadlock");
+    while wait.recv_timeout(Duration::from_millis(500)).is_ok() {}
+    hub.publisher
+        .publish(&[Quote {
+            bid_price: 2.0,
+            ..quote("AAPL")
+        }
+        .into()])
+        .unwrap();
+    assert!(
+        wait.recv_timeout(Duration::from_millis(500)).is_err(),
+        "a dropped subscription still receives"
+    );
+}
+
+#[test]
+fn hub_with_pending_tasks_drops_quickly() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription(&[EventType::Quote]).unwrap();
+    subscription.add_listener(|_| {}).unwrap();
+    subscription.add_symbols(&["AAPL"]).unwrap();
+    hub.publisher.publish(&[quote("AAPL").into()]).unwrap();
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        drop(subscription);
+        drop(hub);
+        sender.send(()).unwrap();
+    });
+    receiver
+        .recv_timeout(Duration::from_secs(5))
+        .expect("dropping the hub took over 5 seconds");
 }
