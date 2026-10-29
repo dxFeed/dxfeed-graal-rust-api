@@ -1,7 +1,7 @@
 //! Endpoints: connections to data sources and hubs.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
@@ -218,6 +218,36 @@ impl DXEndpoint {
         // SAFETY: the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_createWithRole(t, role.to_sys(), out) })?;
         Self::new(handle)
+    }
+
+    /// Returns the default endpoint of the process, with the [`Role::Feed`] role (`DXEndpoint.getInstance()`).
+    ///
+    /// The endpoint is created on the first successful call and configured, as in Java, by the `dxfeed.properties` file
+    /// and the system properties as of that moment (see [`system::set_property`](crate::system::set_property)): with
+    /// `dxfeed.address` set it connects to that address. It is the endpoint of [`DXFeed::get_instance`]. All callers
+    /// share it and it is never dropped: closing it closes it for the whole process.
+    #[doc(alias = "getInstance")]
+    pub fn get_instance() -> Result<&'static DXEndpoint> {
+        static INSTANCE: OnceLock<DXEndpoint> = OnceLock::new();
+        static INIT: Mutex<()> = Mutex::new(());
+        if let Some(endpoint) = INSTANCE.get() {
+            return Ok(endpoint);
+        }
+        // A failed call leaves the cell empty, so that the next call tries again.
+        let _init = crate::lock(&INIT);
+        if let Some(endpoint) = INSTANCE.get() {
+            return Ok(endpoint);
+        }
+        // The SDK applies its defaults of the QD properties and registers the default endpoint, so that `shutdown`
+        // closes it, only for the default feed: get the feed first.
+        // SAFETY: the out-pointer is valid for writes.
+        drop(Handle::create(|t, out| unsafe {
+            sys::dxfg_v4_DXFeed_getInstance(t, out)
+        })?);
+        // SAFETY: as above.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getInstance(t, out) })?;
+        let endpoint = Self::new(handle)?;
+        Ok(INSTANCE.get_or_init(|| endpoint))
     }
 
     /// Connects to `address`, e.g. `demo.dxfeed.com:7300`; the connection is made in the background.

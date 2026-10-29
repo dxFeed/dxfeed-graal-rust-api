@@ -1,10 +1,10 @@
 //! The feed of an endpoint.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
-use crate::endpoint::EndpointState;
+use crate::endpoint::{DXEndpoint, EndpointState};
 use crate::error::{Error, Result};
 use crate::event::{Event, EventKind, EventType};
 use crate::handle::Handle;
@@ -21,6 +21,20 @@ pub struct DXFeed {
 impl DXFeed {
     pub(crate) fn new(endpoint: Arc<EndpointState>) -> Self {
         DXFeed { endpoint }
+    }
+
+    /// Returns the feed of the default endpoint of the process, [`DXEndpoint::get_instance`] (`DXFeed.getInstance()`).
+    ///
+    /// The endpoint is configured on first use by the `dxfeed.properties` file and the system properties, such as
+    /// `dxfeed.address`; closing it closes it for the whole process.
+    #[doc(alias = "getInstance")]
+    pub fn get_instance() -> Result<&'static DXFeed> {
+        static INSTANCE: OnceLock<DXFeed> = OnceLock::new();
+        if let Some(feed) = INSTANCE.get() {
+            return Ok(feed);
+        }
+        let feed = DXEndpoint::get_instance()?.feed();
+        Ok(INSTANCE.get_or_init(|| feed))
     }
 
     /// Creates a subscription to events of type `E`, [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade), attached to
