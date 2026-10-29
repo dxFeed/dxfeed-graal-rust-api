@@ -24,7 +24,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Building](#building)
-- [Running](#running)
+- [Running and Deployment](#running-and-deployment)
 - [Usage](#usage)
   * [Threads and Listeners](#threads-and-listeners)
   * [Closing and Exit](#closing-and-exit)
@@ -45,6 +45,7 @@ The names follow the [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overvi
 |---|---|
 | `dxfeed-graal-sys` | Raw FFI bindings to SDK 3.12.0; the build script gets and links the SDK |
 | `dxfeed-graal` | Safe API: endpoints, feeds, subscriptions, listeners, events, publishing |
+| `dxfeed-graal-build` | Build-script helper that deploys the SDK library next to the application's executables |
 
 ### Implementation Details
 
@@ -106,22 +107,46 @@ The build script of `dxfeed-graal-sys` gets SDK 3.12.0 in one of these ways:
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
   certificate store.
-- With `--no-default-features` and no `DXFEED_GRAAL_SDK_DIR`, the build fails.
 - `DXFEED_GRAAL_SDK_CACHE_DIR`, an absolute path, keeps the downloaded archive in that directory, so a clean build or
   another target directory reuses it instead of downloading 21 MB again. The archive's SHA-256 is checked on every
   reuse; one that does not match is downloaded again with a warning. Without the variable nothing is written outside
   the build directory.
+- With `--no-default-features` and no `DXFEED_GRAAL_SDK_DIR`, the build fails.
 
 The build fails if the SDK headers differ from those of 3.12.0, because the committed bindings fit only that version.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
-## Running
+## Running and Deployment
 
-`cargo run` and `cargo test` find the SDK library on their own. A binary started outside cargo needs the library
-(`DxFeedGraalNativeSdk.dll`, `libDxFeedGraalNativeSdk.so` or `libDxFeedGraalNativeSdk.dylib`) next to the executable
-on Windows, or on the loader path (`LD_LIBRARY_PATH`, `DYLD_LIBRARY_PATH`) or an rpath on Linux and macOS. A crate that
-depends directly on `dxfeed-graal-sys` can read the library directory from `DEP_DXFEEDGRAALNATIVESDK_LIB_DIR` in its
-build script.
+`cargo run` and `cargo test` find the SDK library on their own. An executable started outside cargo needs the library
+(`DxFeedGraalNativeSdk.dll`, `libDxFeedGraalNativeSdk.so` or `libDxFeedGraalNativeSdk.dylib`) next to it. The
+`dxfeed-graal-build` crate puts it there from the application's build script:
+
+```toml
+[dependencies]
+dxfeed-graal = { path = "../dxfeed-graal-rust-api/dxfeed-graal" }
+
+[build-dependencies]
+dxfeed-graal-build = { path = "../dxfeed-graal-rust-api/dxfeed-graal-build" }
+```
+
+```rust,ignore
+// build.rs
+fn main() {
+    dxfeed_graal_build::deploy().unwrap();
+}
+```
+
+`deploy()` copies the library into the profile directory (`target/debug`, `target/release`, or
+`target/<triple>/<profile>` when cross-compiling), where cargo puts the executables, and skips the copy when the
+library has not changed. On Linux and macOS it also sets the executables' rpath to their own directory
+(`$ORIGIN`, `@loader_path`), so they find the library without `LD_LIBRARY_PATH`. To ship the application, copy the
+executable together with the library. Examples and tests are not covered; they run through cargo.
+
+For another layout, or when `build.build-dir` moves build scripts out of the target directory, call
+`dxfeed_graal_build::library_path()` and copy the library yourself. The macOS rpath is not verified yet.
+[`samples/deploy`](samples/deploy) is a complete application, and `cargo run -p xtask -- check-deploy` checks that it
+runs from a directory holding only the executable and the library.
 
 ## Usage
 
@@ -191,6 +216,8 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   ```
 
   The defaults are `AAPL` and `demo.dxfeed.com:7300`.
+- [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
+  [Running and Deployment](#running-and-deployment)).
 
 ## Current State
 
@@ -212,6 +239,7 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
 - [x] Typed and untyped subscriptions to string symbols, listeners, publishing
 - [x] Events printed in the format of Java's `toString`
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
+- [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [ ] Time series subscriptions, models, IPF, schedules, other symbol types
 
 ## Development
@@ -220,6 +248,13 @@ Regenerate the bindings after an SDK update (needs libclang; set `LIBCLANG_PATH`
 
 ```bash
 cargo run -p xtask -- gen-bindings <unpacked SDK dir>
+```
+
+Check that `samples/deploy` runs outside cargo with only the deployed library next to it, fails without it, and that a
+rebuild does not copy the library again:
+
+```bash
+cargo run -p xtask -- check-deploy
 ```
 
 ## License

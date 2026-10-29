@@ -1,6 +1,9 @@
 [package]
 name = "dxfeed-graal"
 description = "Rust API for dxFeed over the Graal Native SDK"
+# Lets build.rs forward the SDK location to dependents as DEP_DXFEED_GRAAL_LIB_DIR.
+links = "dxfeed_graal"
+build = "build.rs"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
