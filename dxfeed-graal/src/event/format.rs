@@ -76,82 +76,56 @@ impl Display for JavaChar {
     }
 }
 
-/// A time in milliseconds since the Unix epoch, printed by the SDK's `TimeFormat.DEFAULT` in the default time zone,
-/// with milliseconds or without; `0` prints as `0`.
+/// A time in milliseconds since the Unix epoch, printed by the SDK's `TimeFormat.DEFAULT.withMillis()` in the default
+/// time zone, as Java prints the times of events; `0` prints as `0`.
 ///
 /// While the process exits, or if the SDK fails, the time prints as its decimal milliseconds.
-pub(super) struct Time {
-    millis: i64,
-    with_millis: bool,
-}
-
-impl Time {
-    /// A time printed to the millisecond (`TimeFormat.DEFAULT.withMillis()`).
-    pub(super) fn millis(millis: i64) -> Self {
-        Time {
-            millis,
-            with_millis: true,
-        }
-    }
-
-    /// A time printed to the second (`TimeFormat.DEFAULT`).
-    pub(super) fn seconds(millis: i64) -> Self {
-        Time {
-            millis,
-            with_millis: false,
-        }
-    }
-}
+pub(super) struct Time(pub(super) i64);
 
 impl Display for Time {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.millis == 0 {
+        if self.0 == 0 {
             return f.write_char('0');
         }
-        match format_time(self.millis, self.with_millis) {
+        match format_time(self.0) {
             Some(text) => f.write_str(&text),
-            None => write!(f, "{}", self.millis),
+            None => write!(f, "{}", self.0),
         }
     }
 }
 
-/// The SDK's `TimeFormat.DEFAULT` and `TimeFormat.DEFAULT.withMillis()`; never released.
-struct TimeFormats {
-    default: *mut sys::dxfg_v4_time_format_t,
-    with_millis: *mut sys::dxfg_v4_time_format_t,
-}
+/// The SDK's `TimeFormat.DEFAULT.withMillis()`; never released.
+struct TimeFormat(*mut sys::dxfg_v4_time_format_t);
 
-// SAFETY: the handles are pointers to SDK memory usable from any attached thread, and Java's `TimeFormat` is
+// SAFETY: the handle is a pointer to SDK memory usable from any attached thread, and Java's `TimeFormat` is
 // thread-safe.
-unsafe impl Send for TimeFormats {}
+unsafe impl Send for TimeFormat {}
 // SAFETY: as above.
-unsafe impl Sync for TimeFormats {}
+unsafe impl Sync for TimeFormat {}
 
-fn time_formats() -> Option<&'static TimeFormats> {
-    static FORMATS: OnceLock<TimeFormats> = OnceLock::new();
+fn time_format() -> Option<&'static TimeFormat> {
+    static FORMAT: OnceLock<TimeFormat> = OnceLock::new();
     static INIT: Mutex<()> = Mutex::new(());
     let init = || {
         let mut default = ptr::null_mut();
         // SAFETY: the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
+        if default.is_null() {
+            return None;
+        }
         let mut with_millis = ptr::null_mut();
         // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut with_millis) }).ok()?;
-        (!default.is_null() && !with_millis.is_null()).then_some(TimeFormats { default, with_millis })
+        (!with_millis.is_null()).then_some(TimeFormat(with_millis))
     };
-    crate::get_or_try_init(&FORMATS, &INIT, || init().ok_or(())).ok()
+    crate::get_or_try_init(&FORMAT, &INIT, || init().ok_or(())).ok()
 }
 
-fn format_time(millis: i64, with_millis: bool) -> Option<String> {
+fn format_time(millis: i64) -> Option<String> {
     if isolate::exiting() {
         return None;
     }
-    let formats = time_formats()?;
-    let format = if with_millis {
-        formats.with_millis
-    } else {
-        formats.default
-    };
+    let format = time_format()?.0;
     let mut text = ptr::null();
     // SAFETY: the time format is live and the out-pointer is valid for writes.
     call(|t| unsafe { sys::dxfg_v4_TimeFormat_format(t, format, millis, &mut text) }).ok()?;
@@ -277,7 +251,6 @@ mod tests {
 
     #[test]
     fn zero_time_needs_no_sdk() {
-        assert_eq!(Time::millis(0).to_string(), "0");
-        assert_eq!(Time::seconds(0).to_string(), "0");
+        assert_eq!(Time(0).to_string(), "0");
     }
 }

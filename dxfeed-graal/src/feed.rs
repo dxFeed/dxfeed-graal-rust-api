@@ -1,6 +1,6 @@
 //! The feed of an endpoint.
 
-use std::sync::{Arc, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
@@ -30,11 +30,8 @@ impl DXFeed {
     #[doc(alias = "getInstance")]
     pub fn get_instance() -> Result<&'static DXFeed> {
         static INSTANCE: OnceLock<DXFeed> = OnceLock::new();
-        if let Some(feed) = INSTANCE.get() {
-            return Ok(feed);
-        }
-        let feed = DXEndpoint::get_instance()?.feed();
-        Ok(INSTANCE.get_or_init(|| feed))
+        static INIT: Mutex<()> = Mutex::new(());
+        crate::get_or_try_init(&INSTANCE, &INIT, || Ok(DXEndpoint::get_instance()?.feed()))
     }
 
     /// Creates a subscription to events of type `E`, [`Quote`](crate::event::Quote) or
@@ -51,8 +48,9 @@ impl DXFeed {
     /// # }
     /// ```
     ///
-    /// A subscription to several event types is created with
-    /// [`create_subscription_with_types`](Self::create_subscription_with_types):
+    /// [`Event`](crate::Event) is not an event type of its own, so a subscription to it does not compile; a
+    /// subscription to several event types is created with
+    /// [`create_subscription_with_types`](Self::create_subscription_with_types) instead:
     ///
     /// ```compile_fail
     /// # fn main() -> dxfeed_graal::Result<()> {

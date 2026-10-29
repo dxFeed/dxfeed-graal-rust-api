@@ -204,14 +204,15 @@ impl std::fmt::Display for Trade {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "Trade{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, exchange={}, price={}, change={}, \
-             size={}, day={}, dayVolume={}, dayTurnover={}, direction={}, ETH={}}}",
+            "Trade{{{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, exchange={}, tradeId={}, price={}, \
+             change={}, size={}, day={}, dayVolume={}, dayTurnover={}, direction={}, ETH={}}}",
             self.symbol,
-            Time::millis(self.event_time),
-            Time::millis(self.time()),
+            Time(self.event_time),
+            Time(self.time()),
             self.time_nano_part,
             self.sequence(),
             JavaChar(self.exchange_code),
+            self.trade_id,
             JavaDouble(self.price),
             JavaDouble(self.change),
             JavaDouble(self.size),

@@ -143,16 +143,13 @@ pub fn quote_with_bid(symbol: &str, bid_price: f64) -> Quote {
     }
 }
 
-/// Whether `text` is a time of `TimeFormat.DEFAULT` (`yyyyMMdd-HHmmss`), with `.SSS` milliseconds if `with_millis`.
-pub fn is_time(text: &str, with_millis: bool) -> bool {
+/// Whether `text` is a time of `TimeFormat.DEFAULT.withMillis()` (`yyyyMMdd-HHmmss.SSS`).
+pub fn is_time(text: &str) -> bool {
     let digits = |s: &str, n: usize| s.len() == n && s.bytes().all(|b| b.is_ascii_digit());
-    let (seconds, millis) = match text.split_once('.') {
-        Some((seconds, millis)) if with_millis => (seconds, Some(millis)),
-        None if !with_millis => (text, None),
-        _ => return false,
-    };
-    let date_time = seconds
-        .split_once('-')
-        .is_some_and(|(d, t)| digits(d, 8) && digits(t, 6));
-    date_time && millis.is_none_or(|m| digits(m, 3))
+    text.split_once('.').is_some_and(|(seconds, millis)| {
+        let date_time = seconds
+            .split_once('-')
+            .is_some_and(|(d, t)| digits(d, 8) && digits(t, 6));
+        date_time && digits(millis, 3)
+    })
 }

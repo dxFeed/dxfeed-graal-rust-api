@@ -32,8 +32,8 @@ fn new_quote_prints_as_in_java() {
 fn new_trade_prints_as_in_java() {
     assert_eq!(
         Trade::new("AAPL").to_string(),
-        "Trade{AAPL, eventTime=0, time=0, timeNanoPart=0, sequence=0, exchange=\\0, price=NaN, change=NaN, size=NaN, \
-         day=19700101, dayVolume=NaN, dayTurnover=NaN, direction=UNDEFINED, ETH=false}"
+        "Trade{AAPL, eventTime=0, time=0, timeNanoPart=0, sequence=0, exchange=\\0, tradeId=0, price=NaN, change=NaN, \
+         size=NaN, day=19700101, dayVolume=NaN, dayTurnover=NaN, direction=UNDEFINED, ETH=false}"
     );
 }
 
@@ -69,12 +69,14 @@ fn trade_values_print_as_in_java() {
         day_volume: 0.0001,
         day_turnover: 1e21,
         flags: 4 << 1 | 1,
+        trade_id: 42,
         ..Trade::new("MSFT")
     };
     assert_eq!(
         trade.to_string(),
-        "Trade{MSFT, eventTime=0, time=0, timeNanoPart=0, sequence=9, exchange=\\u00e9, price=1.5E-5, change=-0.25, \
-         size=1.23456789E7, day=20241004, dayVolume=1.0E-4, dayTurnover=1.0E21, direction=ZERO_UP, ETH=true}"
+        "Trade{MSFT, eventTime=0, time=0, timeNanoPart=0, sequence=9, exchange=\\u00e9, tradeId=42, price=1.5E-5, \
+         change=-0.25, size=1.23456789E7, day=20241004, dayVolume=1.0E-4, dayTurnover=1.0E21, direction=ZERO_UP, \
+         ETH=true}"
     );
 }
 
@@ -88,16 +90,12 @@ fn times_print_through_the_sdk() {
         ..Quote::new("AAPL")
     };
     let text = quote.to_string();
-    for (name, with_millis) in [
-        ("eventTime", true),
-        ("time", true),
-        ("bidTime", false),
-        ("askTime", false),
-    ] {
-        assert!(is_time(field(&text, name), with_millis), "{name} in {text}");
+    for name in ["eventTime", "time", "bidTime", "askTime"] {
+        assert!(is_time(field(&text, name)), "{name} in {text}");
     }
     assert!(field(&text, "eventTime").ends_with(".123"), "{text}");
     assert!(field(&text, "time").ends_with(".456"), "{text}");
+    assert!(field(&text, "bidTime").ends_with(".000"), "{text}");
     // Both times fall on one minute in every time zone: only the seconds differ.
     assert_eq!(field(&text, "bidTime")[..13], field(&text, "askTime")[..13]);
 
@@ -106,7 +104,7 @@ fn times_print_through_the_sdk() {
         ..Trade::new("AAPL")
     };
     let text = trade.to_string();
-    assert!(is_time(field(&text, "time"), true), "{text}");
+    assert!(is_time(field(&text, "time")), "{text}");
     assert!(field(&text, "time").ends_with(".789"), "{text}");
 }
 
@@ -145,7 +143,7 @@ fn received_events_print_like_their_copies() {
     hub.publish_and_process(&[sent.into()]);
     let (borrowed, owned) = texts.try_recv().expect("no quote");
     assert_eq!(borrowed, owned);
-    assert!(is_time(field(&borrowed, "bidTime"), false), "{borrowed}");
+    assert!(is_time(field(&borrowed, "bidTime")), "{borrowed}");
 
     let untyped = hub.feed.create_subscription_with_types(&[EventType::Quote]).unwrap();
     let (sender, texts) = mpsc::channel();

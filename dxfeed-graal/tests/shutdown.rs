@@ -165,7 +165,7 @@ fn display_after_shutdown() {
         .find_map(|line| line.strip_prefix("eventTime="))
         .unwrap_or_else(|| panic!("no time printed\n{stderr}"));
     // The SDK formats the time, or the time prints as its milliseconds if the SDK refuses.
-    let formatted = is_time(event_time, true) && event_time.ends_with(".123");
+    let formatted = is_time(event_time) && event_time.ends_with(".123");
     assert!(formatted || event_time == "1700000000123", "{event_time}");
 }
 
