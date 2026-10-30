@@ -117,7 +117,6 @@ macro_rules! event_type {
 
         impl $crate::event::Table for $name {
             type Sys = $sys;
-            type View = $view;
             const CLASS: ::dxfeed_graal_sys::dxfg_event_clazz_t = $class;
 
             fn to_sys(&self, strings: &mut Vec<::std::ffi::CString>) -> $crate::error::Result<$sys> {

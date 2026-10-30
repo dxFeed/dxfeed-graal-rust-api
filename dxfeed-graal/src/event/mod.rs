@@ -6,7 +6,6 @@
 
 #[macro_use]
 mod table;
-#[macro_use]
 mod flags;
 #[macro_use]
 mod traits;
@@ -87,8 +86,6 @@ use crate::error::{Error, Result, c_string};
 trait Table {
     /// The SDK struct of the event.
     type Sys;
-    /// The view of the SDK struct.
-    type View;
     /// The SDK class of the event.
     const CLASS: sys::dxfg_event_clazz_t;
 

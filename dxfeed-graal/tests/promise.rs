@@ -83,6 +83,11 @@ fn timeouts() {
     assert!(promise.is_cancelled().unwrap());
     assert!(matches!(promise.result(), Err(Error::Java(_))));
     assert!(matches!(promise.wait(LONG), Err(Error::Java(_))));
+
+    // A timeout under a millisecond is rounded up, so it waits and cancels rather than only checking.
+    let promise = hub.feed.get_last_event_promise::<Quote>("IBM").unwrap();
+    assert!(matches!(promise.wait(Duration::from_micros(500)), Err(Error::Timeout)));
+    assert!(promise.is_cancelled().unwrap());
 }
 
 /// Cancelling from another thread wakes a waiter long before its timeout.
@@ -155,8 +160,7 @@ fn listener_cannot_block_on_a_promise() {
     assert!(cancelled.unwrap());
 }
 
-/// Dropping a pending promise releases its handle without cancelling the request; the promise keeps the endpoint
-/// open while it lives.
+/// The promise keeps the endpoint open while it lives, and dropping it releases its handle.
 #[test]
 fn dropping_a_promise_releases_it() {
     let _serial = serial();
@@ -165,7 +169,8 @@ fn dropping_a_promise_releases_it() {
     let promise = hub.feed.get_last_event_promise::<Quote>("AAPL").unwrap();
     drop(hub);
     assert!(!promise.is_cancelled().unwrap());
-    assert!(live_handles() > start);
+    // The promise, and the endpoint, feed and publisher of the feed it holds.
+    assert_eq!(live_handles(), start + 4);
     drop(promise);
     assert_eq!(live_handles(), start);
     assert_eq!(live_events(), 0);

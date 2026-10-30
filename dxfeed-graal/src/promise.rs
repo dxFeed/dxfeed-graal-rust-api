@@ -43,6 +43,9 @@ impl<E: LastingEvent> Promise<E> {
     /// completed exceptionally or was cancelled. The timeout is rounded up to whole milliseconds; one over 24 days
     /// waits 24 days.
     ///
+    /// A promise shared between threads is cancelled for all of them when the positive timeout of one wait expires;
+    /// threads that must not cancel it check it with a zero timeout.
+    ///
     /// A positive timeout inside an event listener returns [`Error::InCallback`]: the listener thread delivers the
     /// events the promise may be waiting for.
     #[doc(alias = "await")]
