@@ -1,6 +1,6 @@
 //! Prints the quotes of a symbol until Enter is pressed, like `PrintQuoteEventsSample` of the other dxFeed APIs.
 //!
-//! Usage: `cargo run --example print_quotes -- [SYMBOL] [ADDRESS]`, by default `AAPL` and `demo.dxfeed.com:7300`.
+//! Usage: `cargo run --example print_quote_events -- [SYMBOL] [ADDRESS]`, by default `AAPL` and `demo.dxfeed.com:7300`.
 
 use std::process::ExitCode;
 

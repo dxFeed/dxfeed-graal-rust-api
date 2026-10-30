@@ -212,24 +212,25 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
 
 ## Samples
 
-- [print_quotes](dxfeed-graal/examples/print_quotes.rs) prints the quotes of a symbol until Enter is pressed, like
-  `PrintQuoteEventsSample` of the other dxFeed APIs:
+The samples are Cargo examples named after the samples of the C++ and .NET APIs, and run with
+`cargo run --example <name> -- <arguments>`. An address argument defaults to `demo.dxfeed.com:7300`; a sample started
+without its required arguments prints its usage.
 
-  ```bash
-  cargo run --example print_quotes -- [SYMBOL] [ADDRESS]
-  ```
+| Sample | Group | C++ / .NET sample | What it does | Arguments |
+|---|---|---|---|---|
+| [print_quote_events](dxfeed-graal/examples/print_quote_events.rs) | API | `PrintQuoteEventsSample` | Prints the quotes of a symbol until Enter is pressed | `[SYMBOL] [ADDRESS]`, `AAPL` by default |
+| [quote_and_trade](dxfeed-graal/examples/quote_and_trade.rs) | API | `QuoteAndTradeSample` | Receives quotes and trades of the default feed through listeners, a promise and last-trade snapshots | `<SYMBOL> [ADDRESS]` |
+| [request_profile](dxfeed-graal/examples/request_profile.rs) | API | `RequestProfileSample` | Prints the profile of a symbol and exits | `<ADDRESS> <SYMBOL>` |
+| [last_event_console](dxfeed-graal/examples/last_event_console.rs) | Console | `LastEventConsoleSample` | Prints the last quote, trade, summary and profile of each symbol typed in the console | `[ADDRESS]` |
 
-  The defaults are `AAPL` and `demo.dxfeed.com:7300`.
-- [last_event](dxfeed-graal/examples/last_event.rs) requests the last quote of a symbol and waits for it with a
-  timeout:
+For example:
 
-  ```bash
-  cargo run --example last_event -- [SYMBOL] [ADDRESS]
-  ```
+```bash
+cargo run --example print_quote_events -- AAPL
+```
 
-  The defaults are the same.
-- [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
-  [Running and Deployment](#running-and-deployment)).
+[deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
+[Running and Deployment](#running-and-deployment)).
 
 ## Current State
 
