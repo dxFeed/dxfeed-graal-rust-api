@@ -21,6 +21,8 @@ pub enum Error {
     ShutDown,
     /// The call is not allowed inside an event listener.
     InCallback,
+    /// The wait for a result timed out, e.g. in [`Promise::wait`](crate::Promise::wait).
+    Timeout,
 }
 
 impl fmt::Display for Error {
@@ -31,6 +33,7 @@ impl fmt::Display for Error {
             Error::InvalidArgument(what) => write!(f, "invalid argument: {what}"),
             Error::ShutDown => f.write_str("the SDK has been shut down"),
             Error::InCallback => f.write_str("the call is not allowed inside an event listener"),
+            Error::Timeout => f.write_str("the wait timed out"),
         }
     }
 }

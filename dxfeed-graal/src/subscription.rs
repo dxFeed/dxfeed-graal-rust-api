@@ -19,9 +19,8 @@ pub struct ListenerId(u64);
 
 /// A subscription of a [`DXFeed`] to events for some symbols (`DXFeedSubscription`).
 ///
-/// `E` is what its listeners receive: [`Quote`](crate::event::Quote) or [`Trade`](crate::event::Trade) for a
-/// subscription created with [`DXFeed::create_subscription`], [`Event`] for one created with
-/// [`DXFeed::create_subscription_with_types`].
+/// `E` is what its listeners receive: an event type such as [`Quote`](crate::event::Quote) for a subscription created
+/// with [`DXFeed::create_subscription`], [`Event`] for one created with [`DXFeed::create_subscription_with_types`].
 ///
 /// Dropping it removes and releases its listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its

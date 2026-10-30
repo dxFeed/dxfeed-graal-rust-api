@@ -178,6 +178,10 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   values to match.
 - Calls chain as in Java: a feed or a subscription taken from a chain keeps its endpoint open, e.g.
   `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();`.
+- The last event of a lasting type (Quote, Profile, Summary, Greeks, Candle, Trade and others) comes from the local
+  cache of the feed with `get_last_event_if_subscribed::<Quote>("AAPL")` (`None` without a subscription) and
+  `get_last_event(&quote)`, or from the uplink with `get_last_event_promise::<Quote>("AAPL")?.wait(timeout)`. A wait
+  that times out returns `Error::Timeout` and cancels the request; dropping a promise does not cancel it, as in Java.
 - `DXFeed::get_instance()` and `DXEndpoint::get_instance()` return the default feed and endpoint of the process,
   configured by the `dxfeed.properties` file and the system properties (`system::set_property("dxfeed.address", ...)`)
   on first use.
@@ -216,6 +220,14 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   ```
 
   The defaults are `AAPL` and `demo.dxfeed.com:7300`.
+- [last_event](dxfeed-graal/examples/last_event.rs) requests the last quote of a symbol and waits for it with a
+  timeout:
+
+  ```bash
+  cargo run --example last_event -- [SYMBOL] [ADDRESS]
+  ```
+
+  The defaults are the same.
 - [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
   [Running and Deployment](#running-and-deployment)).
 
@@ -262,6 +274,7 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
 
 - [x] System properties, the default endpoint and feed (`get_instance`)
 - [x] Typed and untyped subscriptions to string symbols, listeners, publishing
+- [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_event_promise` and `Promise`
 - [x] Events printed in the format of Java's `toString`
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive

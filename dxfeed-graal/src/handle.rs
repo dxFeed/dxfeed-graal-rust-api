@@ -42,6 +42,14 @@ sdk_handle!(
     sys::dxfg_v4_feed_event_listener_t
 );
 
+// SAFETY: the promise of an event nests its Java object handle one level deeper, in `handler.handler`.
+unsafe impl SdkHandle for sys::dxfg_v4_promise_event_t {
+    unsafe fn handler(this: *mut Self) -> *mut sys::dxfg_v4_java_object_handler {
+        // SAFETY: the caller guarantees `this` is live.
+        unsafe { &raw mut (*this).handler.handler }
+    }
+}
+
 static LIVE: AtomicUsize = AtomicUsize::new(0);
 
 /// The number of SDK handles owned by Rust values right now; for tests.

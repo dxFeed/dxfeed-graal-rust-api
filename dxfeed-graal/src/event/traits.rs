@@ -1,6 +1,6 @@
 //! The behavior several event types share, as the Java interfaces of the same names.
 
-use super::{EventFlags, EventKind};
+use super::{Event, EventFlags, EventKind};
 
 /// An event about a market symbol, as Java's `MarketEvent`.
 ///
@@ -16,10 +16,12 @@ pub trait MarketEvent: EventKind {
 }
 
 /// An event whose last value a feed keeps for each symbol, as Java's `LastingEvent`: a new event replaces the previous
-/// one.
+/// one. A feed returns the last value with [`DXFeed::get_last_event_if_subscribed`](crate::DXFeed::get_last_event_if_subscribed),
+/// [`DXFeed::get_last_event`](crate::DXFeed::get_last_event) and
+/// [`DXFeed::get_last_event_promise`](crate::DXFeed::get_last_event_promise).
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait LastingEvent: EventKind {}
+pub trait LastingEvent: EventKind + Clone + Into<Event> + TryFrom<Event, Error = Event> {}
 
 /// An event that a source and an index tell apart from the other events of its symbol, as Java's `IndexedEvent`.
 ///

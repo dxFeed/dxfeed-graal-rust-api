@@ -28,6 +28,7 @@ mod order_imbalance;
 mod otc_markets_order;
 mod profile;
 mod quote;
+pub(crate) mod sdk_event;
 mod series;
 mod spread_order;
 mod summary;

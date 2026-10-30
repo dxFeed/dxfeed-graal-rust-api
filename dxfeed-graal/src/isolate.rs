@@ -240,6 +240,24 @@ fn take_exception(thread: Thread) -> JavaException {
     copy
 }
 
+/// Copies and releases an exception an SDK function returned, or returns `None` for NULL.
+///
+/// # Safety
+///
+/// `exception` must be NULL or a live SDK exception owned by the caller, not used afterwards.
+pub(crate) unsafe fn take_returned_exception(exception: *mut sys::dxfg_v4_exception_t) -> Option<JavaException> {
+    if exception.is_null() {
+        return None;
+    }
+    // SAFETY: guaranteed by the caller.
+    let copy = unsafe { copy_exception(exception, 0) };
+    if !exiting() {
+        // SAFETY: the exception is released once; a failed release leaks it.
+        let _ = with_thread(|t| unsafe { sys::dxfg_v4_Exception_release(t, exception) });
+    }
+    Some(copy)
+}
+
 /// Copies an SDK exception and its causes, at most [`MAX_CAUSES`] deep.
 ///
 /// # Safety

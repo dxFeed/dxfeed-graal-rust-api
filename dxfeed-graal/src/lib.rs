@@ -31,7 +31,26 @@
 //!
 //! A quote prints as Java prints it: `Quote{AAPL, eventTime=0, time=20241004-093000.000, timeNanoPart=0, ...}`.
 //! A subscription to several event types, [`DXFeed::create_subscription_with_types`], gives its listeners an
-//! [`EventRef`] to match.
+//! [`EventRef`] to match. All 27 event types of the SDK are mapped; see [`event`].
+//!
+//! The last event of a [`LastingEvent`](event::LastingEvent) type, such as a quote, comes from the local cache with
+//! [`DXFeed::get_last_event_if_subscribed`] and [`DXFeed::get_last_event`], or from the uplink with
+//! [`DXFeed::get_last_event_promise`], whose [`Promise`] is waited for with a timeout:
+//!
+//! ```no_run
+//! use std::time::Duration;
+//!
+//! use dxfeed_graal::DXEndpoint;
+//! use dxfeed_graal::event::Quote;
+//!
+//! fn main() -> dxfeed_graal::Result<()> {
+//!     let endpoint = DXEndpoint::create()?;
+//!     endpoint.connect("demo.dxfeed.com:7300")?;
+//!     let quote = endpoint.feed().get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(10))?;
+//!     println!("{quote}");
+//!     endpoint.close_and_await_termination()
+//! }
+//! ```
 //!
 //! The default feed of the process, [`DXFeed::get_instance`], connects to the address in the `dxfeed.address` system
 //! property or in the `dxfeed.properties` file:
@@ -67,7 +86,8 @@
 //! # Errors
 //!
 //! Every fallible call returns [`Result`]. A Java exception becomes [`Error::Java`] with its class, message, stack
-//! trace and causes; invalid arguments, such as strings with NUL bytes, are rejected before any SDK call.
+//! trace and causes; invalid arguments, such as strings with NUL bytes, are rejected before any SDK call. A wait that
+//! times out returns [`Error::Timeout`].
 //!
 //! # Closing and exit
 //!
@@ -92,17 +112,21 @@ mod feed;
 mod handle;
 mod isolate;
 mod listener;
+mod promise;
 mod publisher;
 mod subscription;
 pub mod system;
 
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role};
 pub use error::{Error, JavaException, Result};
+#[doc(hidden)]
+pub use event::sdk_event::live_events;
 pub use event::{Event, EventKind, EventRef, EventType, Events, SubscriptionItem};
 pub use executor::ManualExecutor;
 pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
+pub use promise::Promise;
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, ListenerId};
 
