@@ -6,13 +6,15 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use dxfeed_graal::event::{
-    AnalyticOrder, AnalyticOrderRef, AuctionType, Candle, CandleRef, DailyCandle, DailyCandleRef, Greeks, GreeksRef,
-    IcebergType, ImbalanceSide, MarketMaker, MarketMakerRef, NuamOrder, NuamOrderRef, NuamOrderType, NuamTimeAndSale,
-    NuamTimeAndSaleRef, NuamTimeInForceType, NuamTrade, NuamTradeRef, OptionSale, OptionSaleRef, Order, OrderAction,
-    OrderBase, OrderBaseRef, OrderImbalance, OrderImbalanceRef, OrderRef, OtcMarketsOrder, OtcMarketsOrderRef,
-    OtcMarketsPriceType, PriceType, Profile, ProfileRef, Quote, QuoteRef, Scope, Series, SeriesRef,
-    ShortSaleRestriction, Side, SpreadOrder, SpreadOrderRef, Summary, SummaryRef, TheoPrice, TheoPriceRef, TimeAndSale,
-    TimeAndSaleRef, TimeAndSaleType, Trade, TradeETH, TradeETHRef, TradeRef, TradingStatus, Underlying, UnderlyingRef,
+    AnalyticOrder, AnalyticOrderRef, AuctionType, Candle, CandleRef, Configuration, ConfigurationRef, DailyCandle,
+    DailyCandleRef, Greeks, GreeksRef, IcebergType, ImbalanceSide, MarketMaker, MarketMakerRef, Message, MessageRef,
+    NuamOrder, NuamOrderRef, NuamOrderType, NuamTimeAndSale, NuamTimeAndSaleRef, NuamTimeInForceType, NuamTrade,
+    NuamTradeRef, OptionSale, OptionSaleRef, Order, OrderAction, OrderBase, OrderBaseRef, OrderImbalance,
+    OrderImbalanceRef, OrderRef, OtcMarketsOrder, OtcMarketsOrderRef, OtcMarketsPriceType, PriceType, Profile,
+    ProfileRef, Quote, QuoteRef, Scope, Series, SeriesRef, ShortSaleRestriction, Side, SpreadOrder, SpreadOrderRef,
+    Summary, SummaryRef, TextConfiguration, TextConfigurationRef, TextMessage, TextMessageRef, TheoPrice, TheoPriceRef,
+    TimeAndSale, TimeAndSaleRef, TimeAndSaleType, Trade, TradeETH, TradeETHRef, TradeRef, TradingStatus, Underlying,
+    UnderlyingRef,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, EventRef, ManualExecutor, Role, SubscriptionItem,
@@ -104,7 +106,11 @@ to_event!(
     SpreadOrderRef,
     NuamOrderRef,
     MarketMakerRef,
-    OrderImbalanceRef
+    OrderImbalanceRef,
+    ConfigurationRef,
+    MessageRef,
+    TextMessageRef,
+    TextConfigurationRef
 );
 
 impl ToEvent for EventRef<'_> {
@@ -601,6 +607,46 @@ pub fn same_events<T: std::fmt::Debug + ?Sized>(a: &T, b: &T) -> bool {
     format!("{a:?}") == format!("{b:?}")
 }
 
+/// A configuration with a distinct non-zero value in every field.
+pub fn configuration(symbol: &str) -> Configuration {
+    Configuration {
+        event_time: 1_700_000_000_500,
+        version: 3,
+        attachment: Some("{\"mode\": \"test\"}".to_owned()),
+        ..Configuration::new(symbol)
+    }
+}
+
+/// A message with a distinct non-zero value in every field.
+pub fn message(symbol: &str) -> Message {
+    Message {
+        event_time: 1_700_000_000_500,
+        attachment: Some("attach \u{e9}".to_owned()),
+        ..Message::new(symbol)
+    }
+}
+
+/// A text message with a distinct non-zero value in every field.
+pub fn text_message(symbol: &str) -> TextMessage {
+    TextMessage {
+        event_time: 1_700_000_000_500,
+        time_sequence: INDEX,
+        text: Some("halt \u{1F600}".to_owned()),
+        ..TextMessage::new(symbol)
+    }
+}
+
+/// A text configuration with a distinct non-zero value in every field.
+pub fn text_configuration(symbol: &str) -> TextConfiguration {
+    TextConfiguration {
+        event_time: 1_700_000_000_500,
+        time_sequence: INDEX,
+        version: 2,
+        text: Some("mode=test".to_owned()),
+        ..TextConfiguration::new(symbol)
+    }
+}
+
 /// The candle symbol of the samples of candles for `symbol`: its daily candles.
 pub fn candle_symbol(symbol: &str) -> String {
     format!("{symbol}{{=d}}")
@@ -631,6 +677,10 @@ pub fn all_events(symbol: &str) -> Vec<Event> {
         nuam_order(symbol).into(),
         market_maker(symbol).into(),
         order_imbalance(symbol).into(),
+        configuration(symbol).into(),
+        message(symbol).into(),
+        text_message(symbol).into(),
+        text_configuration(symbol).into(),
     ]
 }
 
@@ -709,6 +759,10 @@ pub fn delivered(event: Event) -> Event {
         }),
         Event::MarketMaker(e) => MarketMaker { event_time: 0, ..e }.into(),
         Event::OrderImbalance(e) => OrderImbalance { event_time: 0, ..e }.into(),
+        Event::Configuration(e) => Configuration { event_time: 0, ..e }.into(),
+        Event::Message(e) => Message { event_time: 0, ..e }.into(),
+        Event::TextMessage(e) => TextMessage { event_time: 0, ..e }.into(),
+        Event::TextConfiguration(e) => TextConfiguration { event_time: 0, ..e }.into(),
         other => panic!("no delivered form of {other}"),
     }
 }

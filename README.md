@@ -253,7 +253,10 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
 - [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html)
 - [x] [OrderBase](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderBase.html): received only; Java refuses
   to publish it
-- [ ] Other event types arrive as `EventRef::Other`
+- [x] [Message](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Message.html)
+- [x] [Configuration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Configuration.html)
+- [x] [TextMessage](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextMessage.html)
+- [x] [TextConfiguration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextConfiguration.html)
 
 ### Features
 

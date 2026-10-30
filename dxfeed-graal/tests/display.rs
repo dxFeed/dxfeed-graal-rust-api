@@ -5,11 +5,12 @@ mod support;
 use std::sync::mpsc;
 
 use dxfeed_graal::event::{
-    AnalyticOrder, AuctionType, Candle, DailyCandle, Direction, EventFlags, Greeks, IcebergType, ImbalanceSide,
-    IndexedEvent, MarketEvent, MarketMaker, NuamOrder, NuamOrderType, NuamTimeAndSale, NuamTimeInForceType, NuamTrade,
-    OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OtcMarketsOrder, OtcMarketsPriceType, PriceType,
-    Profile, Quote, Scope, Series, ShortSaleRestriction, Side, SpreadOrder, Summary, TheoPrice, TimeAndSale,
-    TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH, TradingStatus, Underlying,
+    AnalyticOrder, AuctionType, Candle, Configuration, DailyCandle, Direction, EventFlags, Greeks, IcebergType,
+    ImbalanceSide, IndexedEvent, MarketEvent, MarketMaker, Message, NuamOrder, NuamOrderType, NuamTimeAndSale,
+    NuamTimeInForceType, NuamTrade, OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OtcMarketsOrder,
+    OtcMarketsPriceType, PriceType, Profile, Quote, Scope, Series, ShortSaleRestriction, Side, SpreadOrder, Summary,
+    TextConfiguration, TextMessage, TheoPrice, TimeAndSale, TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH,
+    TradingStatus, Underlying,
 };
 use dxfeed_graal::{Error, Event, EventRef, EventType};
 use support::{Hub, is_time, is_time_without_millis, quote};
@@ -1125,4 +1126,68 @@ fn order_values_have_typed_accessors() {
         ..AnalyticOrder::new("AAPL")
     };
     assert_eq!(analytic.iceberg_type(), IcebergType::Native);
+}
+
+/// The strings Java 3.356 prints for the message and configuration events, new and filled through the Java setters of
+/// the same names. Java prints the attachment, an object, without quotes.
+#[test]
+fn message_and_configuration_events_print_as_in_java() {
+    assert_eq!(
+        Configuration::new("AAPL").to_string(),
+        "Configuration{AAPL, eventTime=0, version=0, attachment=null}"
+    );
+    assert_eq!(
+        Message::new("AAPL").to_string(),
+        "Message{AAPL, eventTime=0, attachment=null}"
+    );
+    assert_eq!(
+        TextConfiguration::new("AAPL").to_string(),
+        "TextConfiguration{AAPL, eventTime=0, time=0, sequence=0, version=0, text='null'}"
+    );
+    assert_eq!(
+        TextMessage::new("AAPL").to_string(),
+        "TextMessage{AAPL, eventTime=0, time=0, sequence=0, text='null'}"
+    );
+
+    let configuration = Configuration {
+        version: 3,
+        attachment: Some("attach".to_owned()),
+        ..Configuration::new("AAPL")
+    };
+    assert_eq!(
+        configuration.to_string(),
+        "Configuration{AAPL, eventTime=0, version=3, attachment=attach}"
+    );
+    let message = Message {
+        attachment: Some("attach".to_owned()),
+        ..Message::new("AAPL")
+    };
+    assert_eq!(message.to_string(), "Message{AAPL, eventTime=0, attachment=attach}");
+    let mut text_configuration = TextConfiguration {
+        version: 3,
+        text: Some("text".to_owned()),
+        ..TextConfiguration::new("AAPL")
+    };
+    text_configuration.set_sequence(5).unwrap();
+    assert_eq!(
+        text_configuration.to_string(),
+        "TextConfiguration{AAPL, eventTime=0, time=0, sequence=5, version=3, text='text'}"
+    );
+    let mut text_message = TextMessage {
+        text: Some("text".to_owned()),
+        ..TextMessage::new("AAPL")
+    };
+    text_message.set_sequence(5).unwrap();
+    assert_eq!(
+        text_message.to_string(),
+        "TextMessage{AAPL, eventTime=0, time=0, sequence=5, text='text'}"
+    );
+
+    text_message.set_time(1_700_000_000_789);
+    assert_eq!((text_message.time(), text_message.sequence()), (1_700_000_000_789, 5));
+    let text = text_message.to_string();
+    assert!(
+        is_time(field(&text, "time")) && field(&text, "time").ends_with(".789"),
+        "{text}"
+    );
 }

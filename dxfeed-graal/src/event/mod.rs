@@ -12,10 +12,12 @@ mod flags;
 mod traits;
 mod analytic_order;
 mod candle;
+mod configuration;
 mod daily_candle;
 mod format;
 mod greeks;
 mod market_maker;
+mod message;
 mod nuam_order;
 mod nuam_time_and_sale;
 mod nuam_trade;
@@ -29,6 +31,8 @@ mod quote;
 mod series;
 mod spread_order;
 mod summary;
+mod text_configuration;
+mod text_message;
 mod theo_price;
 mod time_and_sale;
 mod trade;
@@ -45,6 +49,7 @@ use dxfeed_graal_sys as sys;
 
 pub use analytic_order::{AnalyticOrder, AnalyticOrderRef};
 pub use candle::{Candle, CandleRef};
+pub use configuration::{Configuration, ConfigurationRef};
 pub use daily_candle::{DailyCandle, DailyCandleRef};
 pub use flags::{
     AuctionType, Direction, EventFlags, IcebergType, ImbalanceSide, NuamOrderType, NuamTimeInForceType, OrderAction,
@@ -52,6 +57,7 @@ pub use flags::{
 };
 pub use greeks::{Greeks, GreeksRef};
 pub use market_maker::{MarketMaker, MarketMakerRef};
+pub use message::{Message, MessageRef};
 pub use nuam_order::{NuamOrder, NuamOrderRef};
 pub use nuam_time_and_sale::{NuamTimeAndSale, NuamTimeAndSaleRef};
 pub use nuam_trade::{NuamTrade, NuamTradeRef};
@@ -65,6 +71,8 @@ pub use quote::{Quote, QuoteRef};
 pub use series::{Series, SeriesRef};
 pub use spread_order::{SpreadOrder, SpreadOrderRef};
 pub use summary::{Summary, SummaryRef};
+pub use text_configuration::{TextConfiguration, TextConfigurationRef};
+pub use text_message::{TextMessage, TextMessageRef};
 pub use theo_price::{TheoPrice, TheoPriceRef};
 pub use time_and_sale::{TimeAndSale, TimeAndSaleRef};
 pub use trade::{Trade, TradeRef};
@@ -252,6 +260,10 @@ event_types! {
     Trade(TradeRef) [MarketEvent LastingEvent],
     /// [`TradeETH`]: the last trade in extended trading hours.
     TradeETH(TradeETHRef) [MarketEvent LastingEvent],
+    /// [`Configuration`]: a configuration with a version and an attachment.
+    Configuration(ConfigurationRef) [LastingEvent],
+    /// [`Message`]: a message with an attachment.
+    Message(MessageRef) [],
     /// [`TimeAndSale`]: a trade or another market event with a price.
     TimeAndSale(TimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`OrderBase`]: the fields that all the orders share.
@@ -268,8 +280,12 @@ event_types! {
     Series(SeriesRef) [MarketEvent IndexedEvent],
     /// [`OptionSale`]: a trade or another market event with a price for an option.
     OptionSale(OptionSaleRef) [MarketEvent IndexedEvent],
+    /// [`TextMessage`]: a text message with a time.
+    TextMessage(TextMessageRef) [],
     /// [`MarketMaker`]: the best bid and ask of a market maker.
     MarketMaker(MarketMakerRef) [MarketEvent IndexedEvent],
+    /// [`TextConfiguration`]: a configuration as text with a time and a version.
+    TextConfiguration(TextConfigurationRef) [LastingEvent],
     /// [`NuamOrder`]: an order of the Nuam exchange.
     NuamOrder(NuamOrderRef) [MarketEvent IndexedEvent],
     /// [`NuamTimeAndSale`]: a time and sale of the Nuam exchange.

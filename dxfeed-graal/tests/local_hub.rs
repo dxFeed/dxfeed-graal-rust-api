@@ -8,9 +8,10 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use dxfeed_graal::event::{
-    AnalyticOrder, Candle, DailyCandle, EventFlags, Greeks, MarketMaker, NuamOrder, NuamTimeAndSale, NuamTrade,
-    OptionSale, Order, OrderImbalance, OtcMarketsOrder, Profile, Quote, QuoteRef, Scope, Series, Side, SpreadOrder,
-    Summary, TheoPrice, TimeAndSale, Trade, TradeETH, Underlying,
+    AnalyticOrder, Candle, Configuration, DailyCandle, EventFlags, Greeks, MarketMaker, Message, NuamOrder,
+    NuamTimeAndSale, NuamTrade, OptionSale, Order, OrderImbalance, OtcMarketsOrder, Profile, Quote, QuoteRef, Scope,
+    Series, Side, SpreadOrder, Summary, TextConfiguration, TextMessage, TheoPrice, TimeAndSale, Trade, TradeETH,
+    Underlying,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
@@ -582,7 +583,7 @@ fn hub_with_pending_tasks_drops_quickly() {
 }
 
 /// Every mapped type, in the order of [`all_events`].
-const ALL_TYPES: [EventType; 22] = [
+const ALL_TYPES: [EventType; 26] = [
     EventType::Quote,
     EventType::Profile,
     EventType::Summary,
@@ -605,6 +606,10 @@ const ALL_TYPES: [EventType; 22] = [
     EventType::NuamOrder,
     EventType::MarketMaker,
     EventType::OrderImbalance,
+    EventType::Configuration,
+    EventType::Message,
+    EventType::TextMessage,
+    EventType::TextConfiguration,
 ];
 
 #[test]
@@ -680,6 +685,42 @@ fn typed_subscriptions_receive_only_their_type() {
     check(receive_typed::<NuamOrder>(), 19);
     check(receive_typed::<MarketMaker>(), 20);
     check(receive_typed::<OrderImbalance>(), 21);
+    check(receive_typed::<Configuration>(), 22);
+    check(receive_typed::<Message>(), 23);
+    check(receive_typed::<TextMessage>(), 24);
+    check(receive_typed::<TextConfiguration>(), 25);
+}
+
+/// An attachment arrives as it was sent: none, empty or text.
+#[test]
+fn attachments_survive_the_hub() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Message>().unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    let sent: Vec<Event> = [None, Some(""), Some("x")]
+        .into_iter()
+        .map(|attachment| {
+            Message {
+                attachment: attachment.map(str::to_owned),
+                ..Message::new("AAPL")
+            }
+            .into()
+        })
+        .collect();
+    hub.publish_and_process(&sent);
+    assert_eq!(received(&events), sent);
+}
+
+#[test]
+fn attachment_with_nul_is_rejected() {
+    let hub = Hub::new();
+    let message = Message {
+        attachment: Some("a\0b".to_owned()),
+        ..Message::new("AAPL")
+    };
+    let result = hub.publisher.publish_events(&[message.into()]);
+    assert!(matches!(result, Err(Error::InvalidArgument(_))), "{result:?}");
 }
 
 /// Java refuses these orders when they are published, with an `IllegalArgumentException` or, for an order base, a
