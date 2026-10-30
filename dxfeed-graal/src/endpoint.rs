@@ -1,7 +1,8 @@
 //! Endpoints: connections to data sources and hubs.
 
+use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
@@ -10,7 +11,9 @@ use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
+use crate::listener::StateListener;
 use crate::publisher::DXPublisher;
+use crate::subscription::ListenerId;
 
 /// The role of an endpoint (`DXEndpoint.Role`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -51,6 +54,45 @@ impl Role {
             sys::DXFG_ENDPOINT_ROLE_STREAM_PUBLISHER => Role::StreamPublisher,
             sys::DXFG_ENDPOINT_ROLE_LOCAL_HUB => Role::LocalHub,
             other => return Err(Error::InvalidArgument(format!("unknown endpoint role {other}"))),
+        })
+    }
+}
+
+/// The state of an endpoint (`DXEndpoint.State`); see [`DXEndpoint::state`].
+///
+/// It prints as the Java constant: `NOT_CONNECTED`, `CONNECTING`, `CONNECTED` or `CLOSED`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum State {
+    /// Not connected: just created, disconnected, or done reading its files.
+    NotConnected,
+    /// Connecting to its address.
+    Connecting,
+    /// Connected to its address, or listening for connections.
+    Connected,
+    /// Closed: it cannot be used anymore.
+    Closed,
+}
+
+impl State {
+    pub(crate) fn from_sys(state: sys::dxfg_endpoint_state_t) -> Result<Self> {
+        Ok(match state {
+            sys::DXFG_ENDPOINT_STATE_NOT_CONNECTED => State::NotConnected,
+            sys::DXFG_ENDPOINT_STATE_CONNECTING => State::Connecting,
+            sys::DXFG_ENDPOINT_STATE_CONNECTED => State::Connected,
+            sys::DXFG_ENDPOINT_STATE_CLOSED => State::Closed,
+            other => return Err(Error::InvalidArgument(format!("unknown endpoint state {other}"))),
+        })
+    }
+}
+
+impl fmt::Display for State {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            State::NotConnected => "NOT_CONNECTED",
+            State::Connecting => "CONNECTING",
+            State::Connected => "CONNECTED",
+            State::Closed => "CLOSED",
         })
     }
 }
@@ -158,9 +200,22 @@ pub(crate) struct EndpointState {
     pub(crate) publisher: Handle<sys::dxfg_v4_publisher_t>,
     role: Role,
     closed: AtomicBool,
+    state_listeners: Mutex<Vec<(ListenerId, StateListener)>>,
 }
 
 impl EndpointState {
+    fn state_listeners(&self) -> MutexGuard<'_, Vec<(ListenerId, StateListener)>> {
+        crate::lock(&self.state_listeners)
+    }
+
+    fn remove_state_listener(&self, listener: StateListener) -> Result<()> {
+        let (e, l) = (self.endpoint.as_ptr(), listener.as_ptr());
+        // SAFETY: the endpoint and the listener are live.
+        let removed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_removeStateChangeListener(t, e, l) });
+        listener.release();
+        removed
+    }
+
     fn close(&self) -> Result<()> {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
@@ -173,17 +228,26 @@ impl EndpointState {
 
 impl Drop for EndpointState {
     fn drop(&mut self) {
-        if !isolate::exiting() {
-            let _ = self.close();
+        if isolate::exiting() {
+            // No SDK calls from destructors while the process exits; the state listeners leak, as the SDK may still
+            // call their trampoline.
+            return;
         }
+        // The listeners go first, so that no call of them starts once the last owner of the endpoint is gone.
+        let listeners = std::mem::take(&mut *self.state_listeners());
+        for (_, listener) in listeners {
+            let _ = self.remove_state_listener(listener);
+        }
+        let _ = self.close();
     }
 }
 
 /// A connection to a data source or a local hub (`DXEndpoint`).
 ///
 /// An endpoint, its [`DXFeed`], its [`DXPublisher`] and the subscriptions of the feed share it: cloning any of them is
-/// cheap, and the endpoint stays open while one of them lives. Dropping the last one closes the endpoint, without
-/// waiting for the notifications already scheduled. A chain such as
+/// cheap, and the endpoint stays open while one of them lives. Dropping the last one removes the state listeners,
+/// waiting for their running calls as [`remove_state_listener`](Self::remove_state_listener) does, and closes the
+/// endpoint without waiting for the notifications already scheduled. A chain such as
 /// `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();` therefore keeps the endpoint open.
 #[derive(Clone)]
 pub struct DXEndpoint {
@@ -229,6 +293,7 @@ impl DXEndpoint {
                 publisher,
                 role,
                 closed: AtomicBool::new(false),
+                state_listeners: Mutex::new(Vec::new()),
             }),
         })
     }
@@ -288,6 +353,14 @@ impl DXEndpoint {
         Ok(self)
     }
 
+    /// Drops the connection and connects again to the same address; does nothing if the endpoint is not connected or
+    /// connecting.
+    pub fn reconnect(&self) -> Result<()> {
+        let e = self.state.endpoint.as_ptr();
+        // SAFETY: the endpoint is live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_reconnect(t, e) })
+    }
+
     /// Disconnects; the endpoint can connect again.
     pub fn disconnect(&self) -> Result<()> {
         let e = self.state.endpoint.as_ptr();
@@ -295,10 +368,100 @@ impl DXEndpoint {
         call(|t| unsafe { sys::dxfg_v4_DXEndpoint_disconnect(t, e) })
     }
 
+    /// Disconnects and clears the data stored in the endpoint: the last events of its feed and the events its
+    /// publisher has not sent yet. The endpoint can connect again.
+    #[doc(alias = "disconnectAndClear")]
+    pub fn disconnect_and_clear(&self) -> Result<()> {
+        let e = self.state.endpoint.as_ptr();
+        // SAFETY: the endpoint is live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_disconnectAndClear(t, e) })
+    }
+
+    /// Waits until the endpoint is [`State::NotConnected`] or [`State::Closed`]: for a `file:` address, until the file
+    /// is read. The listeners may still be processing its events; [`close_and_await_termination`] waits for them.
+    ///
+    /// Inside a listener it returns [`Error::InCallback`]: it could wait for the notification that is running. With
+    /// a [`ManualExecutor`], keep processing the executor from another thread until it returns.
+    ///
+    /// [`close_and_await_termination`]: Self::close_and_await_termination
+    #[doc(alias = "awaitNotConnected")]
+    pub fn await_not_connected(&self) -> Result<()> {
+        if isolate::in_callback() {
+            return Err(Error::InCallback);
+        }
+        let e = self.state.endpoint.as_ptr();
+        // SAFETY: the endpoint is live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_awaitNotConnected(t, e) })
+    }
+
+    /// Waits until the endpoint has processed the data received or published so far: for a `tape:` address, until
+    /// the published events are written, so call it before closing the endpoint.
+    ///
+    /// Inside a listener it returns [`Error::InCallback`], as [`await_not_connected`](Self::await_not_connected) does.
+    #[doc(alias = "awaitProcessed")]
+    pub fn await_processed(&self) -> Result<()> {
+        if isolate::in_callback() {
+            return Err(Error::InCallback);
+        }
+        let e = self.state.endpoint.as_ptr();
+        // SAFETY: the endpoint is live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_awaitProcessed(t, e) })
+    }
+
+    /// The state of the endpoint.
+    #[doc(alias = "getState")]
+    pub fn state(&self) -> Result<State> {
+        let e = self.state.endpoint.as_ptr();
+        let mut state = sys::DXFG_ENDPOINT_STATE_NOT_CONNECTED;
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getState(t, e, &mut state) })?;
+        State::from_sys(state)
+    }
+
+    /// Adds a listener of state changes; `f` is called with the old and the new state, on a thread of the endpoint's
+    /// executor.
+    ///
+    /// Fast changes are coalesced: `f` may see [`State::NotConnected`] followed by [`State::Connected`]. A panic in `f`
+    /// is caught and printed to stderr; the listener stays active. The listener stays until it is removed or the last
+    /// owner of the endpoint is dropped; a closure that owns the endpoint, its feed or its publisher keeps it open.
+    #[doc(alias = "addStateChangeListener")]
+    pub fn add_state_listener(&self, f: impl FnMut(State, State) + Send + 'static) -> Result<ListenerId> {
+        let listener = StateListener::new(Box::new(f))?;
+        let (e, l) = (self.state.endpoint.as_ptr(), listener.as_ptr());
+        // SAFETY: the endpoint and the listener are live.
+        if let Err(error) = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_addStateChangeListener(t, e, l) }) {
+            listener.release();
+            return Err(error);
+        }
+        let id = ListenerId::next();
+        self.state.state_listeners().push((id, listener));
+        Ok(id)
+    }
+
+    /// Removes a state listener. Called outside listeners, it returns once no call of the listener runs; called from a
+    /// listener, it returns at once and the listener is released in the background. So do not hold a lock that the
+    /// closure takes while removing it from another thread.
+    ///
+    /// Returns [`Error::InvalidArgument`] if the listener is not a state listener of this endpoint.
+    #[doc(alias = "removeStateChangeListener")]
+    pub fn remove_state_listener(&self, id: ListenerId) -> Result<()> {
+        let listener = {
+            let mut listeners = self.state.state_listeners();
+            let index = listeners
+                .iter()
+                .position(|(i, _)| *i == id)
+                .ok_or_else(|| Error::InvalidArgument(format!("{id:?} is not a state listener of this endpoint")))?;
+            listeners.swap_remove(index).1
+        };
+        self.state.remove_state_listener(listener)
+    }
+
     /// Closes the endpoint for all its handles; it cannot be used afterwards. Closing again does nothing.
     ///
     /// Notifications already scheduled may still be delivered after it returns; see
-    /// [`close_and_await_termination`](Self::close_and_await_termination).
+    /// [`close_and_await_termination`](Self::close_and_await_termination). Dropping the last owner of the endpoint
+    /// right after `close` removes the state listeners before they see [`State::Closed`]; to see it, use
+    /// `close_and_await_termination`.
     pub fn close(&self) -> Result<()> {
         self.state.close()
     }

@@ -81,7 +81,8 @@
 //! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and printed to stderr.
 //!
 //! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running
-//! calls, except inside a callback, so do not hold a lock that a closure takes while doing that from another thread.
+//! calls, except inside a callback, and so does dropping the last owner of an endpoint with state listeners. So do not
+//! hold a lock that a closure takes while doing that from another thread.
 //!
 //! # Errors
 //!
@@ -117,7 +118,7 @@ mod publisher;
 mod subscription;
 pub mod system;
 
-pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role};
+pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, Result};
 #[doc(hidden)]
 pub use event::sdk_event::live_events;

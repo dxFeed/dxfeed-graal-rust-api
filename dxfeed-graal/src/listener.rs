@@ -1,4 +1,4 @@
-//! Event listeners: the C trampoline and the release thread.
+//! Listeners of events and of endpoint states: their C trampolines and the release thread.
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -9,43 +9,71 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
+use crate::endpoint::State;
 use crate::error::Result;
 use crate::event::Events;
-use crate::handle::Handle;
+use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, CallbackScope};
 
-/// The closure of a listener.
-pub(crate) type Closure = Box<dyn FnMut(Events<'_>) + Send>;
+/// The closure of an event listener.
+pub(crate) type EventClosure = dyn FnMut(Events<'_>) + Send;
 
-/// What the trampoline needs; shared by the subscription, the SDK (`user_data`) and running calls.
-pub(crate) struct ListenerState {
-    closure: Mutex<Closure>,
+/// The closure of an endpoint state listener: it receives the old and the new state.
+pub(crate) type StateClosure = dyn FnMut(State, State) + Send;
+
+/// A listener of a subscription.
+pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
+
+/// A state listener of an endpoint.
+pub(crate) type StateListener = Listener<sys::dxfg_v4_endpoint_state_change_listener_t, StateClosure>;
+
+/// What a trampoline needs; shared by the owner of the listener, the SDK (`user_data`) and running calls.
+struct ListenerState<C: ?Sized> {
+    closure: Mutex<Box<C>>,
     /// The id of the thread running the closure, `0` when none.
     running: AtomicU64,
 }
 
-/// A listener added to a subscription: its SDK handle and the SDK's strong reference to its state.
-pub(crate) struct Listener {
-    handle: Handle<sys::dxfg_v4_feed_event_listener_t>,
-    state: *const ListenerState,
+/// A listener added to a subscription or an endpoint: its SDK handle and the SDK's strong reference to its state.
+pub(crate) struct Listener<H: SdkHandle, C: ?Sized> {
+    handle: Handle<H>,
+    state: *const ListenerState<C>,
 }
 
 // SAFETY: the handle is Send, and the state is an `Arc` of a Sync value whose closure is Send.
-unsafe impl Send for Listener {}
+unsafe impl<H: SdkHandle, C: ?Sized + Send> Send for Listener<H, C> {}
 
-impl Listener {
-    pub(crate) fn new(closure: Closure) -> Result<Self> {
+impl EventListener {
+    pub(crate) fn new(closure: Box<EventClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: `event_trampoline` matches the listener function type and `user_data` stays valid until the
+            // listener is released (see `release`). The out-pointer is valid for writes.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_DXFeedEventListener_new(t, Some(event_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+impl StateListener {
+    pub(crate) fn new(closure: Box<StateClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `state_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_PropertyChangeListener_new(t, Some(state_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listener<H, C> {
+    /// Creates the listener with `new`, which gets the `user_data` of the trampoline.
+    fn create(closure: Box<C>, new: impl FnOnce(*mut c_void) -> Result<Handle<H>>) -> Result<Self> {
         let state = Arc::into_raw(Arc::new(ListenerState {
             closure: Mutex::new(closure),
             running: AtomicU64::new(0),
         }));
-        let user_data = state as *mut c_void;
-        // SAFETY: `trampoline` matches the listener function type and `user_data` stays valid until the listener is
-        // released (see `release`). The out-pointer is valid for writes.
-        let handle = Handle::create(|t, out| unsafe {
-            sys::dxfg_v4_DXFeedEventListener_new(t, Some(trampoline), user_data, out)
-        });
-        match handle {
+        match new(state as *mut c_void) {
             Ok(handle) => Ok(Listener { handle, state }),
             Err(e) => {
                 // SAFETY: the SDK did not take the reference, so it is ours to drop.
@@ -55,7 +83,7 @@ impl Listener {
         }
     }
 
-    pub(crate) fn as_ptr(&self) -> *mut sys::dxfg_v4_feed_event_listener_t {
+    pub(crate) fn as_ptr(&self) -> *mut H {
         self.handle.as_ptr()
     }
 
@@ -136,15 +164,53 @@ fn thread_id() -> u64 {
     })
 }
 
-unsafe extern "C" fn trampoline(
+unsafe extern "C" fn event_trampoline(
     thread: *mut sys::graal_isolatethread_t,
     events: *mut sys::dxfg_event_type_list,
     user_data: *mut c_void,
 ) {
+    // SAFETY: `user_data` is the state of an event listener, and the SDK keeps the list alive until this call returns.
+    unsafe {
+        dispatch::<EventClosure>(thread, user_data, "an event listener", |closure| {
+            closure(Events::new(events))
+        })
+    };
+}
+
+unsafe extern "C" fn state_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    old_state: sys::dxfg_endpoint_state_t,
+    new_state: sys::dxfg_endpoint_state_t,
+    user_data: *mut c_void,
+) {
+    // A code this crate does not know cannot be reported; the SDK has no other states.
+    let (Ok(old_state), Ok(new_state)) = (State::from_sys(old_state), State::from_sys(new_state)) else {
+        return;
+    };
+    // SAFETY: `user_data` is the state of a state listener.
+    unsafe {
+        dispatch::<StateClosure>(thread, user_data, "an endpoint state listener", |closure| {
+            closure(old_state, new_state)
+        })
+    };
+}
+
+/// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `what` names the
+/// listener in messages.
+///
+/// # Safety
+///
+/// `user_data` must be the state of a live listener whose closure type is `C`.
+unsafe fn dispatch<C: ?Sized>(
+    thread: *mut sys::graal_isolatethread_t,
+    user_data: *mut c_void,
+    what: &str,
+    call: impl FnOnce(&mut C),
+) {
     if isolate::exiting() {
         return;
     }
-    let state = user_data as *const ListenerState;
+    let state = user_data as *const ListenerState<C>;
     // SAFETY: the SDK holds a strong reference until the listener is released, which waits for this call; this call
     // takes its own for its duration, so dropping the subscription from the closure cannot free the state under it.
     let state = unsafe {
@@ -157,14 +223,12 @@ unsafe extern "C" fn trampoline(
         if state.running.load(Ordering::Acquire) == me {
             // A nested call on the thread that runs this listener. The SDK serializes the calls of a subscription, so
             // this is a guard against a deadlock on the closure lock, not an expected path.
-            eprintln!("dxfeed-graal: skipped a nested call of an event listener on the thread that runs it");
+            eprintln!("dxfeed-graal: skipped a nested call of {what} on the thread that runs it");
             return;
         }
         let mut closure = crate::lock(&state.closure);
         state.running.store(me, Ordering::Release);
-        // SAFETY: the SDK keeps the list alive until this call returns.
-        let events = unsafe { Events::new(events) };
-        let result = panic::catch_unwind(AssertUnwindSafe(|| closure(events)));
+        let result = panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure)));
         state.running.store(0, Ordering::Release);
         if let Err(payload) = result {
             let message = payload
@@ -172,7 +236,7 @@ unsafe extern "C" fn trampoline(
                 .copied()
                 .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
                 .unwrap_or("unknown panic");
-            eprintln!("dxfeed-graal: an event listener panicked: {message}");
+            eprintln!("dxfeed-graal: {what} panicked: {message}");
         }
     }));
 }

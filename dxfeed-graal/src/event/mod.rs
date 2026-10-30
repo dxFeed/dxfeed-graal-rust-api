@@ -98,6 +98,9 @@ trait Table {
 macro_rules! event_types {
     ($( $(#[$doc:meta])* $name:ident($view:ident) [$($trait_:ident)*], )*) => {
         /// An event type a subscription can receive.
+        ///
+        /// It prints as and parses from the simple name of its Java class, such as `Quote` or `TimeAndSale`:
+        /// `"Quote".parse::<EventType>()`.
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
         #[non_exhaustive]
         pub enum EventType {
@@ -105,9 +108,39 @@ macro_rules! event_types {
         }
 
         impl EventType {
+            /// Every event type.
+            pub const ALL: &'static [EventType] = &[ $( EventType::$name, )* ];
+
+            /// The simple name of the Java class of the event type, such as `Quote` or `TimeAndSale`.
+            pub fn name(self) -> &'static str {
+                match self {
+                    $( EventType::$name => stringify!($name), )*
+                }
+            }
+
             pub(crate) fn to_sys(self) -> sys::dxfg_event_clazz_t {
                 match self {
                     $( EventType::$name => <$name as Table>::CLASS, )*
+                }
+            }
+        }
+
+        impl Display for EventType {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                f.write_str(self.name())
+            }
+        }
+
+        impl std::str::FromStr for EventType {
+            type Err = Error;
+
+            /// Parses the simple name of the Java class of an event type; the case matters.
+            ///
+            /// Returns [`Error::InvalidArgument`] for any other string.
+            fn from_str(name: &str) -> Result<Self> {
+                match name {
+                    $( stringify!($name) => Ok(EventType::$name), )*
+                    _ => Err(Error::InvalidArgument(format!("unknown event type {name:?}"))),
                 }
             }
         }

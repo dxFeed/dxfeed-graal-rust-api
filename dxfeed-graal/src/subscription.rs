@@ -11,11 +11,20 @@ use crate::event::{Event, Events, SubscriptionItem};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
-use crate::listener::Listener;
+use crate::listener::EventListener;
 
-/// Identifies a listener added by [`DXFeedSubscription::add_event_listener`].
+/// Identifies a listener added by [`DXFeedSubscription::add_event_listener`] or
+/// [`DXEndpoint::add_state_listener`](crate::DXEndpoint::add_state_listener).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ListenerId(u64);
+
+impl ListenerId {
+    /// A new id, unique in the process.
+    pub(crate) fn next() -> Self {
+        static NEXT: AtomicU64 = AtomicU64::new(1);
+        ListenerId(NEXT.fetch_add(1, Ordering::Relaxed))
+    }
+}
 
 /// A subscription of a [`DXFeed`] to events for some symbols (`DXFeedSubscription`).
 ///
@@ -27,7 +36,7 @@ pub struct ListenerId(u64);
 /// listeners, so do not hold a lock their closures take while dropping it. It keeps its feed's endpoint open.
 pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
-    listeners: Mutex<Vec<(ListenerId, Listener)>>,
+    listeners: Mutex<Vec<(ListenerId, EventListener)>>,
     // Dropped last: it may close the endpoint.
     _feed: DXFeed,
     _item: PhantomData<fn() -> E>,
@@ -51,15 +60,14 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     /// the call only: copy what you keep with `to_owned()`.
     #[doc(alias = "addEventListener")]
     pub fn add_event_listener(&self, mut f: impl FnMut(Events<'_, E>) + Send + 'static) -> Result<ListenerId> {
-        static NEXT: AtomicU64 = AtomicU64::new(1);
-        let listener = Listener::new(Box::new(move |events: Events<'_>| f(events.typed())))?;
+        let listener = EventListener::new(Box::new(move |events: Events<'_>| f(events.typed())))?;
         let (s, l) = (self.handle.as_ptr(), listener.as_ptr());
         // SAFETY: the subscription and the listener are live.
         if let Err(e) = call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addEventListener(t, s, l) }) {
             listener.release();
             return Err(e);
         }
-        let id = ListenerId(NEXT.fetch_add(1, Ordering::Relaxed));
+        let id = ListenerId::next();
         self.lock().push((id, listener));
         Ok(id)
     }
@@ -109,11 +117,11 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })
     }
 
-    fn lock(&self) -> MutexGuard<'_, Vec<(ListenerId, Listener)>> {
+    fn lock(&self) -> MutexGuard<'_, Vec<(ListenerId, EventListener)>> {
         crate::lock(&self.listeners)
     }
 
-    fn remove(&self, listener: Listener) -> Result<()> {
+    fn remove(&self, listener: EventListener) -> Result<()> {
         let (s, l) = (self.handle.as_ptr(), listener.as_ptr());
         // SAFETY: the subscription and the listener are live.
         let removed = call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeEventListener(t, s, l) });

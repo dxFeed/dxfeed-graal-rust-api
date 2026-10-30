@@ -193,8 +193,9 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   The calls of one listener do not overlap. The events are valid during the call only: copy what you keep with
   `to_owned()`. A panic in a closure is caught and printed to stderr; the listener stays active.
 - Add listeners before symbols.
-- Removing a listener or dropping its subscription waits for its running calls (inside a callback it does not), so do
-  not hold a lock that a closure takes while doing that from another thread.
+- Removing a listener or dropping its subscription waits for its running calls (inside a callback it does not), and so
+  does dropping the last owner of an endpoint with state listeners. So do not hold a lock that a closure takes while
+  doing that from another thread.
 
 ### Closing and Exit
 
@@ -222,6 +223,10 @@ without its required arguments prints its usage.
 | [quote_and_trade](dxfeed-graal/examples/quote_and_trade.rs) | API | `QuoteAndTradeSample` | Receives quotes and trades of the default feed through listeners, a promise and last-trade snapshots | `<SYMBOL> [ADDRESS]` |
 | [request_profile](dxfeed-graal/examples/request_profile.rs) | API | `RequestProfileSample` | Prints the profile of a symbol and exits | `<ADDRESS> <SYMBOL>` |
 | [last_event_console](dxfeed-graal/examples/last_event_console.rs) | Console | `LastEventConsoleSample` | Prints the last quote, trade, summary and profile of each symbol typed in the console | `[ADDRESS]` |
+| [reconnect](dxfeed-graal/examples/reconnect.rs) | API | `ReconnectSample` | Prints the state changes of an endpoint while it connects, disconnects and connects again | `[ADDRESS]` |
+| [auth](dxfeed-graal/examples/auth.rs) | API | `AuthSample` | Connects the default endpoint with a new random login token every 10 seconds | `[ADDRESS]` |
+| [write_tape_file](dxfeed-graal/examples/write_tape_file.rs) | File | `WriteTapeFileSample` | Publishes two quotes into the text tape file `WriteTapeFile.out.txt` | none |
+| [file_parser](dxfeed-graal/examples/file_parser.rs) | File | `FileParserSample` | Prints the events of the given types and symbols from a tape file | `<FILE> <TYPES> <SYMBOLS>`, for example `WriteTapeFile.out.txt Quote TEST1,TEST2` |
 
 For example:
 
@@ -278,6 +283,8 @@ cargo run --example print_quote_events -- AAPL
 - [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_event_promise` and `Promise`
 - [x] Events printed in the format of Java's `toString`
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
+- [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
+- [x] Event type names: `EventType::name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [ ] Time series subscriptions, models, IPF, schedules, other symbol types
 
