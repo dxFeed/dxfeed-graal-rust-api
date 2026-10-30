@@ -5,7 +5,9 @@
 //! events are cached in memory and snapshots are taken from there; a symbol outside the cache is requested from the
 //! uplink.
 //!
-//! Usage: `cargo run --example last_event_console -- [ADDRESS]`, by default `demo.dxfeed.com:7300`.
+//! Usage: `cargo run --example last_event_console -- [ADDRESS]`. Without ADDRESS the
+//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
+//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
 
 use std::fmt::Display;
 use std::io::BufRead;
@@ -13,11 +15,10 @@ use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{LastingEvent, Profile, Quote, Summary, Trade};
-use dxfeed_graal::{DXEndpoint, Promise};
+use dxfeed_graal::{DXEndpoint, Promise, system};
 
 fn main() -> ExitCode {
-    let address = std::env::args().nth(1).unwrap_or_else(|| "demo.dxfeed.com:7300".into());
-    match run(&address) {
+    match run(std::env::args().nth(1)) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -26,16 +27,16 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(address: &str) -> dxfeed_graal::Result<()> {
+fn run(address: Option<String>) -> dxfeed_graal::Result<()> {
     // The permanent subscription property `dxfeed.qd.subscribe.ticker` holds a comma-separated list of records (the
     // composite events have the names of their event types), a space and a comma-separated list of symbols. Here the
     // symbols are those of an instrument profile file: a URL containing ".ipf".
     let records = "Quote,Trade,Summary,Profile";
     let symbols = "https://dxfeed.s3.amazonaws.com/masterdata/ipf/demo/mux-demo.ipf.zip";
-    // With `dxfeed.address` set, the endpoint connects when it is built.
+    // With `dxfeed.address` set, the endpoint connects when it is built; the property may also be given to the builder.
+    system::set_property("dxfeed.address", &address_or_default(address)?)?;
     let endpoint = DXEndpoint::new_builder()
         .with_property("dxfeed.qd.subscribe.ticker", &format!("{records} {symbols}"))
-        .with_property("dxfeed.address", address)
         .build()?;
     let feed = endpoint.feed();
 
@@ -99,4 +100,13 @@ fn has_exchange_code(symbol: &str) -> bool {
     };
     let bytes = base.as_bytes();
     bytes.len() >= 2 && bytes[bytes.len() - 2] == b'&' && bytes[bytes.len() - 1].is_ascii_alphabetic()
+}
+
+/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
+/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
+fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
+    match address {
+        Some(address) => Ok(address),
+        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
+    }
 }

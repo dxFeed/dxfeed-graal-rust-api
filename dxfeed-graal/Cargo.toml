@@ -16,3 +16,37 @@ dxfeed-graal-sys = { path = "../dxfeed-graal-sys" }
 
 [lints]
 workspace = true
+
+# The samples are grouped like the samples of the other dxFeed APIs.
+
+[[example]]
+name = "auth"
+path = "examples/api/auth.rs"
+
+[[example]]
+name = "print_quote_events"
+path = "examples/api/print_quote_events.rs"
+
+[[example]]
+name = "quote_and_trade"
+path = "examples/api/quote_and_trade.rs"
+
+[[example]]
+name = "reconnect"
+path = "examples/api/reconnect.rs"
+
+[[example]]
+name = "request_profile"
+path = "examples/api/request_profile.rs"
+
+[[example]]
+name = "last_event_console"
+path = "examples/console/last_event_console.rs"
+
+[[example]]
+name = "file_parser"
+path = "examples/file/file_parser.rs"
+
+[[example]]
+name = "write_tape_file"
+path = "examples/file/write_tape_file.rs"

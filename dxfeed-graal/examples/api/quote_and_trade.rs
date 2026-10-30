@@ -2,7 +2,9 @@
 //! the other dxFeed APIs: a typed listener, a last-event promise, an untyped listener for two event types and
 //! snapshots of the last trade. Runs until the process is killed.
 //!
-//! Usage: `cargo run --example quote_and_trade -- <SYMBOL> [ADDRESS]`, by default `demo.dxfeed.com:7300`.
+//! Usage: `cargo run --example quote_and_trade -- <SYMBOL> [ADDRESS]`. Without ADDRESS the
+//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
+//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
 
 use std::process::ExitCode;
 use std::thread;
@@ -16,11 +18,10 @@ fn main() -> ExitCode {
     let Some(symbol) = args.next() else {
         eprintln!("Usage: quote_and_trade <symbol> [address]");
         eprintln!("    symbol  - a security symbol, such as IBM, AAPL or SPX");
-        eprintln!("    address - the address to connect to, demo.dxfeed.com:7300 by default");
+        eprintln!("    address - the address to connect to; dxfeed.address of dxfeed.system.properties by default");
         return ExitCode::from(2);
     };
-    let address = args.next().unwrap_or_else(|| "demo.dxfeed.com:7300".into());
-    match run(&symbol, &address) {
+    match run(&symbol, args.next()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -29,10 +30,9 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(symbol: &str, address: &str) -> dxfeed_graal::Result<()> {
-    // The default feed connects to `dxfeed.address` when it is first used; the other APIs read it from the
-    // `dxfeed.system.properties` file.
-    system::set_property("dxfeed.address", address)?;
+fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
+    // The default feed connects to `dxfeed.address` when it is first used.
+    system::set_property("dxfeed.address", &address_or_default(address)?)?;
     let feed = DXFeed::get_instance()?;
     // Dropping a subscription closes it, so both are kept until the end.
     let _quotes = test_quote_listener(feed, symbol)?;
@@ -84,5 +84,14 @@ fn test_trade_snapshots(feed: &DXFeed, symbol: &str) -> dxfeed_graal::Result<()>
     loop {
         println!("LAST: {}", feed.get_last_event(&trade)?);
         thread::sleep(Duration::from_secs(1));
+    }
+}
+
+/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
+/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
+fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
+    match address {
+        Some(address) => Ok(address),
+        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
     }
 }

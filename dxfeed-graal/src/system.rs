@@ -1,5 +1,11 @@
 //! Java system properties of the SDK and its shutdown.
 //!
+//! When the SDK starts, as in the C++ and .NET APIs, it sets the system properties of the `dxfeed.system.properties`
+//! file in the current directory, or of the file named by the `DXFEED_dxfeed.system.properties` environment variable,
+//! and then those of the `DXFEED_<property>` environment variables, which override the file. The file holds `key=value`
+//! lines read as the C++ API reads them: `#` and `;` start comments, also after a value, a key under a `[section]` line
+//! is named `section:key`, and a repeated key keeps its first value. A missing file is not an error.
+//!
 //! Most properties take effect only when set before the first endpoint is created.
 
 use std::ptr;

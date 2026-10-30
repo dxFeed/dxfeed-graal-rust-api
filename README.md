@@ -26,6 +26,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Building](#building)
 - [Running and Deployment](#running-and-deployment)
 - [Usage](#usage)
+  * [System Properties](#system-properties)
   * [Threads and Listeners](#threads-and-listeners)
   * [Closing and Exit](#closing-and-exit)
 - [Samples](#samples)
@@ -183,8 +184,31 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   `get_last_event(&quote)`, or from the uplink with `get_last_event_promise::<Quote>("AAPL")?.wait(timeout)`. A wait
   that times out returns `Error::Timeout` and cancels the request; dropping a promise does not cancel it, as in Java.
 - `DXFeed::get_instance()` and `DXEndpoint::get_instance()` return the default feed and endpoint of the process,
-  configured by the `dxfeed.properties` file and the system properties (`system::set_property("dxfeed.address", ...)`)
-  on first use.
+  configured on first use by the `dxfeed.properties` file and the system properties.
+
+### System Properties
+
+As in the C++ and .NET APIs, the system properties are set when the SDK starts: first from the
+`dxfeed.system.properties` file in the current directory, or the file named by the `DXFEED_dxfeed.system.properties`
+environment variable, and then from the `DXFEED_<property>` environment variables, which override the file. The file
+holds `key=value` lines; `#` and `;` start comments, also after a value:
+
+```properties
+dxfeed.address=demo.dxfeed.com:7300
+```
+
+The same property as an environment variable, in a POSIX shell and in PowerShell:
+
+```bash
+env DXFEED_dxfeed.address=demo.dxfeed.com:7300 ./my-app
+```
+
+```powershell
+${env:DXFEED_dxfeed.address} = "demo.dxfeed.com:7300"
+```
+
+`system::set_property("dxfeed.address", ...)` sets a property in code. Most properties take effect only when they are
+set before the first endpoint is created.
 
 ### Threads and Listeners
 
@@ -213,26 +237,115 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
 
 ## Samples
 
-The samples are Cargo examples named after the samples of the C++ and .NET APIs, and run with
-`cargo run --example <name> -- <arguments>`. An address argument defaults to `demo.dxfeed.com:7300`; a sample started
-without its required arguments prints its usage.
+The samples follow the samples of the dxFeed Java API, as those of the C++ and .NET APIs do, and are Cargo examples
+grouped in [dxfeed-graal/examples](dxfeed-graal/examples). Run a sample with `cargo run --example <name> -- <arguments>`; started without its required
+arguments, it prints its usage.
 
-| Sample | Group | C++ / .NET sample | What it does | Arguments |
-|---|---|---|---|---|
-| [print_quote_events](dxfeed-graal/examples/print_quote_events.rs) | API | `PrintQuoteEventsSample` | Prints the quotes of a symbol until Enter is pressed | `[SYMBOL] [ADDRESS]`, `AAPL` by default |
-| [quote_and_trade](dxfeed-graal/examples/quote_and_trade.rs) | API | `QuoteAndTradeSample` | Receives quotes and trades of the default feed through listeners, a promise and last-trade snapshots | `<SYMBOL> [ADDRESS]` |
-| [request_profile](dxfeed-graal/examples/request_profile.rs) | API | `RequestProfileSample` | Prints the profile of a symbol and exits | `<ADDRESS> <SYMBOL>` |
-| [last_event_console](dxfeed-graal/examples/last_event_console.rs) | Console | `LastEventConsoleSample` | Prints the last quote, trade, summary and profile of each symbol typed in the console | `[ADDRESS]` |
-| [reconnect](dxfeed-graal/examples/reconnect.rs) | API | `ReconnectSample` | Prints the state changes of an endpoint while it connects, disconnects and connects again | `[ADDRESS]` |
-| [auth](dxfeed-graal/examples/auth.rs) | API | `AuthSample` | Connects the default endpoint with a new random login token every 10 seconds | `[ADDRESS]` |
-| [write_tape_file](dxfeed-graal/examples/write_tape_file.rs) | File | `WriteTapeFileSample` | Publishes two quotes into the text tape file `WriteTapeFile.out.txt` | none |
-| [file_parser](dxfeed-graal/examples/file_parser.rs) | File | `FileParserSample` | Prints the events of the given types and symbols from a tape file | `<FILE> <TYPES> <SYMBOLS>`, for example `WriteTapeFile.out.txt Quote TEST1,TEST2` |
-
-For example:
+A sample that connects to a feed takes the address as an optional last argument (`request_profile` takes it first, as
+the original does):
 
 ```bash
+cargo run --example print_quote_events -- AAPL demo.dxfeed.com:7300
+```
+
+Without it, the address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory, such as
+the [one of the samples](dxfeed-graal/examples/dxfeed.system.properties):
+
+```bash
+cd dxfeed-graal/examples
 cargo run --example print_quote_events -- AAPL
 ```
+
+or of the `DXFEED_dxfeed.address` environment variable (see [System Properties](#system-properties)), and
+`demo.dxfeed.com:7300` otherwise:
+
+```bash
+env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_events -- AAPL
+```
+
+### API
+
+- [x] [auth](dxfeed-graal/examples/api/auth.rs)
+  demonstrates how to connect to an endpoint that requires an authentication token, subscribe to market data events,
+  and handle periodic token updates
+- [ ] connect
+  demonstrates how to connect to the endpoint and subscribe to various market events
+- [x] [print_quote_events](dxfeed-graal/examples/api/print_quote_events.rs)
+  is a simple demonstration of how to subscribe to the `Quote` event, using the `DXFeed` instance singleton and the
+  `dxfeed.system.properties` file
+- [ ] publish_profiles
+  is a simple demonstration of how to publish market events
+- [x] [request_profile](dxfeed-graal/examples/api/request_profile.rs)
+  using an address like `localhost:7700` and a symbol like `A:TEST`, connects to the running `publish_profiles`
+  sample, prints the profile of the symbol and exits
+- [x] [quote_and_trade](dxfeed-graal/examples/api/quote_and_trade.rs)
+  demonstrates how to create multiple event listeners and subscribe to `Quote` and `Trade` events
+- [x] [reconnect](dxfeed-graal/examples/api/reconnect.rs)
+  demonstrates how to connect to an endpoint, subscribe to market data events, and handle reconnections and
+  re-subscribing
+
+### Candle
+
+- [ ] candle
+  demonstrates how to subscribe to `Candle` events from a time with the candle symbol attributes
+- [ ] candle_data
+  demonstrates how to query the CandleData service using the `HistoryEndpoint`
+- [ ] fetch_daily_candles
+  demonstrates how to fetch the candles of the last N days for a symbol
+
+### Console
+
+- [x] [last_event_console](dxfeed-graal/examples/console/last_event_console.rs)
+  demonstrates how to subscribe to various market events with the dxFeed API, cache them in memory, and take
+  snapshots of these events based on user input
+
+### File
+
+- [ ] convert_tape_file
+  demonstrates how to convert one tape file to another tape file with optional intermediate processing or filtering
+- [x] [file_parser](dxfeed-graal/examples/file/file_parser.rs)
+  demonstrates how to read events from a tape file
+- [x] [write_tape_file](dxfeed-graal/examples/file/write_tape_file.rs)
+  demonstrates how to write events to a tape file
+
+### IPF
+
+- [ ] ipf
+  is a simple demonstration of how to get instrument profiles
+- [ ] ipf_live
+  is a simple demonstration of how to get live updates of instrument profiles
+- [ ] option_chain
+  demonstrates how to build option chains, and prints quotes for nearby option strikes
+
+### Model
+
+- [ ] simple_order_book
+  demonstrates how to build an order book of a symbol and an order source with `IndexedEventTxModel`
+- [ ] inc_order_snapshot
+  demonstrates how to subscribe to the `Order` event and handle snapshots and updates
+- [ ] multiple_market_depth
+  demonstrates how to use the `MarketDepthModel` to manage and display order books for multiple symbols
+- [ ] price_level_book
+  demonstrates how to compile a price level book (market by price) that aggregates individual orders (market by
+  order)
+- [ ] market_depth_model
+  demonstrates how to use the `MarketDepthModel`
+
+### Schedule
+
+- [ ] schedule
+  demonstrates how to get various scheduling information for instruments
+
+### OnDemand
+
+- [ ] on_demand
+  demonstrates how to use the dxFeed on-demand history data replay service API
+
+### ORCS
+
+- [ ] price_level_service_client
+  demonstrates how to get the price levels and the quotes of a symbol for a period from the Order Reconstruction
+  Service (ORCS) with `PriceLevelService`
 
 [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
 [Running and Deployment](#running-and-deployment)).
@@ -278,7 +391,8 @@ cargo run --example print_quote_events -- AAPL
 
 ### Features
 
-- [x] System properties, the default endpoint and feed (`get_instance`)
+- [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
+  endpoint and feed (`get_instance`)
 - [x] Typed and untyped subscriptions to string symbols, listeners, publishing
 - [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_event_promise` and `Promise`
 - [x] Events printed in the format of Java's `toString`
@@ -302,6 +416,8 @@ rebuild does not copy the library again:
 ```bash
 cargo run -p xtask -- check-deploy
 ```
+
+The tests expect no `DXFEED_*` environment variables: the SDK reads them as system properties in every test process.
 
 ## License
 

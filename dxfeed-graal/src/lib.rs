@@ -53,7 +53,8 @@
 //! ```
 //!
 //! The default feed of the process, [`DXFeed::get_instance`], connects to the address in the `dxfeed.address` system
-//! property or in the `dxfeed.properties` file:
+//! property or in the `dxfeed.properties` file. System properties come from the code, from the
+//! `dxfeed.system.properties` file and from the `DXFEED_*` environment variables (see [`system`]):
 //!
 //! ```no_run
 //! use dxfeed_graal::event::Quote;

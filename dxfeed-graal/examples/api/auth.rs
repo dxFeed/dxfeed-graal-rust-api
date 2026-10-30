@@ -1,7 +1,9 @@
 //! Connects the default endpoint with a new random login token every 10 seconds and prints its state changes and
 //! quotes, like `AuthSample` of the other dxFeed APIs. Each new token makes the endpoint connect again.
 //!
-//! Usage: `cargo run --example auth -- [ADDRESS]`, by default `demo.dxfeed.com:7300`.
+//! Usage: `cargo run --example auth -- [SYMBOL] [ADDRESS]`, by default `ETH/USD:GDAX`. Without ADDRESS the
+//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
+//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
 
 use std::collections::hash_map::RandomState;
 use std::hash::{BuildHasher, Hasher};
@@ -11,11 +13,12 @@ use std::thread;
 use std::time::Duration;
 
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{DXEndpoint, DXFeed};
+use dxfeed_graal::{DXEndpoint, DXFeed, system};
 
 fn main() -> ExitCode {
-    let address = std::env::args().nth(1).unwrap_or_else(|| "demo.dxfeed.com:7300".into());
-    match run(&address) {
+    let mut args = std::env::args().skip(1);
+    let symbol = args.next().unwrap_or_else(|| "ETH/USD:GDAX".into());
+    match run(&symbol, args.next()) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("error: {error}");
@@ -24,7 +27,8 @@ fn main() -> ExitCode {
     }
 }
 
-fn run(address: &str) -> dxfeed_graal::Result<()> {
+fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
+    let address = &address_or_default(address)?;
     let endpoint = DXEndpoint::get_instance()?;
     endpoint.add_state_listener(|old, new| println!("Connection state changed: {old}->{new}"))?;
 
@@ -34,7 +38,7 @@ fn run(address: &str) -> dxfeed_graal::Result<()> {
             println!("{quote}");
         }
     })?;
-    subscription.add_symbols(["ETH/USD:GDAX"])?;
+    subscription.add_symbols([symbol])?;
 
     // Enter or the end of input stops the program.
     let (stop, stopped) = mpsc::channel();
@@ -68,4 +72,13 @@ fn random_token() -> String {
             letter as char
         })
         .collect()
+}
+
+/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
+/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
+fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
+    match address {
+        Some(address) => Ok(address),
+        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
+    }
 }

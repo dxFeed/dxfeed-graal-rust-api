@@ -2,11 +2,12 @@
 //!
 //! One isolate is created on first use and never torn down: tear-down waits for every Java thread and can hang. A
 //! thread is attached on its first SDK call and detached by a thread-local guard when it exits, unless the process is
-//! exiting.
+//! exiting. Right after its creation, the isolate gets the system properties of the `dxfeed.system.properties` file and
+//! of the `DXFEED_*` environment variables, as in the C++ and .NET APIs.
 
 use std::borrow::Cow;
 use std::cell::Cell;
-use std::ffi::{CStr, c_char, c_int};
+use std::ffi::{CStr, CString, c_char, c_int};
 use std::ptr;
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -134,12 +135,74 @@ fn isolate() -> Result<*mut sys::graal_isolate_t> {
         // SAFETY: `on_exit` is a plain function that lives as long as the process.
         unsafe { atexit(on_exit) };
         own(thread);
+        load_system_properties(thread);
         Ok(Isolate(isolate))
     });
     match isolate {
         Ok(isolate) => Ok(isolate.0),
         Err(code) => Err(Error::Graal(*code)),
     }
+}
+
+/// The prefix of the environment variables that become system properties.
+const ENV_PREFIX: &str = "DXFEED_";
+
+/// The file of system properties read from the current directory, unless `DXFEED_dxfeed.system.properties` names
+/// another one.
+const SYSTEM_PROPERTIES_FILE: &str = "dxfeed.system.properties";
+
+/// Sets as system properties the entries of the system properties file and then the `DXFEED_*` environment variables
+/// without the prefix (`__` in a name becomes `:`), which override the file. A missing file, an entry that cannot be
+/// set or a variable that is not Unicode is skipped, as in the C++ and .NET APIs.
+fn load_system_properties(thread: Thread) {
+    let file = std::env::var_os(format!("{ENV_PREFIX}{SYSTEM_PROPERTIES_FILE}"))
+        .unwrap_or_else(|| SYSTEM_PROPERTIES_FILE.into());
+    let mut properties = std::fs::read(file)
+        .map(|bytes| parse_properties(String::from_utf8_lossy(&bytes).trim_start_matches('\u{feff}')))
+        .unwrap_or_default();
+    properties.extend(std::env::vars_os().filter_map(|(name, value)| {
+        let key = name.to_str()?.replace("__", ":").strip_prefix(ENV_PREFIX)?.to_owned();
+        Some((key, value.into_string().ok()?))
+    }));
+    for (key, value) in properties {
+        let (Ok(key), Ok(value)) = (CString::new(key), CString::new(value)) else {
+            continue;
+        };
+        // SAFETY: `thread` is the calling thread's isolate thread; both strings are NUL-terminated and outlive the call.
+        let code = unsafe { sys::dxfg_v4_system_set_property(thread, key.as_ptr(), value.as_ptr()) };
+        // A failure is skipped; `check` clears its exception.
+        let _ = check(thread, code);
+    }
+}
+
+/// The `key=value` entries of an INI text, in order, read as the C++ API reads them: `#` and `;` start comments, also
+/// after a value; a key under a `[section]` line is named `section:key`; a repeated key keeps its first value; keys and
+/// values are trimmed.
+fn parse_properties(text: &str) -> Vec<(String, String)> {
+    let mut section = String::new();
+    let mut entries: Vec<(String, String)> = Vec::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() || line.starts_with(['#', ';']) {
+            continue;
+        }
+        if let Some(name) = line.strip_prefix('[').and_then(|line| line.strip_suffix(']')) {
+            section = name.trim().to_owned();
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = match (section.as_str(), key.trim()) {
+            (_, "") => continue,
+            ("", key) => key.to_owned(),
+            (section, key) => format!("{section}:{key}"),
+        };
+        let value = value.split(['#', ';']).next().unwrap_or_default().trim();
+        if !entries.iter().any(|(k, _)| *k == key) {
+            entries.push((key, value.to_owned()));
+        }
+    }
+    entries
 }
 
 /// Remembers `thread` as attached by the crate, or reports that the guard is no longer available.
@@ -301,6 +364,21 @@ pub(crate) unsafe fn string<'a>(s: *const c_char) -> Cow<'a, str> {
 mod tests {
     use super::*;
     use crate::system::set_property;
+
+    #[test]
+    fn properties_are_parsed_as_ini_entries() {
+        let text = "# comment\n; comment\n dxfeed.address = demo.dxfeed.com:7300 # the demo feed\nempty=\n=no key\n\
+                    no value\nurl=http://host/path?a=b ; note\ndxfeed.address=other:7300\n[ section ]\nkey=in section\n";
+        let pairs: Vec<(&str, &str)> = vec![
+            ("dxfeed.address", "demo.dxfeed.com:7300"),
+            ("empty", ""),
+            ("url", "http://host/path?a=b"),
+            ("section:key", "in section"),
+        ];
+        let parsed = parse_properties(text);
+        let parsed: Vec<(&str, &str)> = parsed.iter().map(|(k, v)| (k.as_str(), v.as_str())).collect();
+        assert_eq!(parsed, pairs);
+    }
 
     #[test]
     fn threads_share_one_isolate() {

@@ -1,2 +1,4 @@
 /target
 /.idea
+# Written by the write_tape_file sample.
+WriteTapeFile.out.txt
