@@ -61,17 +61,19 @@ pub trait ToEvent {
     fn to_event(&self) -> Option<Event>;
 }
 
-impl ToEvent for &QuoteRef {
-    fn to_event(&self) -> Option<Event> {
-        Some(QuoteRef::to_owned(self).into())
-    }
+macro_rules! to_event {
+    ($($view:ident),*) => {
+        $(
+            impl ToEvent for &$view {
+                fn to_event(&self) -> Option<Event> {
+                    Some($view::to_owned(self).into())
+                }
+            }
+        )*
+    };
 }
 
-impl ToEvent for &TradeRef {
-    fn to_event(&self) -> Option<Event> {
-        Some(TradeRef::to_owned(self).into())
-    }
-}
+to_event!(QuoteRef, TradeRef);
 
 impl ToEvent for EventRef<'_> {
     fn to_event(&self) -> Option<Event> {

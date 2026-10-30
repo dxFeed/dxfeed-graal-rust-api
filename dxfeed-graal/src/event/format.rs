@@ -1,5 +1,5 @@
 //! The Java text of event fields, for the `Display` of events: `Double.toString`, `StringUtil.encodeChar`,
-//! `TimeFormat`, `DayUtil` and the trade direction.
+//! `TimeFormat` and `DayUtil`.
 
 use std::fmt::{self, Display, Formatter, Write};
 use std::ptr;
@@ -156,23 +156,6 @@ pub(super) fn year_month_day(day_id: i32) -> i32 {
     (if year >= 0 { yyyymmdd } else { -yyyymmdd }) as i32
 }
 
-/// The tick direction in bits 1-3 of trade flags, as Java's `Direction` names it; the unused codes are `UNDEFINED`.
-pub(super) fn direction(flags: i32) -> &'static str {
-    match (flags >> 1) & 7 {
-        1 => "DOWN",
-        2 => "ZERO_DOWN",
-        3 => "ZERO",
-        4 => "ZERO_UP",
-        5 => "UP",
-        _ => "UNDEFINED",
-    }
-}
-
-/// Whether trade flags mark a trade in extended trading hours (bit 0).
-pub(super) fn extended_trading_hours(flags: i32) -> bool {
-    flags & 1 != 0
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -226,27 +209,6 @@ mod tests {
         assert_eq!(year_month_day(-1), 19691231);
         assert_eq!(year_month_day(11017), 20000301);
         assert_eq!(year_month_day(11016), 20000229);
-    }
-
-    #[test]
-    fn directions_print_as_in_java() {
-        let names: Vec<&str> = (0..8).map(|code| direction(code << 1)).collect();
-        assert_eq!(
-            names,
-            [
-                "UNDEFINED",
-                "DOWN",
-                "ZERO_DOWN",
-                "ZERO",
-                "ZERO_UP",
-                "UP",
-                "UNDEFINED",
-                "UNDEFINED"
-            ]
-        );
-        assert_eq!(direction(1 | 4 << 1), "ZERO_UP");
-        assert!(extended_trading_hours(1));
-        assert!(!extended_trading_hours(4 << 1));
     }
 
     #[test]

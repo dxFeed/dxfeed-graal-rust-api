@@ -1,123 +1,207 @@
 //! Market events: borrowed views passed to listeners and owned values for publishing.
+//!
+//! Every event type has an owned struct, such as [`Quote`], with pub fields and `new(symbol)`, and a view, such as
+//! [`QuoteRef`], that a listener receives: it reads the SDK's memory in place and is valid during the call only. The
+//! views have an accessor per field; both print the text of Java's `toString`.
 
+#[macro_use]
+mod table;
+#[macro_use]
+mod flags;
+#[macro_use]
+mod traits;
 mod format;
 mod quote;
 mod trade;
 
 use std::ffi::{CString, c_char};
+use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
+use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
+pub use flags::Direction;
 pub use quote::{Quote, QuoteRef};
 pub use trade::{Trade, TradeRef};
+pub use traits::{LastingEvent, MarketEvent};
 
 use crate::error::{Error, Result, c_string};
 
-/// An event type a subscription can receive.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-#[non_exhaustive]
-pub enum EventType {
+/// What the table of an event type generates for the code of this module.
+trait Table {
+    /// The SDK struct of the event.
+    type Sys;
+    /// The view of the SDK struct.
+    type View;
+    /// The SDK class of the event.
+    const CLASS: sys::dxfg_event_clazz_t;
+
+    /// The SDK struct of the event; its strings point into `strings`, which must outlive it.
+    fn to_sys(&self, strings: &mut Vec<CString>) -> Result<Self::Sys>;
+}
+
+/// Generates what each event type adds to the enums and traits of this module, from the list of types: the name of the
+/// owned type, its view and the traits of [`traits`] it implements.
+macro_rules! event_types {
+    ($( $(#[$doc:meta])* $name:ident($view:ident) [$($trait_:ident)*], )*) => {
+        /// An event type a subscription can receive.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
+        pub enum EventType {
+            $( $(#[$doc])* $name, )*
+        }
+
+        impl EventType {
+            pub(crate) fn to_sys(self) -> sys::dxfg_event_clazz_t {
+                match self {
+                    $( EventType::$name => <$name as Table>::CLASS, )*
+                }
+            }
+        }
+
+        /// An event received by a listener, valid during the callback only.
+        #[derive(Debug, Clone, Copy)]
+        #[non_exhaustive]
+        pub enum EventRef<'a> {
+            $( $(#[$doc])* $name(&'a $view), )*
+            /// An event of a type this crate does not map, with its SDK class code (`dxfg_event_clazz_t`).
+            Other(i32),
+        }
+
+        impl EventRef<'_> {
+            /// Copies the event, or returns `None` for [`EventRef::Other`].
+            pub fn to_owned(&self) -> Option<Event> {
+                match *self {
+                    $( EventRef::$name(e) => Some(Event::$name(e.to_owned())), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+        }
+
+        /// The text of Java's `toString` of the event; an event of an unmapped type prints as `Event{class=<code>}`.
+        impl Display for EventRef<'_> {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                match self {
+                    $( EventRef::$name(e) => e.fmt(f), )*
+                    EventRef::Other(class) => write!(f, "Event{{class={class}}}"),
+                }
+            }
+        }
+
+        /// An owned event, e.g. for publishing.
+        #[derive(Debug, Clone, PartialEq)]
+        #[non_exhaustive]
+        pub enum Event {
+            $( $(#[$doc])* $name($name), )*
+        }
+
+        /// The text of Java's `toString` of the event.
+        impl Display for Event {
+            fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+                match self {
+                    $( Event::$name(e) => e.fmt(f), )*
+                }
+            }
+        }
+
+        $(
+            impl From<$name> for Event {
+                fn from(event: $name) -> Self {
+                    Event::$name(event)
+                }
+            }
+
+            /// The event if it is of this type; otherwise the error gives the event back.
+            impl TryFrom<Event> for $name {
+                type Error = Event;
+
+                fn try_from(event: Event) -> std::result::Result<Self, Event> {
+                    match event {
+                        Event::$name(e) => Ok(e),
+                        other => Err(other),
+                    }
+                }
+            }
+
+            impl sealed::Sealed for $name {
+                const ALL: bool = false;
+
+                unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<&'a $view> {
+                    // SAFETY: the caller guarantees the event is live for `'a`; an event of the class of the type is
+                    // its SDK struct, which the view wraps.
+                    unsafe { ((*event).clazz == <$name as Table>::CLASS).then(|| &*event.cast::<$view>()) }
+                }
+            }
+
+            impl SubscriptionItem for $name {
+                type Item<'a> = &'a $view;
+            }
+
+            impl EventKind for $name {
+                const TYPE: EventType = EventType::$name;
+            }
+
+            $( impl_event_trait!($trait_, $name); )*
+        )*
+
+        impl sealed::Sealed for Event {
+            const ALL: bool = true;
+
+            unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<EventRef<'a>> {
+                // SAFETY: the caller guarantees the event is live for `'a`; its first field is the class, and an event
+                // of a class is its SDK struct, which the view wraps.
+                Some(unsafe {
+                    match (*event).clazz {
+                        $( <$name as Table>::CLASS => EventRef::$name(&*event.cast::<$view>()), )*
+                        other => EventRef::Other(other),
+                    }
+                })
+            }
+        }
+
+        impl SubscriptionItem for Event {
+            type Item<'a> = EventRef<'a>;
+        }
+
+        /// The SDK struct of an owned event.
+        enum SysEvent {
+            $( $name(<$name as Table>::Sys), )*
+        }
+
+        impl SysEvent {
+            fn new(event: &Event, strings: &mut Vec<CString>) -> Result<Self> {
+                Ok(match event {
+                    $( Event::$name(e) => SysEvent::$name(e.to_sys(strings)?), )*
+                })
+            }
+
+            fn as_mut_ptr(&mut self) -> *mut sys::dxfg_event_type_t {
+                match self {
+                    $( SysEvent::$name(e) => (e as *mut <$name as Table>::Sys).cast(), )*
+                }
+            }
+        }
+    };
+}
+
+event_types! {
     /// [`Quote`]: the best bid and offer.
-    Quote,
+    Quote(QuoteRef) [MarketEvent LastingEvent],
     /// [`Trade`]: the last trade.
-    Trade,
+    Trade(TradeRef) [MarketEvent LastingEvent],
 }
 
-impl EventType {
-    pub(crate) fn to_sys(self) -> sys::dxfg_event_clazz_t {
-        match self {
-            EventType::Quote => sys::DXFG_EVENT_QUOTE,
-            EventType::Trade => sys::DXFG_EVENT_TRADE,
-        }
-    }
-}
-
-/// An event received by a listener, valid during the callback only.
-#[derive(Debug, Clone, Copy)]
-#[non_exhaustive]
-pub enum EventRef<'a> {
-    /// A quote.
-    Quote(&'a QuoteRef),
-    /// A trade.
-    Trade(&'a TradeRef),
-    /// An event of a type this crate does not map yet, with its SDK class code (`dxfg_event_clazz_t`).
-    Other(i32),
-}
-
-impl EventRef<'_> {
-    /// Copies the event, or returns `None` for [`EventRef::Other`].
-    pub fn to_owned(&self) -> Option<Event> {
-        match *self {
-            EventRef::Quote(q) => Some(Event::Quote(q.to_owned())),
-            EventRef::Trade(t) => Some(Event::Trade(t.to_owned())),
-            EventRef::Other(_) => None,
-        }
-    }
-}
-
-/// The text of Java's `toString` of the event; an event of an unmapped type prints as `Event{class=<code>}`.
-impl std::fmt::Display for EventRef<'_> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            EventRef::Quote(q) => q.fmt(f),
-            EventRef::Trade(t) => t.fmt(f),
-            EventRef::Other(class) => write!(f, "Event{{class={class}}}"),
-        }
-    }
-}
-
-/// An owned event, e.g. for publishing.
-#[derive(Debug, Clone, PartialEq)]
-#[non_exhaustive]
-pub enum Event {
-    /// A quote.
-    Quote(Quote),
-    /// A trade.
-    Trade(Trade),
-}
-
-impl Event {
-    fn symbol(&self) -> &str {
-        match self {
-            Event::Quote(q) => &q.symbol,
-            Event::Trade(t) => &t.symbol,
-        }
-    }
-}
-
-/// The text of Java's `toString` of the event.
-impl std::fmt::Display for Event {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Event::Quote(q) => q.fmt(f),
-            Event::Trade(t) => t.fmt(f),
-        }
-    }
-}
-
-impl From<Quote> for Event {
-    fn from(quote: Quote) -> Self {
-        Event::Quote(quote)
-    }
-}
-
-impl From<Trade> for Event {
-    fn from(trade: Trade) -> Self {
-        Event::Trade(trade)
-    }
-}
-
-/// What a [`DXFeedSubscription`](crate::DXFeedSubscription) delivers: [`Quote`] or [`Trade`] for a subscription to
-/// one event type, [`Event`] for a subscription to several.
+/// What a [`DXFeedSubscription`](crate::DXFeedSubscription) delivers: an owned event type such as [`Quote`] for a
+/// subscription to one event type, [`Event`] for a subscription to several.
 ///
 /// The trait is sealed: only this crate implements it.
 pub trait SubscriptionItem: sealed::Sealed + Send + 'static {
-    /// The item a listener iterates: `&QuoteRef`, `&TradeRef` or [`EventRef`].
+    /// The item a listener iterates: a view such as `&QuoteRef`, or [`EventRef`].
     type Item<'a>;
 }
 
-/// The event types a subscription can be created for by type: [`Quote`] and [`Trade`]; see
+/// The event types a subscription can be created for by type: the owned event types such as [`Quote`]; see
 /// [`DXFeed::create_subscription`](crate::DXFeed::create_subscription).
 ///
 /// The trait is sealed: only this crate implements it.
@@ -144,61 +228,8 @@ mod sealed {
     }
 }
 
-impl sealed::Sealed for Quote {
-    const ALL: bool = false;
-
-    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<&'a QuoteRef> {
-        // SAFETY: the caller guarantees the event is live for `'a`; a quote is a `dxfg_quote_t`.
-        unsafe { ((*event).clazz == sys::DXFG_EVENT_QUOTE).then(|| &*(event as *const QuoteRef)) }
-    }
-}
-
-impl SubscriptionItem for Quote {
-    type Item<'a> = &'a QuoteRef;
-}
-
-impl EventKind for Quote {
-    const TYPE: EventType = EventType::Quote;
-}
-
-impl sealed::Sealed for Trade {
-    const ALL: bool = false;
-
-    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<&'a TradeRef> {
-        // SAFETY: the caller guarantees the event is live for `'a`; a trade is a `dxfg_trade_t`.
-        unsafe { ((*event).clazz == sys::DXFG_EVENT_TRADE).then(|| &*(event as *const TradeRef)) }
-    }
-}
-
-impl SubscriptionItem for Trade {
-    type Item<'a> = &'a TradeRef;
-}
-
-impl EventKind for Trade {
-    const TYPE: EventType = EventType::Trade;
-}
-
-impl sealed::Sealed for Event {
-    const ALL: bool = true;
-
-    unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<EventRef<'a>> {
-        // SAFETY: the caller guarantees the event is live for `'a`; its first field is the class.
-        Some(unsafe {
-            match (*event).clazz {
-                sys::DXFG_EVENT_QUOTE => EventRef::Quote(&*(event as *const QuoteRef)),
-                sys::DXFG_EVENT_TRADE => EventRef::Trade(&*(event as *const TradeRef)),
-                other => EventRef::Other(other),
-            }
-        })
-    }
-}
-
-impl SubscriptionItem for Event {
-    type Item<'a> = EventRef<'a>;
-}
-
-/// The events of one listener call, borrowed from the SDK: `&QuoteRef` for a subscription to quotes, `&TradeRef` for
-/// one to trades and [`EventRef`] for an untyped one.
+/// The events of one listener call, borrowed from the SDK: a view such as `&QuoteRef` for a subscription to one event
+/// type, [`EventRef`] for an untyped one.
 ///
 /// A typed iterator skips events of other types; the SDK does not deliver them.
 pub struct Events<'a, E: SubscriptionItem = Event> {
@@ -262,12 +293,6 @@ impl<'a, E: SubscriptionItem> Iterator for Events<'a, E> {
 
 impl ExactSizeIterator for Events<'_, Event> {}
 
-/// The bits of the sequence at the bottom of the Java `timeSequence` fields; the milliseconds of the time are above it.
-const SEQUENCE_BITS: u32 = 22;
-const SEQUENCE_MASK: i32 = (1 << SEQUENCE_BITS) - 1;
-/// The milliseconds of the time in a `timeSequence` shifted right by [`SEQUENCE_BITS`].
-const MILLIS_MASK: i64 = 0x3FF;
-
 /// A Java `char` exchange code from the SDK.
 fn exchange_code(code: i16) -> char {
     char::from_u32(code as u16 as u32).unwrap_or(char::REPLACEMENT_CHARACTER)
@@ -280,41 +305,37 @@ fn sys_exchange_code(code: char) -> Result<i16> {
         .map_err(|_| Error::InvalidArgument(format!("exchange code {code:?} does not fit a Java char")))
 }
 
+/// Keeps a NUL-terminated copy of `s` in `strings` and returns a pointer to it, or NULL for `None`; `what` names the
+/// string in the error for a NUL byte.
+fn arena_string(strings: &mut Vec<CString>, s: Option<&str>, what: &str) -> Result<*const c_char> {
+    let Some(s) = s else {
+        return Ok(ptr::null());
+    };
+    let s = c_string(s, what)?;
+    // The heap buffer of a `CString` does not move when `strings` grows.
+    let pointer = s.as_ptr();
+    strings.push(s);
+    Ok(pointer)
+}
+
 /// SDK events built from owned ones, with the strings they point to; kept alive while the SDK reads them.
 pub(crate) struct SysEvents {
     events: Vec<SysEvent>,
-    _symbols: Vec<CString>,
+    _strings: Vec<CString>,
     pointers: Vec<*mut sys::dxfg_event_type_t>,
-}
-
-enum SysEvent {
-    Quote(sys::dxfg_quote_t),
-    Trade(sys::dxfg_trade_t),
 }
 
 impl SysEvents {
     pub(crate) fn new(events: &[Event]) -> Result<Self> {
-        let mut symbols = Vec::with_capacity(events.len());
-        let mut sys_events = Vec::with_capacity(events.len());
-        for event in events {
-            let symbol = c_string(event.symbol(), "event symbol")?;
-            let sys_event = match event {
-                Event::Quote(q) => SysEvent::Quote(q.to_sys(symbol.as_ptr())?),
-                Event::Trade(t) => SysEvent::Trade(t.to_sys(symbol.as_ptr())?),
-            };
-            symbols.push(symbol);
-            sys_events.push(sys_event);
-        }
-        let pointers = sys_events
-            .iter_mut()
-            .map(|e| match e {
-                SysEvent::Quote(q) => (q as *mut sys::dxfg_quote_t).cast(),
-                SysEvent::Trade(t) => (t as *mut sys::dxfg_trade_t).cast(),
-            })
-            .collect();
+        let mut strings = Vec::new();
+        let mut sys_events = events
+            .iter()
+            .map(|event| SysEvent::new(event, &mut strings))
+            .collect::<Result<Vec<_>>>()?;
+        let pointers = sys_events.iter_mut().map(SysEvent::as_mut_ptr).collect();
         Ok(SysEvents {
             events: sys_events,
-            _symbols: symbols,
+            _strings: strings,
             pointers,
         })
     }
@@ -326,13 +347,5 @@ impl SysEvents {
             size: self.pointers.len() as i32,
             elements: self.pointers.as_mut_ptr(),
         }
-    }
-}
-
-fn market_event(clazz: sys::dxfg_event_clazz_t, symbol: *const c_char, event_time: i64) -> sys::dxfg_market_event_t {
-    sys::dxfg_market_event_t {
-        event_type: sys::dxfg_event_type_t { clazz },
-        event_symbol: symbol,
-        event_time,
     }
 }

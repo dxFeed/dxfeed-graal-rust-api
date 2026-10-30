@@ -1,0 +1,390 @@
+//! The tables that generate the event types.
+//!
+//! Each event type is one [`event_type!`] table: the names of the owned type and its view, the SDK struct, the event
+//! class and the path to the symbol and the event time, then one row per field and one entry per value computed from
+//! fields. A field-group macro, such as [`trade_base_fields!`], adds the rows several types share and calls the table
+//! with them. Each table also generates the offline tests of its type: they need the SDK library but no endpoint.
+//!
+//! A row is `name: kind [path.in.the.sdk.struct] = default`. The kinds are the number types `f64`, `i64` and `i32`,
+//! `char` for a Java `char` code kept in an `i16`, `string` for a nullable UTF-8 string and `attachment` for the
+//! nullable UTF-8 string the SDK keeps in a `void *`.
+
+/// Generates an event type from its table: the owned type with `new`, its pub fields and computed values, the view
+/// with one accessor per field and value, `to_owned`, `Debug` and `Display` of the view, the conversion for
+/// publishing and the offline tests. The `Display` of the owned type is written by hand next to the table.
+macro_rules! event_type {
+    (
+        head {
+            $(#[$doc:meta])*
+            $name:ident, $view:ident, $sys:ty, $class:path, [$($h:ident).*]
+        }
+        fields {
+            $( $(#[$fdoc:meta])* $field:ident: $kind:ident [$($p:ident).+] = $default:expr, )*
+        }
+        derived {
+            $( $(#[$ddoc:meta])* fn $dname:ident($($arg:ident),*) -> $dty:ty $body:block )*
+        }
+    ) => {
+        $(#[$doc])*
+        #[derive(Debug, Clone, PartialEq)]
+        pub struct $name {
+            /// The symbol.
+            pub symbol: String,
+            /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
+            pub event_time: i64,
+            $( $(#[$fdoc])* pub $field: event_field!(@owned $kind), )*
+        }
+
+        impl $name {
+            #[doc = concat!(
+                "A `", stringify!($name), "` for `symbol` with the default values of Java's `new ",
+                stringify!($name), "(symbol)`."
+            )]
+            pub fn new(symbol: &str) -> Self {
+                $name {
+                    symbol: symbol.to_owned(),
+                    event_time: 0,
+                    $( $field: $default, )*
+                }
+            }
+
+            $(
+                $(#[$ddoc])*
+                pub fn $dname(&self) -> $dty {
+                    $( let $arg = self.$arg; )*
+                    $body
+                }
+            )*
+        }
+
+        #[doc = concat!(
+            "A [`", stringify!($name), "`] received by a listener, borrowed from the SDK: valid during the listener ",
+            "call only."
+        )]
+        #[repr(transparent)]
+        pub struct $view($sys);
+
+        impl $view {
+            /// The symbol; replacement characters stand for bytes that are not UTF-8.
+            pub fn symbol(&self) -> ::std::borrow::Cow<'_, str> {
+                // SAFETY: the SDK keeps the symbol alive while the event lives.
+                unsafe { $crate::isolate::string(self.0 $(.$h)* .event_symbol) }
+            }
+
+            /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
+            pub fn event_time(&self) -> i64 {
+                self.0 $(.$h)* .event_time
+            }
+
+            $(
+                $(#[$fdoc])*
+                pub fn $field(&self) -> event_field!(@view $kind) {
+                    event_field!(@get $kind, self.0.$($p).+)
+                }
+            )*
+
+            $(
+                $(#[$ddoc])*
+                pub fn $dname(&self) -> $dty {
+                    $( let $arg = self.$arg(); )*
+                    $body
+                }
+            )*
+
+            /// Copies the event.
+            pub fn to_owned(&self) -> $name {
+                $name {
+                    symbol: self.symbol().into_owned(),
+                    event_time: self.event_time(),
+                    $( $field: event_field!(@to_owned $kind, self.$field()), )*
+                }
+            }
+        }
+
+        impl ::std::fmt::Debug for $view {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                ::std::fmt::Debug::fmt(&self.to_owned(), f)
+            }
+        }
+
+        #[doc = concat!("The text of Java's `", stringify!($name), ".toString`, as the owned event prints it.")]
+        impl ::std::fmt::Display for $view {
+            fn fmt(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                ::std::fmt::Display::fmt(&self.to_owned(), f)
+            }
+        }
+
+        impl $crate::event::Table for $name {
+            type Sys = $sys;
+            type View = $view;
+            const CLASS: ::dxfeed_graal_sys::dxfg_event_clazz_t = $class;
+
+            fn to_sys(&self, strings: &mut Vec<::std::ffi::CString>) -> $crate::error::Result<$sys> {
+                // SAFETY: the SDK struct is plain data (integers, floats and pointers) for which all zeros are valid.
+                let mut raw: $sys = unsafe { ::std::mem::zeroed() };
+                raw $(.$h)* .event_type.clazz = $class;
+                raw $(.$h)* .event_symbol = $crate::event::arena_string(strings, Some(&self.symbol), "event symbol")?;
+                raw $(.$h)* .event_time = self.event_time;
+                $(
+                    raw.$($p).+ = event_field!(
+                        @to_sys $kind, &self.$field, strings, concat!(stringify!($name), " ", stringify!($field))
+                    );
+                )*
+                Ok(raw)
+            }
+        }
+
+        #[cfg(test)]
+        mod table_tests {
+            use super::*;
+            use $crate::event::Table;
+
+            fn view(raw: &$sys) -> &$view {
+                // SAFETY: the view is a transparent wrapper of the SDK struct.
+                unsafe { &*(raw as *const $sys).cast::<$view>() }
+            }
+
+            fn header(raw: &mut $sys, strings: &mut Vec<::std::ffi::CString>, event_time: i64) {
+                raw $(.$h)* .event_type.clazz = $class;
+                raw $(.$h)* .event_symbol = $crate::event::arena_string(strings, Some("SYM"), "").unwrap();
+                raw $(.$h)* .event_time = event_time;
+            }
+
+            #[test]
+            fn view_has_the_layout_of_the_sdk_struct() {
+                assert_eq!(::std::mem::size_of::<$view>(), ::std::mem::size_of::<$sys>());
+                assert_eq!(::std::mem::align_of::<$view>(), ::std::mem::align_of::<$sys>());
+                assert_eq!(::std::mem::offset_of!($sys, $($h.)* event_type), 0);
+            }
+
+            #[test]
+            fn fields_convert_both_ways() {
+                let mut strings = Vec::new();
+                // SAFETY: as in `to_sys`.
+                let mut raw: $sys = unsafe { ::std::mem::zeroed() };
+                header(&mut raw, &mut strings, 123_456_789);
+                let mut n: u32 = 0;
+                $( n += 1; raw.$($p).+ = event_field!(@sample_sys $kind, n, &mut strings); )*
+
+                let owned = view(&raw).to_owned();
+                assert_eq!(owned.symbol, "SYM");
+                assert_eq!(owned.event_time, 123_456_789);
+                let mut n: u32 = 0;
+                $( n += 1; assert_eq!(owned.$field, event_field!(@sample $kind, n), stringify!($field)); )*
+
+                let mut back_strings = Vec::new();
+                let back = owned.to_sys(&mut back_strings).unwrap();
+                assert_eq!(back $(.$h)* .event_type.clazz, $class);
+                assert_eq!(view(&back).to_owned(), owned);
+            }
+
+            #[test]
+            fn zeroed_event_reads_as_zero_and_null() {
+                // SAFETY: as in `to_sys`.
+                let raw: $sys = unsafe { ::std::mem::zeroed() };
+                let owned = view(&raw).to_owned();
+                assert_eq!(owned.symbol, "");
+                $( event_field!(@assert_zero $kind, owned.$field); )*
+                let _ = (view(&raw).to_string(), owned.to_string(), format!("{:?}", view(&raw)));
+            }
+
+            #[test]
+            fn extreme_values_neither_panic_nor_fail() {
+                for pattern in 0..6 {
+                    let mut strings = Vec::new();
+                    // SAFETY: as in `to_sys`.
+                    let mut raw: $sys = unsafe { ::std::mem::zeroed() };
+                    header(&mut raw, &mut strings, event_field!(@extreme i64, pattern, &mut strings));
+                    $( raw.$($p).+ = event_field!(@extreme $kind, pattern, &mut strings); )*
+                    let view = view(&raw);
+                    let owned = view.to_owned();
+                    let _ = (view.to_string(), owned.to_string(), format!("{view:?}"));
+                    $( let _ = (view.$dname(), owned.$dname()); )*
+                    owned.to_sys(&mut Vec::new()).unwrap();
+                }
+            }
+        }
+    };
+}
+
+/// The parts of [`event_type!`] that depend on the kind of a field.
+macro_rules! event_field {
+    (@owned string) => { Option<String> };
+    (@owned attachment) => { Option<String> };
+    (@owned $kind:ident) => { $kind };
+
+    (@view string) => { Option<::std::borrow::Cow<'_, str>> };
+    (@view attachment) => { Option<::std::borrow::Cow<'_, str>> };
+    (@view $kind:ident) => { $kind };
+
+    (@get char, $v:expr) => { $crate::event::exchange_code($v) };
+    // SAFETY: the SDK keeps the strings of an event alive while the event lives.
+    (@get string, $v:expr) => { unsafe { $crate::event::opt_string($v) } };
+    // SAFETY: as above; the attachment is a UTF-8 string or NULL.
+    (@get attachment, $v:expr) => { unsafe { $crate::event::opt_string($v.cast_const().cast()) } };
+    (@get $kind:ident, $v:expr) => { $v };
+
+    (@to_owned string, $v:expr) => { $v.map(::std::borrow::Cow::into_owned) };
+    (@to_owned attachment, $v:expr) => { $v.map(::std::borrow::Cow::into_owned) };
+    (@to_owned $kind:ident, $v:expr) => { $v };
+
+    (@to_sys char, $v:expr, $strings:expr, $what:expr) => { $crate::event::sys_exchange_code(*$v)? };
+    (@to_sys string, $v:expr, $strings:expr, $what:expr) => {
+        $crate::event::arena_string($strings, $v.as_deref(), $what)?
+    };
+    (@to_sys attachment, $v:expr, $strings:expr, $what:expr) => {
+        $crate::event::arena_string($strings, $v.as_deref(), $what)?.cast_mut().cast()
+    };
+    (@to_sys $kind:ident, $v:expr, $strings:expr, $what:expr) => { *$v };
+
+    // A value distinct for each field number `n`, in the SDK struct and as the owned event keeps it.
+    (@sample_sys char, $n:expr, $strings:expr) => { (0x40 + $n) as i16 };
+    (@sample_sys string, $n:expr, $strings:expr) => {
+        $crate::event::arena_string($strings, Some(format!("s{}", $n).as_str()), "").unwrap()
+    };
+    (@sample_sys attachment, $n:expr, $strings:expr) => {
+        event_field!(@sample_sys string, $n, $strings).cast_mut().cast()
+    };
+    (@sample_sys $kind:ident, $n:expr, $strings:expr) => { event_field!(@sample $kind, $n) };
+    (@sample f64, $n:expr) => { f64::from($n) + 0.25 };
+    (@sample i64, $n:expr) => { i64::from($n) * 1_000_003 };
+    (@sample i32, $n:expr) => { $n as i32 * 7 + 1 };
+    (@sample char, $n:expr) => { char::from(0x40 + $n as u8) };
+    (@sample string, $n:expr) => { Some(format!("s{}", $n)) };
+    (@sample attachment, $n:expr) => { Some(format!("s{}", $n)) };
+
+    (@assert_zero f64, $v:expr) => { assert_eq!($v, 0.0) };
+    (@assert_zero char, $v:expr) => { assert_eq!($v, '\0') };
+    (@assert_zero string, $v:expr) => { assert_eq!($v, None) };
+    (@assert_zero attachment, $v:expr) => { assert_eq!($v, None) };
+    (@assert_zero $kind:ident, $v:expr) => { assert_eq!($v, 0) };
+
+    // Pattern `p` (0 to 5) of extreme values: the limits, all bits set, NaN, infinities, invalid strings.
+    (@extreme f64, $p:expr, $strings:expr) => {
+        [f64::NAN, f64::INFINITY, f64::NEG_INFINITY, -0.0, 5e-324, f64::MAX][$p]
+    };
+    (@extreme i64, $p:expr, $strings:expr) => { [i64::MIN, i64::MAX, -1, 0, 1, i64::MIN + 1][$p] };
+    (@extreme i32, $p:expr, $strings:expr) => { [i32::MIN, i32::MAX, -1, 0, 1, i32::MIN + 1][$p] };
+    (@extreme char, $p:expr, $strings:expr) => { [i16::MIN, i16::MAX, -1, 0, 0x7F, 0xD800_u16 as i16][$p] };
+    (@extreme string, $p:expr, $strings:expr) => { $crate::event::extreme_string($strings, $p) };
+    (@extreme attachment, $p:expr, $strings:expr) => {
+        $crate::event::extreme_string($strings, $p).cast_mut().cast()
+    };
+}
+
+/// The fields, values and setters of Java's `TradeBase` at the path `[p]`, for [`event_type!`].
+macro_rules! trade_base_fields {
+    (
+        [$($p:ident).*]
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Changes the time of the trade and keeps the sequence, as Java's `setTime` does: the seconds are clamped
+            /// to 32 bits.
+            #[doc(alias = "setTime")]
+            pub fn set_time(&mut self, time: i64) {
+                self.time_sequence = $crate::event::flags::with_time(self.time_sequence, time);
+            }
+
+            /// Changes the time of the trade and its nanoseconds part, as Java's `setTimeNanos` does.
+            #[doc(alias = "setTimeNanos")]
+            pub fn set_time_nanos(&mut self, time_nanos: i64) {
+                let (time, nano_part) = $crate::event::flags::split_nanos(time_nanos);
+                self.set_time(time);
+                self.time_nano_part = nano_part;
+            }
+
+            /// Changes the sequence of the trade.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the sequence is negative or above
+            /// `(1 << 22) - 1`.
+            #[doc(alias = "setSequence")]
+            pub fn set_sequence(&mut self, sequence: i32) -> $crate::Result<()> {
+                self.time_sequence = $crate::event::flags::with_sequence(self.time_sequence, sequence)?;
+                Ok(())
+            }
+
+            /// Changes the direction of the price movement from the previous trade.
+            #[doc(alias = "setTickDirection")]
+            pub fn set_tick_direction(&mut self, direction: $crate::event::Direction) {
+                self.flags = $crate::event::flags::TRADE_DIRECTION.set32(self.flags, direction.code());
+            }
+
+            /// Changes whether the trade happened in extended trading hours.
+            #[doc(alias = "setExtendedTradingHours")]
+            pub fn set_extended_trading_hours(&mut self, extended_trading_hours: bool) {
+                self.flags = $crate::event::flags::TRADE_ETH.set32(self.flags, extended_trading_hours.into());
+            }
+        }
+
+        $cb! {
+            head { $(#[$doc])* $name, $($head)* }
+            fields {
+                /// The time and the sequence of the trade, packed as the SDK keeps them: seconds in bits 32 to 63,
+                /// milliseconds in bits 22 to 31 and the sequence in bits 0 to 21.
+                time_sequence: i64 [$($p.)* time_sequence] = 0,
+                /// The microseconds and nanoseconds part of the trade time.
+                time_nano_part: i32 [$($p.)* time_nano_part] = 0,
+                /// The exchange code of the trade; it must fit a Java `char`.
+                exchange_code: char [$($p.)* exchange_code] = '\0',
+                /// The price; NaN if unknown.
+                price: f64 [$($p.)* price] = f64::NAN,
+                /// The change of the price from the close of the previous day; NaN if unknown.
+                change: f64 [$($p.)* change] = f64::NAN,
+                /// The size; NaN if unknown.
+                size: f64 [$($p.)* size] = f64::NAN,
+                /// The identifier of the trading day, in days since 1970-01-01.
+                day_id: i32 [$($p.)* day_id] = 0,
+                /// The volume traded during the day; NaN if unknown.
+                day_volume: f64 [$($p.)* day_volume] = f64::NAN,
+                /// The turnover during the day; NaN if unknown.
+                day_turnover: f64 [$($p.)* day_turnover] = f64::NAN,
+                /// The flags of the trade, packed as the SDK keeps them: the tick direction in bits 1 to 3 and the
+                /// extended trading hours in bit 0.
+                flags: i32 [$($p.)* flags] = 0,
+                /// The identifier of the trade.
+                trade_id: i64 [$($p.)* trade_id] = 0,
+                $($fields)*
+            }
+            derived {
+                /// The time of the trade, in milliseconds since the Unix epoch.
+                #[doc(alias = "getTime")]
+                fn time(time_sequence) -> i64 {
+                    $crate::event::flags::time_of(time_sequence)
+                }
+
+                /// The time of the trade, in nanoseconds since the Unix epoch.
+                #[doc(alias = "getTimeNanos")]
+                fn time_nanos(time_sequence, time_nano_part) -> i64 {
+                    $crate::event::flags::nanos($crate::event::flags::time_of(time_sequence), time_nano_part)
+                }
+
+                /// The sequence number of the trade, to tell apart trades with the same time.
+                #[doc(alias = "getSequence")]
+                fn sequence(time_sequence) -> i32 {
+                    $crate::event::flags::sequence_of(time_sequence)
+                }
+
+                /// The direction of the price movement from the previous trade.
+                #[doc(alias = "getTickDirection")]
+                fn tick_direction(flags) -> $crate::event::Direction {
+                    $crate::event::Direction::from_code($crate::event::flags::TRADE_DIRECTION.get(flags.into()))
+                }
+
+                /// Whether the trade happened in extended trading hours.
+                #[doc(alias = "isExtendedTradingHours")]
+                fn is_extended_trading_hours(flags) -> bool {
+                    $crate::event::flags::TRADE_ETH.get(flags.into()) != 0
+                }
+
+                $($derived)*
+            }
+        }
+    };
+}

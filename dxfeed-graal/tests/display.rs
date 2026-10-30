@@ -4,8 +4,8 @@ mod support;
 
 use std::sync::mpsc;
 
-use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::{Event, EventRef, EventType};
+use dxfeed_graal::event::{Direction, Quote, Trade};
+use dxfeed_graal::{Error, Event, EventRef, EventType};
 use support::{Hub, is_time, quote};
 
 /// The value of `name=` in the text of an event.
@@ -35,6 +35,104 @@ fn new_trade_prints_as_in_java() {
         "Trade{AAPL, eventTime=0, time=0, timeNanoPart=0, sequence=0, exchange=\\0, tradeId=0, price=NaN, change=NaN, \
          size=NaN, day=19700101, dayVolume=NaN, dayTurnover=NaN, direction=UNDEFINED, ETH=false}"
     );
+}
+
+/// Strings printed by Java 3.356 for events filled through the Java setters of the same names.
+#[test]
+fn typed_setters_print_as_in_java() {
+    let mut quote = Quote {
+        bid_exchange_code: 'Q',
+        bid_price: 189.5,
+        bid_size: 100.0,
+        ask_exchange_code: 'N',
+        ask_price: 189.75,
+        ask_size: 200.0,
+        time_nano_part: 456,
+        ..Quote::new("AAPL")
+    };
+    quote.set_sequence(7).unwrap();
+    assert_eq!(
+        quote.to_string(),
+        "Quote{AAPL, eventTime=0, time=0, timeNanoPart=456, sequence=7, bidTime=0, bidExchange=Q, bidPrice=189.5, \
+         bidSize=100.0, askTime=0, askExchange=N, askPrice=189.75, askSize=200.0}"
+    );
+
+    let base = || {
+        let mut trade = Trade {
+            exchange_code: 'Q',
+            price: 190.25,
+            change: 0.5,
+            size: 300.0,
+            day_id: 19675,
+            day_volume: 1_000_000.0,
+            day_turnover: 1.9e8,
+            time_nano_part: 321,
+            trade_id: 42,
+            ..Trade::new("AAPL")
+        };
+        trade.set_sequence(9).unwrap();
+        trade
+    };
+    let prefix = "Trade{AAPL, eventTime=0, time=0, timeNanoPart=321, sequence=9, exchange=Q, tradeId=42, price=190.25, \
+                  change=0.5, size=300.0, day=20231114, dayVolume=1000000.0, dayTurnover=1.9E8, ";
+    let mut eth = base();
+    eth.set_extended_trading_hours(true);
+    assert_eq!(
+        (eth.flags, eth.to_string()),
+        (1, format!("{prefix}direction=UNDEFINED, ETH=true}}"))
+    );
+    let mut zero_down = base();
+    zero_down.set_tick_direction(Direction::ZeroDown);
+    assert_eq!(
+        (zero_down.flags, zero_down.to_string()),
+        (4, format!("{prefix}direction=ZERO_DOWN, ETH=false}}"))
+    );
+    let mut zero_up = base();
+    zero_up.set_tick_direction(Direction::ZeroUp);
+    zero_up.set_extended_trading_hours(true);
+    assert_eq!(
+        (zero_up.flags, zero_up.to_string()),
+        (9, format!("{prefix}direction=ZERO_UP, ETH=true}}"))
+    );
+    assert_eq!(zero_up.tick_direction(), Direction::ZeroUp);
+    assert!(zero_up.is_extended_trading_hours());
+}
+
+#[test]
+fn setters_keep_the_other_packed_values() {
+    let mut quote = Quote::new("AAPL");
+    quote.set_sequence(5).unwrap();
+    quote.set_bid_time(1_700_000_000_123);
+    quote.set_ask_time(1_700_000_000_045);
+    assert_eq!((quote.time(), quote.sequence()), (1_700_000_000_123, 5));
+    assert_eq!(quote.time_nanos(), 1_700_000_000_123_000_000);
+    assert!(matches!(quote.set_sequence(1 << 22), Err(Error::InvalidArgument(_))));
+    assert!(matches!(quote.set_sequence(-1), Err(Error::InvalidArgument(_))));
+    assert_eq!(quote.sequence(), 5);
+
+    let mut trade = Trade::new("AAPL");
+    trade.set_sequence(3).unwrap();
+    trade.set_time_nanos(1_700_000_000_789_000_456);
+    trade.set_tick_direction(Direction::Up);
+    trade.set_extended_trading_hours(true);
+    trade.set_tick_direction(Direction::Down);
+    assert_eq!(trade.time(), 1_700_000_000_789);
+    assert_eq!(trade.time_nanos(), 1_700_000_000_789_000_456);
+    assert_eq!((trade.time_nano_part, trade.sequence()), (456, 3));
+    assert_eq!(
+        (trade.tick_direction(), trade.is_extended_trading_hours()),
+        (Direction::Down, true)
+    );
+    trade.set_extended_trading_hours(false);
+    assert_eq!(trade.flags, Direction::Down.code() << 1);
+}
+
+#[test]
+fn events_convert_back_to_their_type() {
+    // `quote` has no NaN, which would make the events unequal to themselves.
+    let event = Event::from(quote("AAPL"));
+    assert_eq!(Trade::try_from(event.clone()), Err(event.clone()));
+    assert_eq!(Quote::try_from(event), Ok(quote("AAPL")));
 }
 
 #[test]

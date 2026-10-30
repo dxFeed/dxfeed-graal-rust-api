@@ -24,6 +24,10 @@ impl DXPublisher {
 
     /// Publishes `events`. The endpoint's own feed receives them for the symbols it is subscribed to; a connected
     /// publisher endpoint also sends them to remote subscribers. Events without subscribers are dropped.
+    ///
+    /// Fails with [`Error::InvalidArgument`](crate::Error::InvalidArgument), publishing nothing, when a string holds a
+    /// NUL byte or an exchange code does not fit a Java `char`; with [`Error::Java`](crate::Error::Java) when the SDK
+    /// refuses the events.
     #[doc(alias = "publishEvents")]
     pub fn publish_events(&self, events: &[Event]) -> Result<()> {
         let mut sys_events = SysEvents::new(events)?;
