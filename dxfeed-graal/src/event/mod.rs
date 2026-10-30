@@ -11,20 +11,37 @@ mod flags;
 #[macro_use]
 mod traits;
 mod format;
+mod greeks;
+mod nuam_trade;
+mod profile;
 mod quote;
+mod series;
+mod summary;
+mod theo_price;
 mod trade;
+mod trade_eth;
+mod underlying;
 
-use std::ffi::{CString, c_char};
+use std::borrow::Cow;
+use std::ffi::{CStr, CString, c_char};
 use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
 use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
-pub use flags::Direction;
+pub use flags::{Direction, EventFlags, PriceType, ShortSaleRestriction, TradingStatus};
+pub use greeks::{Greeks, GreeksRef};
+pub use nuam_trade::{NuamTrade, NuamTradeRef};
+pub use profile::{Profile, ProfileRef};
 pub use quote::{Quote, QuoteRef};
+pub use series::{Series, SeriesRef};
+pub use summary::{Summary, SummaryRef};
+pub use theo_price::{TheoPrice, TheoPriceRef};
 pub use trade::{Trade, TradeRef};
-pub use traits::{LastingEvent, MarketEvent};
+pub use trade_eth::{TradeETH, TradeETHRef};
+pub use traits::{IndexedEvent, LastingEvent, MarketEvent, TimeSeriesEvent};
+pub use underlying::{Underlying, UnderlyingRef};
 
 use crate::error::{Error, Result, c_string};
 
@@ -188,8 +205,24 @@ macro_rules! event_types {
 event_types! {
     /// [`Quote`]: the best bid and offer.
     Quote(QuoteRef) [MarketEvent LastingEvent],
+    /// [`Profile`]: the description and trading limits of a symbol.
+    Profile(ProfileRef) [MarketEvent LastingEvent],
+    /// [`Summary`]: the prices and volume of the day.
+    Summary(SummaryRef) [MarketEvent LastingEvent],
+    /// [`Greeks`]: the price sensitivities of an option.
+    Greeks(GreeksRef) [MarketEvent LastingEvent IndexedEvent TimeSeriesEvent],
+    /// [`Underlying`]: the volatility and option volumes of an underlying symbol.
+    Underlying(UnderlyingRef) [MarketEvent LastingEvent IndexedEvent TimeSeriesEvent],
+    /// [`TheoPrice`]: the theoretical price of an option.
+    TheoPrice(TheoPriceRef) [MarketEvent LastingEvent IndexedEvent TimeSeriesEvent],
     /// [`Trade`]: the last trade.
     Trade(TradeRef) [MarketEvent LastingEvent],
+    /// [`TradeETH`]: the last trade in extended trading hours.
+    TradeETH(TradeETHRef) [MarketEvent LastingEvent],
+    /// [`Series`]: the properties of an option series.
+    Series(SeriesRef) [MarketEvent IndexedEvent],
+    /// [`NuamTrade`]: the last trade of the Nuam exchange.
+    NuamTrade(NuamTradeRef) [MarketEvent LastingEvent],
 }
 
 /// What a [`DXFeedSubscription`](crate::DXFeedSubscription) delivers: an owned event type such as [`Quote`] for a
@@ -303,6 +336,30 @@ fn sys_exchange_code(code: char) -> Result<i16> {
     u16::try_from(code as u32)
         .map(|c| c as i16)
         .map_err(|_| Error::InvalidArgument(format!("exchange code {code:?} does not fit a Java char")))
+}
+
+/// A nullable string of an SDK event; replacement characters stand for bytes that are not UTF-8.
+///
+/// # Safety
+///
+/// `s` must be NULL or a NUL-terminated string that outlives `'a`.
+unsafe fn opt_string<'a>(s: *const c_char) -> Option<Cow<'a, str>> {
+    // SAFETY: the caller guarantees a NUL-terminated string.
+    (!s.is_null()).then(|| unsafe { CStr::from_ptr(s) }.to_string_lossy())
+}
+
+/// Pattern `p` of the strings of the extreme-value tests: NULL, bytes that are not UTF-8, characters outside ASCII.
+#[cfg(test)]
+fn extreme_string(strings: &mut Vec<CString>, p: usize) -> *const c_char {
+    let bytes: &[u8] = match p % 3 {
+        0 => return ptr::null(),
+        1 => b"\xff\xfe",
+        _ => "\u{1F600} \u{e9}".as_bytes(),
+    };
+    let s = CString::new(bytes).unwrap();
+    let pointer = s.as_ptr();
+    strings.push(s);
+    pointer
 }
 
 /// Keeps a NUL-terminated copy of `s` in `strings` and returns a pointer to it, or NULL for `None`; `what` names the

@@ -1,6 +1,6 @@
 //! The behavior several event types share, as the Java interfaces of the same names.
 
-use super::EventKind;
+use super::{EventFlags, EventKind};
 
 /// An event about a market symbol, as Java's `MarketEvent`.
 ///
@@ -21,6 +21,28 @@ pub trait MarketEvent: EventKind {
 /// The trait is sealed: only this crate implements it.
 pub trait LastingEvent: EventKind {}
 
+/// An event that a source and an index tell apart from the other events of its symbol, as Java's `IndexedEvent`.
+///
+/// The trait is sealed: only this crate implements it.
+pub trait IndexedEvent: EventKind {
+    /// The index of the event among the events of its symbol and source.
+    #[doc(alias = "getIndex")]
+    fn index(&self) -> i64;
+
+    /// The flags of the event in a transaction or a snapshot.
+    #[doc(alias = "getEventFlags")]
+    fn event_flags(&self) -> EventFlags;
+}
+
+/// An indexed event with a time, as Java's `TimeSeriesEvent`: the index of the event is its time and sequence.
+///
+/// The trait is sealed: only this crate implements it.
+pub trait TimeSeriesEvent: IndexedEvent {
+    /// The time of the event, in milliseconds since the Unix epoch.
+    #[doc(alias = "getTime")]
+    fn time(&self) -> i64;
+}
+
 /// Implements a trait of this module for an event type, from the fields its table generates.
 macro_rules! impl_event_trait {
     (MarketEvent, $name:ident) => {
@@ -36,5 +58,23 @@ macro_rules! impl_event_trait {
     };
     (LastingEvent, $name:ident) => {
         impl LastingEvent for $name {}
+    };
+    (IndexedEvent, $name:ident) => {
+        impl IndexedEvent for $name {
+            fn index(&self) -> i64 {
+                self.index
+            }
+
+            fn event_flags(&self) -> EventFlags {
+                self.event_flags
+            }
+        }
+    };
+    (TimeSeriesEvent, $name:ident) => {
+        impl TimeSeriesEvent for $name {
+            fn time(&self) -> i64 {
+                $name::time(self)
+            }
+        }
     };
 }

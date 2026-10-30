@@ -1,5 +1,8 @@
 //! Packed fields: bit ranges, the enums kept in them, and the time and sequence packed into one number.
 
+use std::fmt::{self, LowerHex};
+use std::ops::{BitAnd, BitAndAssign, BitOr, BitOrAssign};
+
 use crate::error::{Error, Result};
 
 /// A range of bits of a packed field, read and written as Java's `Util.getBits` and `Util.setBits` do.
@@ -38,6 +41,15 @@ impl Bits {
 pub(crate) const TRADE_DIRECTION: Bits = Bits::new(3, 1);
 /// The extended trading hours bit in the flags of a trade.
 pub(crate) const TRADE_ETH: Bits = Bits::new(1, 0);
+
+/// The short sale restriction in the flags of a profile.
+pub(crate) const PROFILE_SSR: Bits = Bits::new(2, 2);
+/// The trading status in the flags of a profile.
+pub(crate) const PROFILE_STATUS: Bits = Bits::new(2, 0);
+/// The type of the day close price in the flags of a summary.
+pub(crate) const SUMMARY_DAY_CLOSE_TYPE: Bits = Bits::new(2, 2);
+/// The type of the previous day close price in the flags of a summary.
+pub(crate) const SUMMARY_PREV_DAY_CLOSE_TYPE: Bits = Bits::new(2, 0);
 
 /// The largest sequence that fits the packed time and sequence fields.
 pub(crate) const MAX_SEQUENCE: i32 = (1 << 22) - 1;
@@ -155,6 +167,122 @@ flag_enum! {
     }
 }
 
+flag_enum! {
+    /// The trading status of a symbol (`TradingStatus`).
+    TradingStatus {
+        /// The status is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// Trading is halted.
+        Halted = 1 "HALTED",
+        /// Trading is active.
+        Active = 2 "ACTIVE",
+    }
+}
+
+flag_enum! {
+    /// The short sale restriction of a symbol (`ShortSaleRestriction`).
+    ShortSaleRestriction {
+        /// The restriction is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// Short sales are restricted.
+        Active = 1 "ACTIVE",
+        /// Short sales are not restricted.
+        Inactive = 2 "INACTIVE",
+    }
+}
+
+flag_enum! {
+    /// The type of a price (`PriceType`).
+    PriceType {
+        /// A regular price.
+        Regular = 0 "REGULAR",
+        /// An indicative price, for example before the opening.
+        Indicative = 1 "INDICATIVE",
+        /// A preliminary price, for example before the final close.
+        Preliminary = 2 "PRELIMINARY",
+        /// The final price.
+        Final = 3 "FINAL",
+    }
+}
+
+/// The flags of an indexed event that mark transactions and snapshots, as the constants of Java's `IndexedEvent`.
+///
+/// It keeps every bit it is created from, including the bits without a constant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+pub struct EventFlags(i32);
+
+impl EventFlags {
+    /// The event is a part of a transaction that is not complete yet (`TX_PENDING`).
+    pub const TX_PENDING: Self = EventFlags(0x01);
+    /// The event removes the event with the same index (`REMOVE_EVENT`).
+    pub const REMOVE_EVENT: Self = EventFlags(0x02);
+    /// The event starts a snapshot (`SNAPSHOT_BEGIN`).
+    pub const SNAPSHOT_BEGIN: Self = EventFlags(0x04);
+    /// The event ends a snapshot (`SNAPSHOT_END`).
+    pub const SNAPSHOT_END: Self = EventFlags(0x08);
+    /// The event ends a snapshot that was cut short (`SNAPSHOT_SNIP`).
+    pub const SNAPSHOT_SNIP: Self = EventFlags(0x10);
+    /// The event is a part of a snapshot (`SNAPSHOT_MODE`).
+    pub const SNAPSHOT_MODE: Self = EventFlags(0x40);
+
+    /// No flags.
+    pub const fn empty() -> Self {
+        EventFlags(0)
+    }
+
+    /// The flags of the bits of `bits`, as Java's `setEventFlags` takes them.
+    #[doc(alias = "setEventFlags")]
+    pub const fn from_bits(bits: i32) -> Self {
+        EventFlags(bits)
+    }
+
+    /// The bits of the flags, as Java's `getEventFlags` gives them.
+    #[doc(alias = "getEventFlags")]
+    pub const fn bits(self) -> i32 {
+        self.0
+    }
+
+    /// Whether every flag of `other` is set.
+    pub const fn contains(self, other: Self) -> bool {
+        self.0 & other.0 == other.0
+    }
+}
+
+impl BitOr for EventFlags {
+    type Output = Self;
+
+    fn bitor(self, other: Self) -> Self {
+        EventFlags(self.0 | other.0)
+    }
+}
+
+impl BitOrAssign for EventFlags {
+    fn bitor_assign(&mut self, other: Self) {
+        self.0 |= other.0;
+    }
+}
+
+impl BitAnd for EventFlags {
+    type Output = Self;
+
+    fn bitand(self, other: Self) -> Self {
+        EventFlags(self.0 & other.0)
+    }
+}
+
+impl BitAndAssign for EventFlags {
+    fn bitand_assign(&mut self, other: Self) {
+        self.0 &= other.0;
+    }
+}
+
+/// The bits in hex, as Java's `Integer.toHexString` prints them.
+impl LowerHex for EventFlags {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        LowerHex::fmt(&self.0, f)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -192,6 +320,50 @@ mod tests {
         }
         assert_eq!(Direction::from_code(-1), Direction::Undefined);
         assert_eq!(Direction::default(), Direction::Undefined);
+    }
+
+    #[test]
+    fn enums_have_java_codes_and_names() {
+        let names = |n: i32, name: fn(i32) -> String| (0..n).map(name).collect::<Vec<_>>().join(" ");
+        assert_eq!(
+            names(4, |c| TradingStatus::from_code(c).to_string()),
+            "UNDEFINED HALTED ACTIVE UNDEFINED"
+        );
+        assert_eq!(
+            names(4, |c| ShortSaleRestriction::from_code(c).to_string()),
+            "UNDEFINED ACTIVE INACTIVE UNDEFINED"
+        );
+        assert_eq!(
+            names(5, |c| PriceType::from_code(c).to_string()),
+            "REGULAR INDICATIVE PRELIMINARY FINAL REGULAR"
+        );
+        for code in 0..3 {
+            assert_eq!(TradingStatus::from_code(code).code(), code);
+            assert_eq!(ShortSaleRestriction::from_code(code).code(), code);
+        }
+        for code in 0..4 {
+            assert_eq!(PriceType::from_code(code).code(), code);
+        }
+        assert_eq!(PriceType::default(), PriceType::Regular);
+    }
+
+    #[test]
+    fn event_flags_keep_all_bits() {
+        let flags = EventFlags::SNAPSHOT_BEGIN | EventFlags::TX_PENDING;
+        assert_eq!(flags.bits(), 5);
+        assert!(flags.contains(EventFlags::TX_PENDING));
+        assert!(!flags.contains(EventFlags::SNAPSHOT_END | EventFlags::TX_PENDING));
+        assert_eq!(flags & EventFlags::SNAPSHOT_BEGIN, EventFlags::SNAPSHOT_BEGIN);
+        assert_eq!(EventFlags::from_bits(-1).bits(), -1);
+        assert_eq!(
+            format!("{:x} {:x}", EventFlags::from_bits(0x7f), EventFlags::from_bits(-1)),
+            "7f ffffffff"
+        );
+        assert_eq!(EventFlags::default(), EventFlags::empty());
+        let mut flags = EventFlags::SNAPSHOT_MODE;
+        flags |= EventFlags::REMOVE_EVENT;
+        flags &= EventFlags::REMOVE_EVENT | EventFlags::SNAPSHOT_SNIP;
+        assert_eq!(flags, EventFlags::REMOVE_EVENT);
     }
 
     #[test]

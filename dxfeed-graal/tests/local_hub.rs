@@ -7,9 +7,13 @@ use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
-use dxfeed_graal::event::{Quote, QuoteRef, Trade};
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, Event, EventRef, EventType, ManualExecutor, Role};
-use support::{Hub, collect, quote, quote_with_bid, trade};
+use dxfeed_graal::event::{
+    Greeks, NuamTrade, Profile, Quote, QuoteRef, Series, Summary, TheoPrice, Trade, TradeETH, Underlying,
+};
+use dxfeed_graal::{
+    DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
+};
+use support::{Hub, all_events, collect, delivered, quote, quote_with_bid, trade};
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
 /// nanosecond part of a quote through the hub, they come back as zero.
@@ -553,4 +557,65 @@ fn hub_with_pending_tasks_drops_quickly() {
     receiver
         .recv_timeout(Duration::from_secs(5))
         .expect("dropping the hub took over 5 seconds");
+}
+
+/// Every mapped type, in the order of [`all_events`].
+const ALL_TYPES: [EventType; 10] = [
+    EventType::Quote,
+    EventType::Profile,
+    EventType::Summary,
+    EventType::Greeks,
+    EventType::Underlying,
+    EventType::TheoPrice,
+    EventType::Trade,
+    EventType::TradeETH,
+    EventType::Series,
+    EventType::NuamTrade,
+];
+
+#[test]
+fn every_type_round_trips() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription_with_types(&ALL_TYPES).unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&all_events("AAPL"));
+    // The hub keeps the order within a type only: a series may come after a later Nuam trade.
+    let received = received(&events);
+    assert_eq!(received.len(), ALL_TYPES.len(), "{received:?}");
+    for expected in all_events("AAPL").into_iter().map(delivered) {
+        assert!(received.contains(&expected), "{expected:?} not in {received:?}");
+    }
+}
+
+/// Subscribes to `E` only, publishes one event of each type and returns what the listener received.
+fn receive_typed<E>() -> Vec<Event>
+where
+    E: EventKind,
+    for<'a> E::Item<'a>: support::ToEvent,
+{
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<E>().unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&all_events("AAPL"));
+    received(&events)
+}
+
+#[test]
+fn typed_subscriptions_receive_only_their_type() {
+    let all = all_events("AAPL");
+    let check = |received: Vec<Event>, index: usize| {
+        assert_eq!(received, vec![delivered(all[index].clone())], "{:?}", ALL_TYPES[index]);
+    };
+    check(receive_typed::<Quote>(), 0);
+    check(receive_typed::<Profile>(), 1);
+    check(receive_typed::<Summary>(), 2);
+    check(receive_typed::<Greeks>(), 3);
+    check(receive_typed::<Underlying>(), 4);
+    check(receive_typed::<TheoPrice>(), 5);
+    check(receive_typed::<Trade>(), 6);
+    check(receive_typed::<TradeETH>(), 7);
+    check(receive_typed::<Series>(), 8);
+    check(receive_typed::<NuamTrade>(), 9);
 }

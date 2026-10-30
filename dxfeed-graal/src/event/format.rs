@@ -1,5 +1,5 @@
 //! The Java text of event fields, for the `Display` of events: `Double.toString`, `StringUtil.encodeChar`,
-//! `TimeFormat` and `DayUtil`.
+//! `WideDecimal`, `TimeFormat` and `DayUtil`.
 
 use std::fmt::{self, Display, Formatter, Write};
 use std::ptr;
@@ -84,17 +84,31 @@ pub(super) struct Time(pub(super) i64);
 
 impl Display for Time {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        if self.0 == 0 {
-            return f.write_char('0');
-        }
-        match format_time(self.0) {
-            Some(text) => f.write_str(&text),
-            None => write!(f, "{}", self.0),
-        }
+        write_time(f, self.0, true)
     }
 }
 
-/// The SDK's `TimeFormat.DEFAULT.withMillis()`; never released.
+/// A time as [`Time`] prints it, but by `TimeFormat.DEFAULT`, without milliseconds: Java prints the halt times of a
+/// profile so.
+pub(super) struct TimeSeconds(pub(super) i64);
+
+impl Display for TimeSeconds {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write_time(f, self.0, false)
+    }
+}
+
+fn write_time(f: &mut Formatter<'_>, millis: i64, with_millis: bool) -> fmt::Result {
+    if millis == 0 {
+        return f.write_char('0');
+    }
+    match format_time(millis, with_millis) {
+        Some(text) => f.write_str(&text),
+        None => write!(f, "{millis}"),
+    }
+}
+
+/// A `TimeFormat` of the SDK; never released.
 struct TimeFormat(*mut sys::dxfg_v4_time_format_t);
 
 // SAFETY: the handle is a pointer to SDK memory usable from any attached thread, and Java's `TimeFormat` is
@@ -103,29 +117,30 @@ unsafe impl Send for TimeFormat {}
 // SAFETY: as above.
 unsafe impl Sync for TimeFormat {}
 
-fn time_format() -> Option<&'static TimeFormat> {
-    static FORMAT: OnceLock<TimeFormat> = OnceLock::new();
+/// `TimeFormat.DEFAULT.withMillis()`, or `TimeFormat.DEFAULT`.
+fn time_format(with_millis: bool) -> Option<&'static TimeFormat> {
+    static FORMATS: [OnceLock<TimeFormat>; 2] = [const { OnceLock::new() }; 2];
     static INIT: Mutex<()> = Mutex::new(());
     let init = || {
         let mut default = ptr::null_mut();
         // SAFETY: the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
-        if default.is_null() {
-            return None;
+        if default.is_null() || !with_millis {
+            return (!default.is_null()).then_some(TimeFormat(default));
         }
-        let mut with_millis = ptr::null_mut();
+        let mut millis = ptr::null_mut();
         // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut with_millis) }).ok()?;
-        (!with_millis.is_null()).then_some(TimeFormat(with_millis))
+        call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut millis) }).ok()?;
+        (!millis.is_null()).then_some(TimeFormat(millis))
     };
-    crate::get_or_try_init(&FORMAT, &INIT, || init().ok_or(())).ok()
+    crate::get_or_try_init(&FORMATS[usize::from(with_millis)], &INIT, || init().ok_or(())).ok()
 }
 
-fn format_time(millis: i64) -> Option<String> {
+fn format_time(millis: i64, with_millis: bool) -> Option<String> {
     if isolate::exiting() {
         return None;
     }
-    let format = time_format()?.0;
+    let format = time_format(with_millis)?.0;
     let mut text = ptr::null();
     // SAFETY: the time format is live and the out-pointer is valid for writes.
     call(|t| unsafe { sys::dxfg_v4_TimeFormat_format(t, format, millis, &mut text) }).ok()?;
@@ -137,6 +152,247 @@ fn format_time(millis: i64) -> Option<String> {
     // SAFETY: `text` came from dxfg_v4_TimeFormat_format and is released once.
     let _ = call(|t| unsafe { sys::dxfg_v4_String_release(t, text) });
     Some(copy)
+}
+
+/// A nullable string in single quotes, as Java's `toString` of events prints it: `'text'`, or `'null'`.
+pub(super) struct Quoted<'a>(pub(super) Option<&'a str>);
+
+impl Display for Quoted<'_> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        write!(f, "'{}'", self.0.unwrap_or("null"))
+    }
+}
+
+/// A `double` as Java prints `WideDecimal.toString(WideDecimal.composeWide(d))`: the shares and the free float of a
+/// profile. The value is rounded to a decimal with a 56-bit significand; plain notation is used for at most 6 leading
+/// or trailing zeros (`1000`, `0.0001`, `1E7`).
+pub(super) struct WideDecimal(pub(super) f64);
+
+impl Display for WideDecimal {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str(&wide::to_string(wide::compose(self.0)))
+    }
+}
+
+/// A port of the parts of Java's `com.devexperts.util.WideDecimal` 3.356 that `composeWide(double)` and `toString`
+/// use: a 56-bit significand and an 8-bit rank in one `long`, the value being `significand * 10^(BIAS - rank)`; rank
+/// 0 is NaN or an infinity by the sign of the significand.
+mod wide {
+    const BIAS: i32 = 128;
+    const MAX_SIGNIFICAND: i64 = i64::MAX >> 8;
+    const MIN_SIGNIFICAND: i64 = i64::MIN >> 8;
+    const MAX_DOUBLE_VALUE: f64 = (1_i64 << 51) as f64;
+    const NAN: i64 = 0;
+    const POSITIVE_INFINITY: i64 = 0x100;
+    const NEGATIVE_INFINITY: i64 = -0x100;
+    const EXACT_LONG_POWERS: i32 = 18;
+    const MAX_LEADING_ZEROS: i32 = 6;
+    const MAX_TRAILING_ZEROS: i32 = 6;
+    const SCIENTIFIC_MODULO: i64 = 10_000_000;
+
+    /// `10^e` as Java's `Double.parseDouble("1E" + e)` gives it.
+    fn pow10(e: i32) -> f64 {
+        format!("1E{e}").parse().expect("a power of 10")
+    }
+
+    fn long_pow10(e: i32) -> i64 {
+        10_i64.pow(e as u32)
+    }
+
+    /// Java's `MULTIPLIERS[rank]`.
+    fn multiplier(rank: i32) -> f64 {
+        if rank == 0 { f64::INFINITY } else { pow10(BIAS - rank) }
+    }
+
+    /// Java's `DIVISORS[rank]`.
+    fn divisor(rank: i32) -> f64 {
+        if rank == 0 { 0.0 } else { pow10(rank - BIAS) }
+    }
+
+    /// NaN or an infinity by the sign of `significand`.
+    fn non_finite(significand: i64) -> i64 {
+        match significand.signum() {
+            1 => POSITIVE_INFINITY,
+            -1 => NEGATIVE_INFINITY,
+            _ => NAN,
+        }
+    }
+
+    /// Java's `composeWide(double)`.
+    pub(super) fn compose(value: f64) -> i64 {
+        // `as` saturates as Java's `(long)` does, and NaN gives 0 in both.
+        if value == value as i64 as f64 {
+            compose_long(value as i64)
+        } else if value >= 0.0 {
+            compose_non_negative(value)
+        } else if value < 0.0 {
+            neg(compose_non_negative(-value))
+        } else {
+            NAN
+        }
+    }
+
+    fn compose_long(value: i64) -> i64 {
+        if (MIN_SIGNIFICAND..=MAX_SIGNIFICAND).contains(&value) {
+            (value << 8) | i64::from(BIAS)
+        } else {
+            compose_non_fitting(value, BIAS)
+        }
+    }
+
+    fn compose_non_negative(value: f64) -> i64 {
+        let rank = find_rank(value);
+        if rank <= 0 {
+            return POSITIVE_INFINITY;
+        }
+        let significand = (value * divisor(rank) + 0.5) as i64;
+        compose_fitting(significand, rank)
+    }
+
+    /// Java's `findRank`: a binary search of the largest rank whose limit `value` does not exceed.
+    fn find_rank(value: f64) -> i32 {
+        let max_double = |rank: i32| MAX_DOUBLE_VALUE * multiplier(rank);
+        let mut rank = if value > max_double(128) { 0 } else { 128 };
+        for step in [64, 32, 16, 8, 4, 2, 1] {
+            if value <= max_double(rank + step) {
+                rank += step;
+            }
+        }
+        rank
+    }
+
+    /// Java's `composeNonFitting` for the target rank `BIAS`.
+    fn compose_non_fitting(mut significand: i64, mut rank: i32) -> i64 {
+        let reduction = if (MIN_SIGNIFICAND..=MAX_SIGNIFICAND).contains(&significand) {
+            0
+        } else if (MIN_SIGNIFICAND * 10 - 5..MAX_SIGNIFICAND * 10 + 5).contains(&significand) {
+            1
+        } else if (MIN_SIGNIFICAND * 100 - 50..MAX_SIGNIFICAND * 100 + 50).contains(&significand) {
+            2
+        } else {
+            3
+        };
+        if rank <= reduction {
+            return non_finite(significand);
+        }
+        let reduction = reduction.max(rank - 255);
+        if reduction > 0 {
+            significand = div10(significand, long_pow10(reduction));
+            rank -= reduction;
+        }
+        compose_fitting(significand, rank)
+    }
+
+    /// Java's `composeFitting` for the target rank `BIAS`.
+    fn compose_fitting(mut significand: i64, mut rank: i32) -> i64 {
+        if significand == 0 {
+            return i64::from(BIAS);
+        }
+        while rank > BIAS && significand % 10 == 0 {
+            significand /= 10;
+            rank -= 1;
+        }
+        let fits_one_more_digit = |s: i64| (MIN_SIGNIFICAND / 10..=MAX_SIGNIFICAND / 10).contains(&s);
+        while rank < BIAS && fits_one_more_digit(significand) {
+            significand *= 10;
+            rank += 1;
+        }
+        // Java keeps one decimal place as two: 0.5 is 50 * 10^-2.
+        if rank == BIAS + 1 && fits_one_more_digit(significand) {
+            significand *= 10;
+            rank += 1;
+        }
+        (significand << 8) | i64::from(rank)
+    }
+
+    /// Java's `div10`: division by a power of 10 that rounds half up, toward negative infinity for negative values.
+    fn div10(significand: i64, pow10: i64) -> i64 {
+        if significand >= 0 {
+            (significand / (pow10 >> 1) + 1) >> 1
+        } else {
+            ((significand + 1) / (pow10 >> 1)) >> 1
+        }
+    }
+
+    fn neg(wide: i64) -> i64 {
+        (wide ^ -0x100).wrapping_add(0x100)
+    }
+
+    /// Java's `WideDecimal.toString(long)`.
+    pub(super) fn to_string(wide: i64) -> String {
+        let significand = wide >> 8;
+        let rank = (wide & 0xFF) as i32;
+        if rank == 0 {
+            let text = match non_finite(significand) {
+                POSITIVE_INFINITY => "Infinity",
+                NEGATIVE_INFINITY => "-Infinity",
+                _ => "NaN",
+            };
+            return text.to_owned();
+        }
+        if significand == 0 {
+            return "0".to_owned();
+        }
+        match to_integer(significand, rank) {
+            0 => fractional_or_scientific(significand, rank),
+            integer => integer.to_string(),
+        }
+    }
+
+    /// Java's `toIntegerString`: the value if it is an integer with at most 6 trailing zeros, otherwise 0.
+    fn to_integer(significand: i64, rank: i32) -> i64 {
+        if rank > BIAS {
+            if rank - BIAS <= EXACT_LONG_POWERS {
+                let pow10 = long_pow10(rank - BIAS);
+                let result = significand / pow10;
+                if result * pow10 == significand && result % SCIENTIFIC_MODULO != 0 {
+                    return result;
+                }
+            }
+        } else if rank == BIAS {
+            return if significand % SCIENTIFIC_MODULO == 0 {
+                0
+            } else {
+                significand
+            };
+        } else if BIAS - rank <= EXACT_LONG_POWERS.min(MAX_TRAILING_ZEROS) {
+            let pow10 = long_pow10(BIAS - rank);
+            let result = significand.wrapping_mul(pow10);
+            if result / pow10 == significand && result % SCIENTIFIC_MODULO != 0 {
+                return result;
+            }
+        }
+        0
+    }
+
+    /// Java's `appendFractionalOrScientific`.
+    fn fractional_or_scientific(mut significand: i64, mut rank: i32) -> String {
+        while significand % 10 == 0 {
+            significand /= 10;
+            rank -= 1;
+        }
+        let mut text = significand.to_string();
+        let first_digit = i32::from(significand < 0);
+        let zeros = |n: i32| "0".repeat(n as usize);
+        if rank > BIAS {
+            let dot = text.len() as i32 - (rank - BIAS);
+            if dot > first_digit {
+                text.insert(dot as usize, '.');
+                return text;
+            }
+            if first_digit - dot <= MAX_LEADING_ZEROS {
+                text.insert_str(first_digit as usize, &format!("0.{}", zeros(first_digit - dot)));
+                return text;
+            }
+        } else if BIAS - rank <= MAX_TRAILING_ZEROS {
+            return text + &zeros(BIAS - rank);
+        }
+        let digits = text.len() as i32 - first_digit;
+        if digits != 1 {
+            text.insert((first_digit + 1) as usize, '.');
+        }
+        format!("{text}E{}", BIAS - rank + digits - 1)
+    }
 }
 
 /// The `yyyymmdd` number of a day id, the days since 1970-01-01, as Java's `DayUtil.getYearMonthDayByDayId` gives it:
@@ -214,5 +470,71 @@ mod tests {
     #[test]
     fn zero_time_needs_no_sdk() {
         assert_eq!(Time(0).to_string(), "0");
+        assert_eq!(TimeSeconds(0).to_string(), "0");
+    }
+
+    #[test]
+    fn strings_print_quoted_as_in_java() {
+        assert_eq!(Quoted(Some("desc")).to_string(), "'desc'");
+        assert_eq!(Quoted(Some("")).to_string(), "''");
+        assert_eq!(Quoted(None).to_string(), "'null'");
+    }
+
+    /// The text and the bits Java 3.356 gives for `WideDecimal.toString(WideDecimal.composeWide(d))`.
+    #[test]
+    fn wide_decimals_print_as_in_java() {
+        let cases = [
+            (1000.0, "1000"),
+            (0.5, "0.5"),
+            (1.0e-4, "0.0001"),
+            (1.23456789e10, "12345678900"),
+            (f64::NAN, "NaN"),
+            (f64::INFINITY, "Infinity"),
+            (f64::NEG_INFINITY, "-Infinity"),
+            (0.0, "0"),
+            (-0.0, "0"),
+            (1.0e7, "1E7"),
+            (1.23456789e7, "12345678.9"),
+            (1.0e-5, "0.00001"),
+            (1.2345678901234568e17, "123456789012345680"),
+            (5e-324, "0"),
+            (f64::MAX, "Infinity"),
+            (0.1, "0.1"),
+            (100.0, "100"),
+            (1.0e15, "1E15"),
+            (500.5, "500.5"),
+        ];
+        for (value, java) in cases {
+            assert_eq!(WideDecimal(value).to_string(), java, "{value:?}");
+        }
+        let bits = [
+            (1000.0, 0x3e880),
+            (0.5, 0x3282),
+            (1.0e-4, 0x184),
+            (1.23456789e10, 0x2dfdc1c3480),
+            (f64::INFINITY, 0x100),
+            (f64::NEG_INFINITY, -0x100),
+            (-0.0, 0x80),
+            (1.0e7, 0x98968080),
+            (1.23456789e7, 0x499602d282),
+            (1.2345678901234568e17, 0x2bdc545d6b4b887f),
+            (1.0e15, 0x38d7ea4c6800080),
+        ];
+        for (value, wide) in bits {
+            assert_eq!(wide::compose(value), wide, "{value:?}");
+        }
+        // Negative, tiny and huge values neither panic nor overflow.
+        for value in [
+            -2.5,
+            -1.0e-9,
+            1.0e-9,
+            -1.0e300,
+            1.5e20,
+            i64::MAX as f64,
+            i64::MIN as f64,
+            f64::MIN,
+        ] {
+            let _ = WideDecimal(value).to_string();
+        }
     }
 }

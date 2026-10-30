@@ -6,8 +6,9 @@
 //! with them. Each table also generates the offline tests of its type: they need the SDK library but no endpoint.
 //!
 //! A row is `name: kind [path.in.the.sdk.struct] = default`. The kinds are the number types `f64`, `i64` and `i32`,
-//! `char` for a Java `char` code kept in an `i16`, `string` for a nullable UTF-8 string and `attachment` for the
-//! nullable UTF-8 string the SDK keeps in a `void *`.
+//! `char` for a Java `char` code kept in an `i16`, `event_flags` for the [`EventFlags`](super::EventFlags) kept in an
+//! `i32`, `string` for a nullable UTF-8 string and `attachment` for the nullable UTF-8 string the SDK keeps in a
+//! `void *`.
 
 /// Generates an event type from its table: the owned type with `new`, its pub fields and computed values, the view
 /// with one accessor per field and value, `to_owned`, `Debug` and `Display` of the view, the conversion for
@@ -211,13 +212,16 @@ macro_rules! event_type {
 macro_rules! event_field {
     (@owned string) => { Option<String> };
     (@owned attachment) => { Option<String> };
+    (@owned event_flags) => { $crate::event::EventFlags };
     (@owned $kind:ident) => { $kind };
 
     (@view string) => { Option<::std::borrow::Cow<'_, str>> };
     (@view attachment) => { Option<::std::borrow::Cow<'_, str>> };
+    (@view event_flags) => { $crate::event::EventFlags };
     (@view $kind:ident) => { $kind };
 
     (@get char, $v:expr) => { $crate::event::exchange_code($v) };
+    (@get event_flags, $v:expr) => { $crate::event::EventFlags::from_bits($v) };
     // SAFETY: the SDK keeps the strings of an event alive while the event lives.
     (@get string, $v:expr) => { unsafe { $crate::event::opt_string($v) } };
     // SAFETY: as above; the attachment is a UTF-8 string or NULL.
@@ -229,6 +233,7 @@ macro_rules! event_field {
     (@to_owned $kind:ident, $v:expr) => { $v };
 
     (@to_sys char, $v:expr, $strings:expr, $what:expr) => { $crate::event::sys_exchange_code(*$v)? };
+    (@to_sys event_flags, $v:expr, $strings:expr, $what:expr) => { $v.bits() };
     (@to_sys string, $v:expr, $strings:expr, $what:expr) => {
         $crate::event::arena_string($strings, $v.as_deref(), $what)?
     };
@@ -239,6 +244,7 @@ macro_rules! event_field {
 
     // A value distinct for each field number `n`, in the SDK struct and as the owned event keeps it.
     (@sample_sys char, $n:expr, $strings:expr) => { (0x40 + $n) as i16 };
+    (@sample_sys event_flags, $n:expr, $strings:expr) => { event_field!(@sample i32, $n) };
     (@sample_sys string, $n:expr, $strings:expr) => {
         $crate::event::arena_string($strings, Some(format!("s{}", $n).as_str()), "").unwrap()
     };
@@ -250,11 +256,13 @@ macro_rules! event_field {
     (@sample i64, $n:expr) => { i64::from($n) * 1_000_003 };
     (@sample i32, $n:expr) => { $n as i32 * 7 + 1 };
     (@sample char, $n:expr) => { char::from(0x40 + $n as u8) };
+    (@sample event_flags, $n:expr) => { $crate::event::EventFlags::from_bits(event_field!(@sample i32, $n)) };
     (@sample string, $n:expr) => { Some(format!("s{}", $n)) };
     (@sample attachment, $n:expr) => { Some(format!("s{}", $n)) };
 
     (@assert_zero f64, $v:expr) => { assert_eq!($v, 0.0) };
     (@assert_zero char, $v:expr) => { assert_eq!($v, '\0') };
+    (@assert_zero event_flags, $v:expr) => { assert_eq!($v, $crate::event::EventFlags::empty()) };
     (@assert_zero string, $v:expr) => { assert_eq!($v, None) };
     (@assert_zero attachment, $v:expr) => { assert_eq!($v, None) };
     (@assert_zero $kind:ident, $v:expr) => { assert_eq!($v, 0) };
@@ -265,10 +273,95 @@ macro_rules! event_field {
     };
     (@extreme i64, $p:expr, $strings:expr) => { [i64::MIN, i64::MAX, -1, 0, 1, i64::MIN + 1][$p] };
     (@extreme i32, $p:expr, $strings:expr) => { [i32::MIN, i32::MAX, -1, 0, 1, i32::MIN + 1][$p] };
+    (@extreme event_flags, $p:expr, $strings:expr) => { event_field!(@extreme i32, $p, $strings) };
     (@extreme char, $p:expr, $strings:expr) => { [i16::MIN, i16::MAX, -1, 0, 0x7F, 0xD800_u16 as i16][$p] };
     (@extreme string, $p:expr, $strings:expr) => { $crate::event::extreme_string($strings, $p) };
     (@extreme attachment, $p:expr, $strings:expr) => {
         $crate::event::extreme_string($strings, $p).cast_mut().cast()
+    };
+}
+
+/// The time and the sequence of an event packed in its field `ts` (seconds in bits 32 to 63, milliseconds in bits 22
+/// to 31, the sequence in bits 0 to 21), as Java's `getTime`, `getSequence`, `setTime` and `setSequence` read and write
+/// them, for [`event_type!`].
+macro_rules! time_sequence_values {
+    (
+        $ts:ident
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Changes the time of the event and keeps the sequence, as Java's `setTime` does: the seconds are clamped
+            /// to 32 bits.
+            #[doc(alias = "setTime")]
+            pub fn set_time(&mut self, time: i64) {
+                self.$ts = $crate::event::flags::with_time(self.$ts, time);
+            }
+
+            /// Changes the sequence of the event.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the sequence is negative or above
+            /// `(1 << 22) - 1`.
+            #[doc(alias = "setSequence")]
+            pub fn set_sequence(&mut self, sequence: i32) -> $crate::Result<()> {
+                self.$ts = $crate::event::flags::with_sequence(self.$ts, sequence)?;
+                Ok(())
+            }
+        }
+
+        $cb! {
+            head { $(#[$doc])* $name, $($head)* }
+            fields { $($fields)* }
+            derived {
+                /// The time of the event, in milliseconds since the Unix epoch.
+                #[doc(alias = "getTime")]
+                fn time($ts) -> i64 {
+                    $crate::event::flags::time_of($ts)
+                }
+
+                /// The sequence number of the event, to tell apart events with the same time.
+                #[doc(alias = "getSequence")]
+                fn sequence($ts) -> i32 {
+                    $crate::event::flags::sequence_of($ts)
+                }
+
+                $($derived)*
+            }
+        }
+    };
+}
+
+/// The fields of Java's time series events that keep the time and the sequence in the index (Greeks, Underlying,
+/// TheoPrice) at the path `[p]`, with the values of [`time_sequence_values!`], for [`event_type!`].
+macro_rules! time_series_fields {
+    (
+        [$($p:ident).*]
+        $cb:ident! {
+            head { $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        time_sequence_values! {
+            index
+            $cb! {
+                head { $($head)* }
+                fields {
+                    /// The flags of the event in a transaction or a snapshot.
+                    event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
+                    /// The index of the event: its time and sequence, packed as [`time`](Self::time) and
+                    /// [`sequence`](Self::sequence) read them.
+                    index: i64 [$($p.)* index] = 0,
+                    $($fields)*
+                }
+                derived { $($derived)* }
+            }
+        }
     };
 }
 
@@ -283,11 +376,29 @@ macro_rules! trade_base_fields {
         }
     ) => {
         impl $name {
-            /// Changes the time of the trade and keeps the sequence, as Java's `setTime` does: the seconds are clamped
-            /// to 32 bits.
-            #[doc(alias = "setTime")]
-            pub fn set_time(&mut self, time: i64) {
-                self.time_sequence = $crate::event::flags::with_time(self.time_sequence, time);
+            /// Writes the text of Java's `TradeBase.baseFieldsToString` after `{`: the symbol to `ETH=...`.
+            fn fmt_trade_base(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                use $crate::event::format::{JavaChar, JavaDouble, Time, year_month_day};
+                write!(
+                    f,
+                    "{}, eventTime={}, time={}, timeNanoPart={}, sequence={}, exchange={}, tradeId={}, price={}, \
+                     change={}, size={}, day={}, dayVolume={}, dayTurnover={}, direction={}, ETH={}",
+                    self.symbol,
+                    Time(self.event_time),
+                    Time(self.time()),
+                    self.time_nano_part,
+                    self.sequence(),
+                    JavaChar(self.exchange_code),
+                    self.trade_id,
+                    JavaDouble(self.price),
+                    JavaDouble(self.change),
+                    JavaDouble(self.size),
+                    year_month_day(self.day_id),
+                    JavaDouble(self.day_volume),
+                    JavaDouble(self.day_turnover),
+                    self.tick_direction(),
+                    self.is_extended_trading_hours(),
+                )
             }
 
             /// Changes the time of the trade and its nanoseconds part, as Java's `setTimeNanos` does.
@@ -296,18 +407,6 @@ macro_rules! trade_base_fields {
                 let (time, nano_part) = $crate::event::flags::split_nanos(time_nanos);
                 self.set_time(time);
                 self.time_nano_part = nano_part;
-            }
-
-            /// Changes the sequence of the trade.
-            ///
-            /// # Errors
-            ///
-            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the sequence is negative or above
-            /// `(1 << 22) - 1`.
-            #[doc(alias = "setSequence")]
-            pub fn set_sequence(&mut self, sequence: i32) -> $crate::Result<()> {
-                self.time_sequence = $crate::event::flags::with_sequence(self.time_sequence, sequence)?;
-                Ok(())
             }
 
             /// Changes the direction of the price movement from the previous trade.
@@ -323,7 +422,9 @@ macro_rules! trade_base_fields {
             }
         }
 
-        $cb! {
+        time_sequence_values! {
+            time_sequence
+            $cb! {
             head { $(#[$doc])* $name, $($head)* }
             fields {
                 /// The time and the sequence of the trade, packed as the SDK keeps them: seconds in bits 32 to 63,
@@ -353,22 +454,10 @@ macro_rules! trade_base_fields {
                 $($fields)*
             }
             derived {
-                /// The time of the trade, in milliseconds since the Unix epoch.
-                #[doc(alias = "getTime")]
-                fn time(time_sequence) -> i64 {
-                    $crate::event::flags::time_of(time_sequence)
-                }
-
                 /// The time of the trade, in nanoseconds since the Unix epoch.
                 #[doc(alias = "getTimeNanos")]
                 fn time_nanos(time_sequence, time_nano_part) -> i64 {
                     $crate::event::flags::nanos($crate::event::flags::time_of(time_sequence), time_nano_part)
-                }
-
-                /// The sequence number of the trade, to tell apart trades with the same time.
-                #[doc(alias = "getSequence")]
-                fn sequence(time_sequence) -> i32 {
-                    $crate::event::flags::sequence_of(time_sequence)
                 }
 
                 /// The direction of the price movement from the previous trade.
@@ -384,6 +473,7 @@ macro_rules! trade_base_fields {
                 }
 
                 $($derived)*
+            }
             }
         }
     };
