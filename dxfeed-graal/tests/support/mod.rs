@@ -6,9 +6,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use dxfeed_graal::event::{
-    Greeks, GreeksRef, NuamTrade, NuamTradeRef, PriceType, Profile, ProfileRef, Quote, QuoteRef, Series, SeriesRef,
-    ShortSaleRestriction, Summary, SummaryRef, TheoPrice, TheoPriceRef, Trade, TradeETH, TradeETHRef, TradeRef,
-    TradingStatus, Underlying, UnderlyingRef,
+    Candle, CandleRef, DailyCandle, DailyCandleRef, Greeks, GreeksRef, NuamTimeAndSale, NuamTimeAndSaleRef, NuamTrade,
+    NuamTradeRef, OptionSale, OptionSaleRef, PriceType, Profile, ProfileRef, Quote, QuoteRef, Series, SeriesRef,
+    ShortSaleRestriction, Side, Summary, SummaryRef, TheoPrice, TheoPriceRef, TimeAndSale, TimeAndSaleRef,
+    TimeAndSaleType, Trade, TradeETH, TradeETHRef, TradeRef, TradingStatus, Underlying, UnderlyingRef,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, EventRef, ManualExecutor, Role, SubscriptionItem,
@@ -87,7 +88,12 @@ to_event!(
     TradeRef,
     TradeETHRef,
     SeriesRef,
-    NuamTradeRef
+    NuamTradeRef,
+    TimeAndSaleRef,
+    NuamTimeAndSaleRef,
+    OptionSaleRef,
+    CandleRef,
+    DailyCandleRef
 );
 
 impl ToEvent for EventRef<'_> {
@@ -310,7 +316,123 @@ pub fn series(symbol: &str) -> Series {
     }
 }
 
-/// One event of each mapped type, with the values of the samples.
+/// A time and sale with a distinct non-zero value in every field but the event flags.
+pub fn time_and_sale(symbol: &str) -> TimeAndSale {
+    let mut sale = TimeAndSale {
+        event_time: 1_700_000_000_500,
+        index: INDEX,
+        time_nano_part: 7,
+        exchange_code: 'Q',
+        price: 190.5,
+        size: 300.0,
+        bid_price: 190.25,
+        ask_price: 190.75,
+        exchange_sale_conditions: Some("F01".to_owned()),
+        buyer: Some("buyer_1".to_owned()),
+        seller: Some("seller_1".to_owned()),
+        trade_id: 4242,
+        ..TimeAndSale::new(symbol)
+    };
+    sale.set_trade_through_exempt('X').unwrap();
+    sale.set_aggressor_side(Side::Buy);
+    sale.set_valid_tick(true);
+    sale.set_time_and_sale_type(TimeAndSaleType::Correction);
+    sale
+}
+
+/// A Nuam time and sale with a distinct non-zero value in every field but the event flags.
+pub fn nuam_time_and_sale(symbol: &str) -> NuamTimeAndSale {
+    let sale = time_and_sale(symbol);
+    NuamTimeAndSale {
+        event_time: sale.event_time,
+        index: sale.index,
+        time_nano_part: sale.time_nano_part,
+        exchange_code: sale.exchange_code,
+        price: sale.price,
+        size: sale.size,
+        bid_price: sale.bid_price,
+        ask_price: sale.ask_price,
+        exchange_sale_conditions: sale.exchange_sale_conditions,
+        flags: sale.flags,
+        trade_id: sale.trade_id,
+        buyer: sale.buyer,
+        seller: sale.seller,
+        match_id: 99,
+        ..NuamTimeAndSale::new(symbol)
+    }
+}
+
+/// An option sale with a distinct non-zero value in every field but the event flags.
+pub fn option_sale(symbol: &str) -> OptionSale {
+    let mut sale = OptionSale {
+        event_time: 1_700_000_000_500,
+        index: 17,
+        time_sequence: INDEX,
+        time_nano_part: 7,
+        exchange_code: 'C',
+        price: 2.5,
+        size: 10.0,
+        bid_price: 2.45,
+        ask_price: 2.55,
+        exchange_sale_conditions: Some("F02".to_owned()),
+        underlying_price: 190.0,
+        volatility: 0.3,
+        delta: 0.45,
+        option_symbol: Some(".AAPL250117C150".to_owned()),
+        ..OptionSale::new(symbol)
+    };
+    sale.set_aggressor_side(Side::Sell);
+    sale.set_spread_leg(true);
+    sale
+}
+
+/// A candle with a distinct non-zero value in every field but the event flags.
+pub fn candle(symbol: &str) -> Candle {
+    Candle {
+        event_time: 1_700_000_000_500,
+        index: INDEX,
+        count: 120,
+        open: 189.0,
+        high: 191.0,
+        low: 188.5,
+        close: 190.5,
+        volume: 50_000.0,
+        vwap: 190.1,
+        bid_volume: 20_000.0,
+        ask_volume: 30_000.0,
+        imp_volatility: 0.28,
+        open_interest: 7000.0,
+        ..Candle::new(symbol)
+    }
+}
+
+/// A daily candle with the values of [`candle`].
+pub fn daily_candle(symbol: &str) -> DailyCandle {
+    let candle = candle(symbol);
+    DailyCandle {
+        event_time: candle.event_time,
+        index: candle.index,
+        count: candle.count,
+        open: candle.open,
+        high: candle.high,
+        low: candle.low,
+        close: candle.close,
+        volume: candle.volume,
+        vwap: candle.vwap,
+        bid_volume: candle.bid_volume,
+        ask_volume: candle.ask_volume,
+        imp_volatility: candle.imp_volatility,
+        open_interest: candle.open_interest,
+        ..DailyCandle::new(symbol)
+    }
+}
+
+/// The candle symbol of the samples of candles for `symbol`: its daily candles.
+pub fn candle_symbol(symbol: &str) -> String {
+    format!("{symbol}{{=d}}")
+}
+
+/// One event of each mapped type, with the values of the samples; the candles are for [`candle_symbol`].
 pub fn all_events(symbol: &str) -> Vec<Event> {
     vec![
         quote(symbol).into(),
@@ -323,11 +445,17 @@ pub fn all_events(symbol: &str) -> Vec<Event> {
         trade_eth(symbol).into(),
         series(symbol).into(),
         nuam_trade(symbol).into(),
+        time_and_sale(symbol).into(),
+        nuam_time_and_sale(symbol).into(),
+        option_sale(symbol).into(),
+        candle(&candle_symbol(symbol)).into(),
+        daily_candle(&candle_symbol(symbol)).into(),
     ]
 }
 
 /// The event as `LOCAL_HUB` delivers it: the SDK does not carry through the hub the event time of any event, the
-/// millisecond-sequence of a quote and the nanosecond part of the trades; they come back as zero.
+/// millisecond-sequence of a quote, the nanosecond part of the trades and sales, and the buyer and the seller of a
+/// time and sale; they come back as zero or `None`.
 pub fn delivered(event: Event) -> Event {
     match event {
         Event::Quote(e) => Quote {
@@ -361,6 +489,30 @@ pub fn delivered(event: Event) -> Event {
             ..e
         }
         .into(),
+        Event::TimeAndSale(e) => TimeAndSale {
+            event_time: 0,
+            time_nano_part: 0,
+            buyer: None,
+            seller: None,
+            ..e
+        }
+        .into(),
+        Event::NuamTimeAndSale(e) => NuamTimeAndSale {
+            event_time: 0,
+            time_nano_part: 0,
+            buyer: None,
+            seller: None,
+            ..e
+        }
+        .into(),
+        Event::OptionSale(e) => OptionSale {
+            event_time: 0,
+            time_nano_part: 0,
+            ..e
+        }
+        .into(),
+        Event::Candle(e) => Candle { event_time: 0, ..e }.into(),
+        Event::DailyCandle(e) => DailyCandle { event_time: 0, ..e }.into(),
         other => panic!("no delivered form of {other}"),
     }
 }

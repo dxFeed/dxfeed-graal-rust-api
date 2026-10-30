@@ -5,8 +5,9 @@ mod support;
 use std::sync::mpsc;
 
 use dxfeed_graal::event::{
-    Direction, EventFlags, Greeks, IndexedEvent, MarketEvent, NuamTrade, PriceType, Profile, Quote, Series,
-    ShortSaleRestriction, Summary, TheoPrice, TimeSeriesEvent, Trade, TradeETH, TradingStatus, Underlying,
+    Candle, DailyCandle, Direction, EventFlags, Greeks, IndexedEvent, MarketEvent, NuamTimeAndSale, NuamTrade,
+    OptionSale, PriceType, Profile, Quote, Series, ShortSaleRestriction, Side, Summary, TheoPrice, TimeAndSale,
+    TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH, TradingStatus, Underlying,
 };
 use dxfeed_graal::{Error, Event, EventRef, EventType};
 use support::{Hub, is_time, is_time_without_millis, quote};
@@ -566,4 +567,243 @@ fn packed_market_values_have_typed_accessors() {
     greeks.set_time(1_700_000_000_000);
     assert_eq!(TimeSeriesEvent::time(&greeks), 1_700_000_000_000);
     assert_eq!(MarketEvent::symbol(&greeks), "AAPL");
+}
+
+/// The strings Java 3.356 prints for `new TimeAndSale("AAPL")` and the other sale and candle events.
+#[test]
+fn new_sale_and_candle_events_print_as_in_java() {
+    let sale = "eventTime=0, eventFlags=0x0, time=0, timeNanoPart=0, sequence=0, exchange=\\0, tradeId=0, price=NaN, \
+                size=NaN, bid=NaN, ask=NaN, ESC='null', TTE=\\0, side=UNDEFINED, spread=false, ETH=false, \
+                validTick=false, type=NEW";
+    let candle = "eventTime=0, eventFlags=0x0, time=0, sequence=0, count=0, open=NaN, high=NaN, low=NaN, close=NaN, \
+                  volume=NaN, vwap=NaN, bidVolume=NaN, askVolume=NaN, impVolatility=NaN, openInterest=NaN";
+    let cases: [(String, String); 5] = [
+        (
+            TimeAndSale::new("AAPL").to_string(),
+            format!("TimeAndSale{{AAPL, {sale}}}"),
+        ),
+        (
+            NuamTimeAndSale::new("AAPL").to_string(),
+            format!("NuamTimeAndSale{{AAPL, {sale}, matchId=0}}"),
+        ),
+        (
+            OptionSale::new("AAPL").to_string(),
+            "OptionSale{AAPL, eventTime=0, eventFlags=0x0, index=0x0, time=0, timeNanoPart=0, sequence=0, \
+             exchange=\\0, price=NaN, size=NaN, bid=NaN, ask=NaN, ESC='null', TTE=\\0, side=UNDEFINED, spread=false, \
+             ETH=false, validTick=false, type=NEW, underlyingPrice=NaN, volatility=NaN, delta=NaN, optionSymbol='null'}"
+                .to_owned(),
+        ),
+        (
+            Candle::new("AAPL{=d}").to_string(),
+            format!("Candle{{AAPL{{=d}}, {candle}}}"),
+        ),
+        (
+            DailyCandle::new("AAPL{=d}").to_string(),
+            format!("DailyCandle{{AAPL{{=d}}, {candle}}}"),
+        ),
+    ];
+    for (rust, java) in cases {
+        assert_eq!(rust, java);
+    }
+}
+
+/// Sets the sale values of Java's reference strings: the setters `setTradeThroughExempt('X')`,
+/// `setAggressorSide(SELL)`, `setSpreadLeg(true)`, `setExtendedTradingHours(true)`, `setValidTick(true)` and
+/// `setType(CORRECTION)`.
+macro_rules! set_sale_flags {
+    ($sale:expr) => {
+        $sale.set_trade_through_exempt('X').unwrap();
+        $sale.set_aggressor_side(Side::Sell);
+        $sale.set_spread_leg(true);
+        $sale.set_extended_trading_hours(true);
+        $sale.set_valid_tick(true);
+        $sale.set_time_and_sale_type(TimeAndSaleType::Correction);
+        assert_eq!($sale.flags, 0x585d);
+    };
+}
+
+/// The strings Java 3.356 prints for sale and candle events filled through the Java setters of the same names.
+#[test]
+fn filled_sale_and_candle_events_print_as_in_java() {
+    let mut time_and_sale = TimeAndSale {
+        time_nano_part: 7,
+        exchange_code: 'Q',
+        trade_id: 42,
+        price: 1.5,
+        size: 10.0,
+        bid_price: 2.25,
+        ask_price: 1e7,
+        exchange_sale_conditions: Some("ESC".to_owned()),
+        buyer: Some("buyer".to_owned()),
+        seller: Some("seller".to_owned()),
+        ..TimeAndSale::new("AAPL")
+    };
+    time_and_sale.set_sequence(5).unwrap();
+    set_sale_flags!(time_and_sale);
+    let sale = "AAPL, eventTime=0, eventFlags=0x0, time=0, timeNanoPart=7, sequence=5, exchange=Q, tradeId=42, \
+                price=1.5, size=10.0, bid=2.25, ask=1.0E7, ESC='ESC', TTE=X, side=SELL, spread=true, ETH=true, \
+                validTick=true, type=CORRECTION, buyer='buyer', seller='seller'";
+    assert_eq!(time_and_sale.to_string(), format!("TimeAndSale{{{sale}}}"));
+
+    let mut nuam = NuamTimeAndSale {
+        time_nano_part: 7,
+        exchange_code: 'Q',
+        trade_id: 42,
+        price: 1.5,
+        size: 10.0,
+        bid_price: 2.25,
+        ask_price: 1e7,
+        exchange_sale_conditions: Some("ESC".to_owned()),
+        buyer: Some("buyer".to_owned()),
+        seller: Some("seller".to_owned()),
+        match_id: 99,
+        ..NuamTimeAndSale::new("AAPL")
+    };
+    nuam.set_sequence(5).unwrap();
+    set_sale_flags!(nuam);
+    assert_eq!(nuam.to_string(), format!("NuamTimeAndSale{{{sale}, matchId=99}}"));
+
+    // Java prints the buyer and the seller only when they are set, empty ones too.
+    let empty = TimeAndSale {
+        exchange_sale_conditions: Some(String::new()),
+        buyer: Some(String::new()),
+        seller: Some(String::new()),
+        ..TimeAndSale::new("AAPL")
+    };
+    assert!(empty.to_string().ends_with(
+        "ESC='', TTE=\\0, side=UNDEFINED, spread=false, ETH=false, \
+                                         validTick=false, type=NEW, buyer='', seller=''}"
+    ));
+    let seller_only = TimeAndSale {
+        seller: Some("s".to_owned()),
+        ..TimeAndSale::new("AAPL")
+    };
+    assert!(
+        seller_only.to_string().ends_with("type=NEW, seller='s'}"),
+        "{seller_only}"
+    );
+
+    let mut option_sale = OptionSale {
+        index: 17,
+        time_nano_part: 7,
+        exchange_code: 'Q',
+        price: 1.5,
+        size: 10.0,
+        bid_price: 2.25,
+        ask_price: 1e7,
+        exchange_sale_conditions: Some("ESC".to_owned()),
+        underlying_price: 100.0,
+        volatility: 0.25,
+        delta: 0.5,
+        option_symbol: Some(".AAPL250117C150".to_owned()),
+        ..OptionSale::new("AAPL")
+    };
+    option_sale.set_sequence(5).unwrap();
+    set_sale_flags!(option_sale);
+    assert_eq!(
+        option_sale.to_string(),
+        "OptionSale{AAPL, eventTime=0, eventFlags=0x0, index=0x11, time=0, timeNanoPart=7, sequence=5, exchange=Q, \
+         price=1.5, size=10.0, bid=2.25, ask=1.0E7, ESC='ESC', TTE=X, side=SELL, spread=true, ETH=true, \
+         validTick=true, type=CORRECTION, underlyingPrice=100.0, volatility=0.25, delta=0.5, \
+         optionSymbol='.AAPL250117C150'}"
+    );
+
+    let candle = "AAPL{=d}, eventTime=0, eventFlags=0x0, time=0, sequence=5, count=3, open=1.5, high=1.0E7, low=1.0, \
+                  close=10.0, volume=1000.0, vwap=1.75, bidVolume=400.0, askVolume=600.0, impVolatility=0.25, \
+                  openInterest=77.0";
+    let mut filled = Candle {
+        count: 3,
+        open: 1.5,
+        high: 1e7,
+        low: 1.0,
+        close: 10.0,
+        volume: 1000.0,
+        vwap: 1.75,
+        bid_volume: 400.0,
+        ask_volume: 600.0,
+        imp_volatility: 0.25,
+        open_interest: 77.0,
+        ..Candle::new("AAPL{=d}")
+    };
+    filled.set_sequence(5).unwrap();
+    assert_eq!(filled.to_string(), format!("Candle{{{candle}}}"));
+    let mut daily = DailyCandle {
+        count: 3,
+        open: 1.5,
+        high: 1e7,
+        low: 1.0,
+        close: 10.0,
+        volume: 1000.0,
+        vwap: 1.75,
+        bid_volume: 400.0,
+        ask_volume: 600.0,
+        imp_volatility: 0.25,
+        open_interest: 77.0,
+        ..DailyCandle::new("AAPL{=d}")
+    };
+    daily.set_sequence(5).unwrap();
+    assert_eq!(daily.to_string(), format!("DailyCandle{{{candle}}}"));
+}
+
+#[test]
+fn sale_values_have_typed_accessors() {
+    let mut sale = TimeAndSale::new("AAPL");
+    set_sale_flags!(sale);
+    assert_eq!(
+        (
+            sale.trade_through_exempt(),
+            sale.aggressor_side(),
+            sale.time_and_sale_type()
+        ),
+        ('X', Side::Sell, TimeAndSaleType::Correction)
+    );
+    assert!(sale.is_spread_leg() && sale.is_extended_trading_hours() && sale.is_valid_tick());
+    assert!(sale.is_correction() && !sale.is_new() && !sale.is_cancel());
+    sale.set_time_and_sale_type(TimeAndSaleType::Cancel);
+    sale.set_spread_leg(false);
+    sale.set_trade_through_exempt('\u{ff}').unwrap();
+    assert!(sale.is_cancel() && !sale.is_spread_leg() && sale.is_valid_tick());
+    assert_eq!(
+        (sale.trade_through_exempt(), sale.aggressor_side()),
+        ('\u{ff}', Side::Sell)
+    );
+    assert!(matches!(
+        sale.set_trade_through_exempt('\u{100}'),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert_eq!(sale.trade_through_exempt(), '\u{ff}');
+
+    sale.set_time_nanos(1_700_000_000_123_456_789);
+    assert_eq!(
+        (sale.time(), sale.time_nano_part, sale.time_nanos()),
+        (1_700_000_000_123, 456_789, 1_700_000_000_123_456_789)
+    );
+    assert_eq!(IndexedEvent::index(&sale), sale.index);
+    assert_eq!(TimeSeriesEvent::time(&sale), 1_700_000_000_123);
+
+    let mut option_sale = OptionSale {
+        index: 17,
+        ..OptionSale::new("AAPL")
+    };
+    option_sale.set_time(1_700_000_000_000);
+    assert_eq!(
+        (IndexedEvent::index(&option_sale), option_sale.time()),
+        (17, 1_700_000_000_000)
+    );
+    assert_eq!(MarketEvent::symbol(&option_sale), "AAPL");
+
+    let mut candle = Candle::new("AAPL{=d}");
+    candle.set_time(1_700_000_000_000);
+    assert_eq!(candle.index, 1_700_000_000 << 32);
+    assert_eq!(TimeSeriesEvent::time(&candle), 1_700_000_000_000);
+
+    let text = {
+        let mut sale = TimeAndSale::new("AAPL");
+        sale.set_time(1_700_000_000_789);
+        sale.to_string()
+    };
+    assert!(
+        is_time(field(&text, "time")) && field(&text, "time").ends_with(".789"),
+        "{text}"
+    );
 }

@@ -8,12 +8,13 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use dxfeed_graal::event::{
-    Greeks, NuamTrade, Profile, Quote, QuoteRef, Series, Summary, TheoPrice, Trade, TradeETH, Underlying,
+    Candle, DailyCandle, Greeks, NuamTimeAndSale, NuamTrade, OptionSale, Profile, Quote, QuoteRef, Series, Summary,
+    TheoPrice, TimeAndSale, Trade, TradeETH, Underlying,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
 };
-use support::{Hub, all_events, collect, delivered, quote, quote_with_bid, trade};
+use support::{Hub, all_events, candle_symbol, collect, delivered, quote, quote_with_bid, trade};
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
 /// nanosecond part of a quote through the hub, they come back as zero.
@@ -560,7 +561,7 @@ fn hub_with_pending_tasks_drops_quickly() {
 }
 
 /// Every mapped type, in the order of [`all_events`].
-const ALL_TYPES: [EventType; 10] = [
+const ALL_TYPES: [EventType; 15] = [
     EventType::Quote,
     EventType::Profile,
     EventType::Summary,
@@ -571,6 +572,11 @@ const ALL_TYPES: [EventType; 10] = [
     EventType::TradeETH,
     EventType::Series,
     EventType::NuamTrade,
+    EventType::TimeAndSale,
+    EventType::NuamTimeAndSale,
+    EventType::OptionSale,
+    EventType::Candle,
+    EventType::DailyCandle,
 ];
 
 #[test]
@@ -578,9 +584,12 @@ fn every_type_round_trips() {
     let hub = Hub::new();
     let subscription = hub.feed.create_subscription_with_types(&ALL_TYPES).unwrap();
     let events = collect(&subscription);
-    subscription.add_symbols(["AAPL"]).unwrap();
+    subscription
+        .add_symbols(["AAPL".to_owned(), candle_symbol("AAPL")])
+        .unwrap();
     hub.publish_and_process(&all_events("AAPL"));
-    // The hub keeps the order within a type only: a series may come after a later Nuam trade.
+    // The hub keeps the order within a type only: a series may come after a later Nuam trade. The candles arrive
+    // with the symbol they were sent with.
     let received = received(&events);
     assert_eq!(received.len(), ALL_TYPES.len(), "{received:?}");
     for expected in all_events("AAPL").into_iter().map(delivered) {
@@ -597,7 +606,9 @@ where
     let hub = Hub::new();
     let subscription = hub.feed.create_subscription::<E>().unwrap();
     let events = collect(&subscription);
-    subscription.add_symbols(["AAPL"]).unwrap();
+    subscription
+        .add_symbols(["AAPL".to_owned(), candle_symbol("AAPL")])
+        .unwrap();
     hub.publish_and_process(&all_events("AAPL"));
     received(&events)
 }
@@ -618,4 +629,9 @@ fn typed_subscriptions_receive_only_their_type() {
     check(receive_typed::<TradeETH>(), 7);
     check(receive_typed::<Series>(), 8);
     check(receive_typed::<NuamTrade>(), 9);
+    check(receive_typed::<TimeAndSale>(), 10);
+    check(receive_typed::<NuamTimeAndSale>(), 11);
+    check(receive_typed::<OptionSale>(), 12);
+    check(receive_typed::<Candle>(), 13);
+    check(receive_typed::<DailyCandle>(), 14);
 }

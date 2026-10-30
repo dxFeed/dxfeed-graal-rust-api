@@ -10,14 +10,19 @@ mod table;
 mod flags;
 #[macro_use]
 mod traits;
+mod candle;
+mod daily_candle;
 mod format;
 mod greeks;
+mod nuam_time_and_sale;
 mod nuam_trade;
+mod option_sale;
 mod profile;
 mod quote;
 mod series;
 mod summary;
 mod theo_price;
+mod time_and_sale;
 mod trade;
 mod trade_eth;
 mod underlying;
@@ -30,14 +35,19 @@ use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
-pub use flags::{Direction, EventFlags, PriceType, ShortSaleRestriction, TradingStatus};
+pub use candle::{Candle, CandleRef};
+pub use daily_candle::{DailyCandle, DailyCandleRef};
+pub use flags::{Direction, EventFlags, PriceType, ShortSaleRestriction, Side, TimeAndSaleType, TradingStatus};
 pub use greeks::{Greeks, GreeksRef};
+pub use nuam_time_and_sale::{NuamTimeAndSale, NuamTimeAndSaleRef};
 pub use nuam_trade::{NuamTrade, NuamTradeRef};
+pub use option_sale::{OptionSale, OptionSaleRef};
 pub use profile::{Profile, ProfileRef};
 pub use quote::{Quote, QuoteRef};
 pub use series::{Series, SeriesRef};
 pub use summary::{Summary, SummaryRef};
 pub use theo_price::{TheoPrice, TheoPriceRef};
+pub use time_and_sale::{TimeAndSale, TimeAndSaleRef};
 pub use trade::{Trade, TradeRef};
 pub use trade_eth::{TradeETH, TradeETHRef};
 pub use traits::{IndexedEvent, LastingEvent, MarketEvent, TimeSeriesEvent};
@@ -211,6 +221,10 @@ event_types! {
     Summary(SummaryRef) [MarketEvent LastingEvent],
     /// [`Greeks`]: the price sensitivities of an option.
     Greeks(GreeksRef) [MarketEvent LastingEvent IndexedEvent TimeSeriesEvent],
+    /// [`Candle`]: the prices and volume of a period.
+    Candle(CandleRef) [LastingEvent IndexedEvent TimeSeriesEvent],
+    /// [`DailyCandle`]: the prices and volume of a day.
+    DailyCandle(DailyCandleRef) [LastingEvent IndexedEvent TimeSeriesEvent],
     /// [`Underlying`]: the volatility and option volumes of an underlying symbol.
     Underlying(UnderlyingRef) [MarketEvent LastingEvent IndexedEvent TimeSeriesEvent],
     /// [`TheoPrice`]: the theoretical price of an option.
@@ -219,8 +233,14 @@ event_types! {
     Trade(TradeRef) [MarketEvent LastingEvent],
     /// [`TradeETH`]: the last trade in extended trading hours.
     TradeETH(TradeETHRef) [MarketEvent LastingEvent],
+    /// [`TimeAndSale`]: a trade or another market event with a price.
+    TimeAndSale(TimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`Series`]: the properties of an option series.
     Series(SeriesRef) [MarketEvent IndexedEvent],
+    /// [`OptionSale`]: a trade or another market event with a price for an option.
+    OptionSale(OptionSaleRef) [MarketEvent IndexedEvent],
+    /// [`NuamTimeAndSale`]: a time and sale of the Nuam exchange.
+    NuamTimeAndSale(NuamTimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`NuamTrade`]: the last trade of the Nuam exchange.
     NuamTrade(NuamTradeRef) [MarketEvent LastingEvent],
 }

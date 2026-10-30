@@ -51,6 +51,19 @@ pub(crate) const SUMMARY_DAY_CLOSE_TYPE: Bits = Bits::new(2, 2);
 /// The type of the previous day close price in the flags of a summary.
 pub(crate) const SUMMARY_PREV_DAY_CLOSE_TYPE: Bits = Bits::new(2, 0);
 
+/// The trade-through-exempt character in the flags of a sale.
+pub(crate) const SALE_TTE: Bits = Bits::new(8, 8);
+/// The aggressor side in the flags of a sale.
+pub(crate) const SALE_SIDE: Bits = Bits::new(2, 5);
+/// The spread leg bit in the flags of a sale.
+pub(crate) const SALE_SPREAD_LEG: Bits = Bits::new(1, 4);
+/// The extended trading hours bit in the flags of a sale.
+pub(crate) const SALE_ETH: Bits = Bits::new(1, 3);
+/// The valid tick bit in the flags of a sale.
+pub(crate) const SALE_VALID_TICK: Bits = Bits::new(1, 2);
+/// The type of a sale in its flags.
+pub(crate) const SALE_TYPE: Bits = Bits::new(2, 0);
+
 /// The largest sequence that fits the packed time and sequence fields.
 pub(crate) const MAX_SEQUENCE: i32 = (1 << 22) - 1;
 /// The sequence in the low bits of a packed time and sequence.
@@ -188,6 +201,30 @@ flag_enum! {
         Active = 1 "ACTIVE",
         /// Short sales are not restricted.
         Inactive = 2 "INACTIVE",
+    }
+}
+
+flag_enum! {
+    /// The side of an order or of the aggressor of a trade (`Side`).
+    Side {
+        /// The side is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// A buy: a bid order or a trade initiated by a buyer.
+        Buy = 1 "BUY",
+        /// A sell: an ask order or a trade initiated by a seller.
+        Sell = 2 "SELL",
+    }
+}
+
+flag_enum! {
+    /// The type of a time and sale event (`TimeAndSaleType`).
+    TimeAndSaleType {
+        /// A new event.
+        New = 0 "NEW",
+        /// A correction of an earlier event.
+        Correction = 1 "CORRECTION",
+        /// A cancellation of an earlier event.
+        Cancel = 2 "CANCEL",
     }
 }
 
@@ -340,6 +377,18 @@ mod tests {
         for code in 0..3 {
             assert_eq!(TradingStatus::from_code(code).code(), code);
             assert_eq!(ShortSaleRestriction::from_code(code).code(), code);
+        }
+        assert_eq!(
+            names(4, |c| Side::from_code(c).to_string()),
+            "UNDEFINED BUY SELL UNDEFINED"
+        );
+        assert_eq!(
+            names(4, |c| TimeAndSaleType::from_code(c).to_string()),
+            "NEW CORRECTION CANCEL NEW"
+        );
+        for code in 0..3 {
+            assert_eq!(Side::from_code(code).code(), code);
+            assert_eq!(TimeAndSaleType::from_code(code).code(), code);
         }
         for code in 0..4 {
             assert_eq!(PriceType::from_code(code).code(), code);

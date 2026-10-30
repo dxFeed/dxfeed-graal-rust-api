@@ -337,7 +337,8 @@ macro_rules! time_sequence_values {
 }
 
 /// The fields of Java's time series events that keep the time and the sequence in the index (Greeks, Underlying,
-/// TheoPrice) at the path `[p]`, with the values of [`time_sequence_values!`], for [`event_type!`].
+/// TheoPrice, TimeAndSale, Candle) at the path `[p]`, with the values of [`time_sequence_values!`], for
+/// [`event_type!`].
 macro_rules! time_series_fields {
     (
         [$($p:ident).*]
@@ -474,6 +475,362 @@ macro_rules! trade_base_fields {
 
                 $($derived)*
             }
+            }
+        }
+    };
+}
+
+/// The fields, values and setters that Java's `TimeAndSale` and `OptionSale` share, at the path `[p]`, for
+/// [`event_type!`]. With `index`, the index keeps the time and the sequence, as in `TimeAndSale`; with
+/// `time_sequence`, a field of its own keeps them next to the index, as in `OptionSale`.
+macro_rules! sale_fields {
+    (
+        [$($p:ident).*] index
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        sale_fields! {
+            @sale [$($p).*] index $name
+            time_series_fields! { [$($p).*] }
+            {}
+            $cb! { head { $(#[$doc])* $name, $($head)* } fields { $($fields)* } derived { $($derived)* } }
+        }
+    };
+    (
+        [$($p:ident).*] time_sequence
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        sale_fields! {
+            @sale [$($p).*] time_sequence $name
+            time_sequence_values! { time_sequence }
+            {
+                /// The flags of the event in a transaction or a snapshot.
+                event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
+                /// The index of the event among the events of its symbol, to correct or cancel it later.
+                index: i64 [$($p.)* index] = 0,
+                /// The time and the sequence of the event, packed as [`time`](Self::time) and
+                /// [`sequence`](Self::sequence) read them.
+                time_sequence: i64 [$($p.)* time_sequence] = 0,
+            }
+            $cb! { head { $(#[$doc])* $name, $($head)* } fields { $($fields)* } derived { $($derived)* } }
+        }
+    };
+    (
+        @sale [$($p:ident).*] $ts:ident $name:ident
+        $group:ident! { $($group_args:tt)* }
+        { $($first:tt)* }
+        $cb:ident! {
+            head { $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Writes the part of Java's `toString` from `price=` to `type=...`.
+            fn fmt_sale(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                use $crate::event::format::{JavaChar, JavaDouble, Quoted};
+                write!(
+                    f,
+                    "price={}, size={}, bid={}, ask={}, ESC={}, TTE={}, side={}, spread={}, ETH={}, validTick={}, \
+                     type={}",
+                    JavaDouble(self.price),
+                    JavaDouble(self.size),
+                    JavaDouble(self.bid_price),
+                    JavaDouble(self.ask_price),
+                    Quoted(self.exchange_sale_conditions.as_deref()),
+                    JavaChar(self.trade_through_exempt()),
+                    self.aggressor_side(),
+                    self.is_spread_leg(),
+                    self.is_extended_trading_hours(),
+                    self.is_valid_tick(),
+                    self.time_and_sale_type(),
+                )
+            }
+
+            /// Changes the time of the event and its nanoseconds part, as Java's `setTimeNanos` does.
+            #[doc(alias = "setTimeNanos")]
+            pub fn set_time_nanos(&mut self, time_nanos: i64) {
+                let (time, nano_part) = $crate::event::flags::split_nanos(time_nanos);
+                self.set_time(time);
+                self.time_nano_part = nano_part;
+            }
+
+            /// Changes the trade-through-exempt code.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the code is above `'\u{ff}'`.
+            #[doc(alias = "setTradeThroughExempt")]
+            pub fn set_trade_through_exempt(&mut self, code: char) -> $crate::Result<()> {
+                let bits = u8::try_from(code).map_err(|_| {
+                    $crate::Error::InvalidArgument(format!("trade-through-exempt code {code:?} does not fit 8 bits"))
+                })?;
+                self.flags = $crate::event::flags::SALE_TTE.set32(self.flags, bits.into());
+                Ok(())
+            }
+
+            /// Changes the side of the aggressor of the trade.
+            #[doc(alias = "setAggressorSide")]
+            pub fn set_aggressor_side(&mut self, side: $crate::event::Side) {
+                self.flags = $crate::event::flags::SALE_SIDE.set32(self.flags, side.code());
+            }
+
+            /// Changes whether the event is a leg of a spread trade.
+            #[doc(alias = "setSpreadLeg")]
+            pub fn set_spread_leg(&mut self, spread_leg: bool) {
+                self.flags = $crate::event::flags::SALE_SPREAD_LEG.set32(self.flags, spread_leg.into());
+            }
+
+            /// Changes whether the event happened in extended trading hours.
+            #[doc(alias = "setExtendedTradingHours")]
+            pub fn set_extended_trading_hours(&mut self, extended_trading_hours: bool) {
+                self.flags = $crate::event::flags::SALE_ETH.set32(self.flags, extended_trading_hours.into());
+            }
+
+            /// Changes whether the event is a valid tick.
+            #[doc(alias = "setValidTick")]
+            pub fn set_valid_tick(&mut self, valid_tick: bool) {
+                self.flags = $crate::event::flags::SALE_VALID_TICK.set32(self.flags, valid_tick.into());
+            }
+
+            /// Changes the type of the event: new, correction or cancellation.
+            #[doc(alias = "setType")]
+            pub fn set_time_and_sale_type(&mut self, sale_type: $crate::event::TimeAndSaleType) {
+                self.flags = $crate::event::flags::SALE_TYPE.set32(self.flags, sale_type.code());
+            }
+        }
+
+        $group! {
+            $($group_args)*
+            $cb! {
+                head { $($head)* }
+                fields {
+                    $($first)*
+                    /// The microseconds and nanoseconds part of the time of the event.
+                    time_nano_part: i32 [$($p.)* time_nano_part] = 0,
+                    /// The exchange code of the event; it must fit a Java `char`.
+                    exchange_code: char [$($p.)* exchange_code] = '\0',
+                    /// The price; NaN if unknown.
+                    price: f64 [$($p.)* price] = f64::NAN,
+                    /// The size; NaN if unknown.
+                    size: f64 [$($p.)* size] = f64::NAN,
+                    /// The bid price on the market at the time of the event; NaN if unknown.
+                    bid_price: f64 [$($p.)* bid_price] = f64::NAN,
+                    /// The ask price on the market at the time of the event; NaN if unknown.
+                    ask_price: f64 [$($p.)* ask_price] = f64::NAN,
+                    /// The sale conditions of the data feed, in its own format; `None` if none.
+                    exchange_sale_conditions: string [$($p.)* exchange_sale_conditions] = None,
+                    /// The flags of the event, packed as the SDK keeps them: the trade-through-exempt code in bits 8
+                    /// to 15, the aggressor side in bits 5 and 6, the spread leg, extended trading hours and valid
+                    /// tick in bits 4, 3 and 2, the type in bits 0 and 1.
+                    flags: i32 [$($p.)* flags] = 0,
+                    $($fields)*
+                }
+                derived {
+                    /// The time of the event, in nanoseconds since the Unix epoch.
+                    #[doc(alias = "getTimeNanos")]
+                    fn time_nanos($ts, time_nano_part) -> i64 {
+                        $crate::event::flags::nanos($crate::event::flags::time_of($ts), time_nano_part)
+                    }
+
+                    /// The trade-through-exempt code; `'\0'` if none.
+                    #[doc(alias = "getTradeThroughExempt")]
+                    fn trade_through_exempt(flags) -> char {
+                        char::from($crate::event::flags::SALE_TTE.get(flags.into()) as u8)
+                    }
+
+                    /// The side of the aggressor of the trade.
+                    #[doc(alias = "getAggressorSide")]
+                    fn aggressor_side(flags) -> $crate::event::Side {
+                        $crate::event::Side::from_code($crate::event::flags::SALE_SIDE.get(flags.into()))
+                    }
+
+                    /// Whether the event is a leg of a spread trade.
+                    #[doc(alias = "isSpreadLeg")]
+                    fn is_spread_leg(flags) -> bool {
+                        $crate::event::flags::SALE_SPREAD_LEG.get(flags.into()) != 0
+                    }
+
+                    /// Whether the event happened in extended trading hours.
+                    #[doc(alias = "isExtendedTradingHours")]
+                    fn is_extended_trading_hours(flags) -> bool {
+                        $crate::event::flags::SALE_ETH.get(flags.into()) != 0
+                    }
+
+                    /// Whether the event is a valid tick: a trade that may update the last price and the day
+                    /// statistics.
+                    #[doc(alias = "isValidTick")]
+                    fn is_valid_tick(flags) -> bool {
+                        $crate::event::flags::SALE_VALID_TICK.get(flags.into()) != 0
+                    }
+
+                    /// The type of the event: new, correction or cancellation.
+                    #[doc(alias = "getType")]
+                    fn time_and_sale_type(flags) -> $crate::event::TimeAndSaleType {
+                        $crate::event::TimeAndSaleType::from_code($crate::event::flags::SALE_TYPE.get(flags.into()))
+                    }
+
+                    /// Whether the event is new: neither a correction nor a cancellation.
+                    #[doc(alias = "isNew")]
+                    fn is_new(flags) -> bool {
+                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 0
+                    }
+
+                    /// Whether the event corrects an earlier event.
+                    #[doc(alias = "isCorrection")]
+                    fn is_correction(flags) -> bool {
+                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 1
+                    }
+
+                    /// Whether the event cancels an earlier event.
+                    #[doc(alias = "isCancel")]
+                    fn is_cancel(flags) -> bool {
+                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 2
+                    }
+
+                    $($derived)*
+                }
+            }
+        }
+    };
+}
+
+/// The fields of Java's `TimeAndSale` at the path `[p]`, with the values and setters of [`sale_fields!`], for
+/// [`event_type!`].
+macro_rules! time_and_sale_fields {
+    (
+        [$($p:ident).*]
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Writes the text of Java's `TimeAndSale.toString` after `{` and before `}`.
+            fn fmt_time_and_sale(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                use $crate::event::format::{JavaChar, Quoted, Time};
+                write!(
+                    f,
+                    "{}, eventTime={}, eventFlags=0x{:x}, time={}, timeNanoPart={}, sequence={}, exchange={}, \
+                     tradeId={}, ",
+                    self.symbol,
+                    Time(self.event_time),
+                    self.event_flags,
+                    Time(self.time()),
+                    self.time_nano_part,
+                    self.sequence(),
+                    JavaChar(self.exchange_code),
+                    self.trade_id,
+                )?;
+                self.fmt_sale(f)?;
+                // Java prints the buyer and the seller only when they are set.
+                if let Some(buyer) = self.buyer.as_deref() {
+                    write!(f, ", buyer={}", Quoted(Some(buyer)))?;
+                }
+                if let Some(seller) = self.seller.as_deref() {
+                    write!(f, ", seller={}", Quoted(Some(seller)))?;
+                }
+                Ok(())
+            }
+        }
+
+        sale_fields! {
+            [$($p).*] index
+            $cb! {
+                head { $(#[$doc])* $name, $($head)* }
+                fields {
+                    /// The identifier of the trade for the events of a trade (execution, correction, cancellation);
+                    /// `0` if none.
+                    trade_id: i64 [$($p.)* trade_id] = 0,
+                    /// The buyer; `None` if unknown.
+                    buyer: string [$($p.)* buyer] = None,
+                    /// The seller; `None` if unknown.
+                    seller: string [$($p.)* seller] = None,
+                    $($fields)*
+                }
+                derived { $($derived)* }
+            }
+        }
+    };
+}
+
+/// The fields of Java's `Candle` at the path `[p]`, with the values of [`time_series_fields!`], for [`event_type!`].
+macro_rules! candle_fields {
+    (
+        [$($p:ident).*]
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Writes the text of Java's `Candle.toString` after `{` and before `}`.
+            fn fmt_candle(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                use $crate::event::format::{JavaDouble, Time};
+                write!(
+                    f,
+                    "{}, eventTime={}, eventFlags=0x{:x}, time={}, sequence={}, count={}, open={}, high={}, low={}, \
+                     close={}, volume={}, vwap={}, bidVolume={}, askVolume={}, impVolatility={}, openInterest={}",
+                    self.symbol,
+                    Time(self.event_time),
+                    self.event_flags,
+                    Time(self.time()),
+                    self.sequence(),
+                    self.count,
+                    JavaDouble(self.open),
+                    JavaDouble(self.high),
+                    JavaDouble(self.low),
+                    JavaDouble(self.close),
+                    JavaDouble(self.volume),
+                    JavaDouble(self.vwap),
+                    JavaDouble(self.bid_volume),
+                    JavaDouble(self.ask_volume),
+                    JavaDouble(self.imp_volatility),
+                    JavaDouble(self.open_interest),
+                )
+            }
+        }
+
+        time_series_fields! {
+            [$($p).*]
+            $cb! {
+                head { $(#[$doc])* $name, $($head)* }
+                fields {
+                    /// The number of the original events (trades or quotes) in the candle.
+                    count: i64 [$($p.)* count] = 0,
+                    /// The first (open) price; NaN if unknown.
+                    open: f64 [$($p.)* open] = f64::NAN,
+                    /// The highest price; NaN if unknown.
+                    high: f64 [$($p.)* high] = f64::NAN,
+                    /// The lowest price; NaN if unknown.
+                    low: f64 [$($p.)* low] = f64::NAN,
+                    /// The last (close) price; NaN if unknown.
+                    close: f64 [$($p.)* close] = f64::NAN,
+                    /// The total volume; NaN if unknown.
+                    volume: f64 [$($p.)* volume] = f64::NAN,
+                    /// The volume-weighted average price; NaN if unknown.
+                    #[doc(alias = "getVWAP")]
+                    vwap: f64 [$($p.)* vwap] = f64::NAN,
+                    /// The bid volume; NaN if unknown.
+                    bid_volume: f64 [$($p.)* bid_volume] = f64::NAN,
+                    /// The ask volume; NaN if unknown.
+                    ask_volume: f64 [$($p.)* ask_volume] = f64::NAN,
+                    /// The implied volatility; NaN if unknown.
+                    imp_volatility: f64 [$($p.)* imp_volatility] = f64::NAN,
+                    /// The open interest; NaN if unknown.
+                    open_interest: f64 [$($p.)* open_interest] = f64::NAN,
+                    $($fields)*
+                }
+                derived { $($derived)* }
             }
         }
     };
