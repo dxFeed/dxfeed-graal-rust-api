@@ -1,6 +1,6 @@
 //! Endpoints: connections to data sources and hubs.
 
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
@@ -74,7 +74,10 @@ impl DXEndpointBuilder {
         self
     }
 
-    /// Sets the name used in logs and thread names.
+    /// Sets the name used in logs and thread names (the [`DXEndpoint::NAME_PROPERTY`] property).
+    ///
+    /// Without a name the endpoint is named `qdrst`, and the next ones `qdrst-1`, `qdrst-2` and so on, as the other
+    /// dxFeed Graal APIs name theirs `qdcxx` and `qdnet`.
     pub fn with_name(mut self, name: &str) -> Self {
         self.name = Some(name.to_owned());
         self
@@ -98,7 +101,12 @@ impl DXEndpointBuilder {
     ///
     /// Returns [`Error::InvalidArgument`] if a name or property contains a NUL byte.
     pub fn build(self) -> Result<DXEndpoint> {
-        let name = self.name.as_deref().map(|n| c_string(n, "endpoint name")).transpose()?;
+        let name = match self.name {
+            Some(name) => Some(name),
+            None if self.properties.iter().any(|(k, _)| k == DXEndpoint::NAME_PROPERTY) => None,
+            None => Some(default_name(NEXT_DEFAULT_NAME.fetch_add(1, Ordering::Relaxed))),
+        };
+        let name = name.as_deref().map(|n| c_string(n, "endpoint name")).transpose()?;
         let properties = self
             .properties
             .iter()
@@ -128,6 +136,18 @@ impl DXEndpointBuilder {
         // SAFETY: the builder is live and the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_Builder_build(t, b, out) })?;
         DXEndpoint::new(handle, true)
+    }
+}
+
+/// The number of the next endpoint built without a name.
+static NEXT_DEFAULT_NAME: AtomicU64 = AtomicU64::new(0);
+
+/// The name of the endpoint built `number`-th without a name: `qdrst`, then `qdrst-1`, `qdrst-2` and so on.
+fn default_name(number: u64) -> String {
+    if number == 0 {
+        "qdrst".to_owned()
+    } else {
+        format!("qdrst-{number}")
     }
 }
 
@@ -213,6 +233,10 @@ impl DXEndpoint {
         })
     }
 
+    /// The property that names an endpoint in logs and thread names (`DXEndpoint.NAME_PROPERTY`); see
+    /// [`DXEndpointBuilder::with_name`].
+    pub const NAME_PROPERTY: &'static str = "name";
+
     /// Returns a builder for an endpoint.
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> DXEndpointBuilder {
@@ -224,12 +248,10 @@ impl DXEndpoint {
         Self::create_with_role(Role::Feed)
     }
 
-    /// Creates an endpoint with `role` and default settings.
+    /// Creates an endpoint with `role` and default settings, as `new_builder().with_role(role).build()` does.
     #[doc(alias = "create")]
     pub fn create_with_role(role: Role) -> Result<Self> {
-        // SAFETY: the out-pointer is valid for writes.
-        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_createWithRole(t, role.to_sys(), out) })?;
-        Self::new(handle, true)
+        Self::new_builder().with_role(role).build()
     }
 
     /// Returns the default endpoint of the process, with the [`Role::Feed`] role (`DXEndpoint.getInstance()`).
@@ -313,5 +335,17 @@ impl DXEndpoint {
     #[doc(alias = "getPublisher")]
     pub fn publisher(&self) -> DXPublisher {
         DXPublisher::new(self.state.clone())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_names_count_from_the_second_endpoint() {
+        assert_eq!(default_name(0), "qdrst");
+        assert_eq!(default_name(1), "qdrst-1");
+        assert_eq!(default_name(12), "qdrst-12");
     }
 }
