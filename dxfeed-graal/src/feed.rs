@@ -97,8 +97,8 @@ impl DXFeed {
         Ok(DXFeedSubscription::new(handle, self.clone()))
     }
 
-    /// Returns the last event of type `E` for `symbol` from the local cache of the feed, or `None` if no subscription of
-    /// this feed is subscribed to them (`DXFeed.getLastEventIfSubscribed`).
+    /// Returns the last event of type `E` for `symbol` from the local cache of the feed, or `None` if no subscription
+    /// of this feed is subscribed to them (`DXFeed.getLastEventIfSubscribed`).
     ///
     /// The call is not remote; a wildcard subscription does not count. An event that has not arrived yet is returned
     /// with only its symbol set, as `E::new(symbol)` with the SDK defaults: `NaN` prices and sizes, other fields zero
@@ -143,8 +143,8 @@ impl DXFeed {
     /// The request needs no subscription. It completes when the event is known, which may take arbitrarily long, so
     /// [`Promise::wait`] takes a timeout. It completes exceptionally when the event is permanently unavailable and on a
     /// [`STREAM_FEED`](crate::Role::StreamFeed) endpoint. Closing the endpoint does not complete it, so only the
-    /// timeout ends a wait then. The promise keeps the endpoint open while it lives. A candle symbol such as `AAPL{=d}` is parsed by the SDK; a malformed one fails
-    /// with [`Error::Java`].
+    /// timeout ends a wait then. The promise keeps the endpoint open while it lives. A candle symbol such as
+    /// `AAPL{=d}` is parsed by the SDK; a malformed one fails with [`Error::Java`].
     ///
     /// ```no_run
     /// # fn main() -> dxfeed_graal::Result<()> {
@@ -184,8 +184,8 @@ impl DXFeed {
         Ok(Promise::new(handle, self.clone()))
     }
 
-    /// Returns a new event with the last values of the type and symbol of `event` from the local cache of the feed, or a
-    /// copy of `event` when they are not known (`DXFeed.getLastEvent`).
+    /// Returns a new event with the last values of the type and symbol of `event` from the local cache of the feed, or
+    /// a copy of `event` when they are not known (`DXFeed.getLastEvent`).
     ///
     /// The values are known when a subscription of this feed is subscribed to the type and symbol and the event has
     /// arrived; a returned copy cannot be told apart from an event that has the same values. Use
@@ -217,13 +217,11 @@ impl DXFeed {
     /// ```
     #[doc(alias = "getLastEvent")]
     pub fn get_last_event<E: LastingEvent>(&self, event: &E) -> Result<E> {
-        let mut sys_events = SysEvents::new(&[event.clone().into()])?;
-        let list = sys_events.list();
-        // SAFETY: the list holds one event, which lives while `sys_events` does.
-        let event = unsafe { *list.elements };
+        let sys_events = SysEvents::new(&[event.clone().into()])?;
+        let event = sys_events.pointers()[0];
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the event are live; the SDK only reads the event. The out-pointer is valid for writes.
         take_event(|t, out| unsafe { sys::dxfg_v4_DXFeed_getLastEvent(t, feed, event, out) })?
-            .ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned NULL")))
+            .ok_or_else(|| Error::Java(JavaException::null_result()))
     }
 }

@@ -71,6 +71,11 @@ impl JavaException {
         Self::new(String::new(), message.to_owned(), String::new(), None)
     }
 
+    /// The exception used when the SDK returned NULL where it promises a value.
+    pub(crate) fn null_result() -> Self {
+        Self::from_message("the SDK returned NULL")
+    }
+
     /// The exception used when the SDK failed to report its own exception.
     pub(crate) fn lost() -> Self {
         Self::from_message("exception lost")

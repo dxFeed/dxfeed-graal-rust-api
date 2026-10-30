@@ -41,13 +41,13 @@ time_sequence_values! {
             /// The side of the imbalance.
             #[doc(alias = "getImbalanceSide")]
             fn imbalance_side(flags) -> ImbalanceSide {
-                ImbalanceSide::from_code(IMBALANCE_SIDE.get(flags.into()))
+                ImbalanceSide::from_code(IMBALANCE_SIDE.get32(flags))
             }
 
             /// The type of the auction.
             #[doc(alias = "getAuctionType")]
             fn auction_type(flags) -> AuctionType {
-                AuctionType::from_code(IMBALANCE_AUCTION_TYPE.get(flags.into()))
+                AuctionType::from_code(IMBALANCE_AUCTION_TYPE.get32(flags))
             }
         }
     }

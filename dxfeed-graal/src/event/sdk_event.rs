@@ -65,7 +65,10 @@ pub(crate) fn take_event<E: LastingEvent>(
 /// The symbol of a last-event request for events of type `E`: a candle symbol for the candles, a string otherwise.
 pub(crate) enum SdkSymbol {
     /// A string symbol and the text its struct points to.
-    String(sys::dxfg_string_symbol_t, #[allow(dead_code)] CString),
+    String {
+        symbol: sys::dxfg_string_symbol_t,
+        _text: CString,
+    },
     /// A candle symbol the SDK created.
     Candle(NonNull<sys::dxfg_symbol_t>),
 }
@@ -78,14 +81,16 @@ impl SdkSymbol {
                 supper: sys::dxfg_symbol_t { type_: sys::STRING },
                 symbol: text.as_ptr(),
             };
-            return Ok(SdkSymbol::String(string, text));
+            return Ok(SdkSymbol::String {
+                symbol: string,
+                _text: text,
+            });
         }
         // The SDK finds the last candle only by a candle symbol: a string symbol fails with ClassCastException.
         let mut raw = ptr::null_mut();
         // SAFETY: the text is a NUL-terminated string and the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_Symbol_new(t, text.as_ptr(), sys::CANDLE, &mut raw) })?;
-        let symbol =
-            NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned NULL")))?;
+        let symbol = NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::null_result()))?;
         Ok(SdkSymbol::Candle(symbol))
     }
 
@@ -93,7 +98,7 @@ impl SdkSymbol {
     pub(crate) fn as_mut_ptr(&mut self) -> *mut sys::dxfg_symbol_t {
         match self {
             // The string of the struct is the heap buffer of the `CString`, which does not move with `self`.
-            SdkSymbol::String(string, _) => (string as *mut sys::dxfg_string_symbol_t).cast(),
+            SdkSymbol::String { symbol, .. } => (symbol as *mut sys::dxfg_string_symbol_t).cast(),
             SdkSymbol::Candle(symbol) => symbol.as_ptr(),
         }
     }

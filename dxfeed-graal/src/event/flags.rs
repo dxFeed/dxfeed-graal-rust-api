@@ -31,6 +31,16 @@ impl Bits {
         (value & !(self.mask << self.shift)) | ((i64::from(bits) & self.mask) << self.shift)
     }
 
+    /// [`Bits::get`] for a 32-bit field.
+    pub(crate) fn get32(self, value: i32) -> i32 {
+        self.get(value.into())
+    }
+
+    /// Whether any of the bits of a 32-bit field is set.
+    pub(crate) fn is_set32(self, value: i32) -> bool {
+        self.get32(value) != 0
+    }
+
     /// [`Bits::set`] for a 32-bit field; the bits must lie within the low 32.
     pub(crate) fn set32(self, value: i32, bits: i32) -> i32 {
         self.set(value.into(), bits) as i32
@@ -182,7 +192,7 @@ pub(crate) const MAX_SEQUENCE: i32 = (1 << 22) - 1;
 /// The sequence in the low bits of a packed time and sequence.
 const SEQUENCE: Bits = Bits::new(22, 0);
 /// The milliseconds of a packed time and sequence.
-const MILLIS: Bits = Bits::new(10, 22);
+pub(crate) const MILLIS: Bits = Bits::new(10, 22);
 
 /// The time in milliseconds of a packed time and sequence: seconds in bits 32 to 63, milliseconds in bits 22 to 31.
 pub(crate) fn time_of(time_sequence: i64) -> i64 {

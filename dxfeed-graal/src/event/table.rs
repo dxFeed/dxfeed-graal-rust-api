@@ -473,13 +473,13 @@ macro_rules! trade_base_fields {
                 /// The direction of the price movement from the previous trade.
                 #[doc(alias = "getTickDirection")]
                 fn tick_direction(flags) -> $crate::event::Direction {
-                    $crate::event::Direction::from_code($crate::event::flags::TRADE_DIRECTION.get(flags.into()))
+                    $crate::event::Direction::from_code($crate::event::flags::TRADE_DIRECTION.get32(flags))
                 }
 
                 /// Whether the trade happened in extended trading hours.
                 #[doc(alias = "isExtendedTradingHours")]
                 fn is_extended_trading_hours(flags) -> bool {
-                    $crate::event::flags::TRADE_ETH.get(flags.into()) != 0
+                    $crate::event::flags::TRADE_ETH.is_set32(flags)
                 }
 
                 $($derived)*
@@ -665,56 +665,57 @@ macro_rules! sale_fields {
                     /// The trade-through-exempt code; `'\0'` if none.
                     #[doc(alias = "getTradeThroughExempt")]
                     fn trade_through_exempt(flags) -> char {
-                        char::from($crate::event::flags::SALE_TTE.get(flags.into()) as u8)
+                        char::from($crate::event::flags::SALE_TTE.get32(flags) as u8)
                     }
 
                     /// The side of the aggressor of the trade.
                     #[doc(alias = "getAggressorSide")]
                     fn aggressor_side(flags) -> $crate::event::Side {
-                        $crate::event::Side::from_code($crate::event::flags::SALE_SIDE.get(flags.into()))
+                        $crate::event::Side::from_code($crate::event::flags::SALE_SIDE.get32(flags))
                     }
 
                     /// Whether the event is a leg of a spread trade.
                     #[doc(alias = "isSpreadLeg")]
                     fn is_spread_leg(flags) -> bool {
-                        $crate::event::flags::SALE_SPREAD_LEG.get(flags.into()) != 0
+                        $crate::event::flags::SALE_SPREAD_LEG.is_set32(flags)
                     }
 
                     /// Whether the event happened in extended trading hours.
                     #[doc(alias = "isExtendedTradingHours")]
                     fn is_extended_trading_hours(flags) -> bool {
-                        $crate::event::flags::SALE_ETH.get(flags.into()) != 0
+                        $crate::event::flags::SALE_ETH.is_set32(flags)
                     }
 
                     /// Whether the event is a valid tick: a trade that may update the last price and the day
                     /// statistics.
                     #[doc(alias = "isValidTick")]
                     fn is_valid_tick(flags) -> bool {
-                        $crate::event::flags::SALE_VALID_TICK.get(flags.into()) != 0
+                        $crate::event::flags::SALE_VALID_TICK.is_set32(flags)
                     }
 
                     /// The type of the event: new, correction or cancellation.
                     #[doc(alias = "getType")]
                     fn time_and_sale_type(flags) -> $crate::event::TimeAndSaleType {
-                        $crate::event::TimeAndSaleType::from_code($crate::event::flags::SALE_TYPE.get(flags.into()))
+                        $crate::event::TimeAndSaleType::from_code($crate::event::flags::SALE_TYPE.get32(flags))
                     }
 
                     /// Whether the event is new: neither a correction nor a cancellation.
                     #[doc(alias = "isNew")]
                     fn is_new(flags) -> bool {
-                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 0
+                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::New.code()
                     }
 
                     /// Whether the event corrects an earlier event.
                     #[doc(alias = "isCorrection")]
                     fn is_correction(flags) -> bool {
-                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 1
+                        $crate::event::flags::SALE_TYPE.get32(flags)
+                            == $crate::event::TimeAndSaleType::Correction.code()
                     }
 
                     /// Whether the event cancels an earlier event.
                     #[doc(alias = "isCancel")]
                     fn is_cancel(flags) -> bool {
-                        $crate::event::flags::SALE_TYPE.get(flags.into()) == 2
+                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::Cancel.code()
                     }
 
                     $($derived)*
@@ -1023,25 +1024,25 @@ macro_rules! order_base_fields {
                 /// The action of the order.
                 #[doc(alias = "getAction")]
                 fn action(flags) -> $crate::event::OrderAction {
-                    $crate::event::OrderAction::from_code($crate::event::flags::ORDER_ACTION.get(flags.into()))
+                    $crate::event::OrderAction::from_code($crate::event::flags::ORDER_ACTION.get32(flags))
                 }
 
                 /// The exchange code of the order; `'\0'` if unknown.
                 #[doc(alias = "getExchangeCode")]
                 fn exchange_code(flags) -> char {
-                    char::from($crate::event::flags::ORDER_EXCHANGE.get(flags.into()) as u8)
+                    char::from($crate::event::flags::ORDER_EXCHANGE.get32(flags) as u8)
                 }
 
                 /// The side of the order.
                 #[doc(alias = "getOrderSide")]
                 fn order_side(flags) -> $crate::event::Side {
-                    $crate::event::Side::from_code($crate::event::flags::ORDER_SIDE.get(flags.into()))
+                    $crate::event::Side::from_code($crate::event::flags::ORDER_SIDE.get32(flags))
                 }
 
                 /// The scope of the order: composite, regional, aggregate or an individual order.
                 #[doc(alias = "getScope")]
                 fn scope(flags) -> $crate::event::Scope {
-                    $crate::event::Scope::from_code($crate::event::flags::ORDER_SCOPE.get(flags.into()))
+                    $crate::event::Scope::from_code($crate::event::flags::ORDER_SCOPE.get32(flags))
                 }
 
                 $($derived)*

@@ -49,25 +49,25 @@ event_type! {
         /// The short sale restriction of the security.
         #[doc(alias = "getShortSaleRestriction")]
         fn short_sale_restriction(flags) -> ShortSaleRestriction {
-            ShortSaleRestriction::from_code(PROFILE_SSR.get(flags.into()))
+            ShortSaleRestriction::from_code(PROFILE_SSR.get32(flags))
         }
 
         /// Whether short sales of the security are restricted.
         #[doc(alias = "isShortSaleRestricted")]
         fn is_short_sale_restricted(flags) -> bool {
-            ShortSaleRestriction::from_code(PROFILE_SSR.get(flags.into())) == ShortSaleRestriction::Active
+            ShortSaleRestriction::from_code(PROFILE_SSR.get32(flags)) == ShortSaleRestriction::Active
         }
 
         /// The trading status of the security.
         #[doc(alias = "getTradingStatus")]
         fn trading_status(flags) -> TradingStatus {
-            TradingStatus::from_code(PROFILE_STATUS.get(flags.into()))
+            TradingStatus::from_code(PROFILE_STATUS.get32(flags))
         }
 
         /// Whether trading of the security is halted.
         #[doc(alias = "isTradingHalted")]
         fn is_trading_halted(flags) -> bool {
-            TradingStatus::from_code(PROFILE_STATUS.get(flags.into())) == TradingStatus::Halted
+            TradingStatus::from_code(PROFILE_STATUS.get32(flags)) == TradingStatus::Halted
         }
     }
 }

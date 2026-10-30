@@ -37,13 +37,13 @@ event_type! {
         /// The type of the day close price.
         #[doc(alias = "getDayClosePriceType")]
         fn day_close_price_type(flags) -> PriceType {
-            PriceType::from_code(SUMMARY_DAY_CLOSE_TYPE.get(flags.into()))
+            PriceType::from_code(SUMMARY_DAY_CLOSE_TYPE.get32(flags))
         }
 
         /// The type of the previous day close price.
         #[doc(alias = "getPrevDayClosePriceType")]
         fn prev_day_close_price_type(flags) -> PriceType {
-            PriceType::from_code(SUMMARY_PREV_DAY_CLOSE_TYPE.get(flags.into()))
+            PriceType::from_code(SUMMARY_PREV_DAY_CLOSE_TYPE.get32(flags))
         }
     }
 }

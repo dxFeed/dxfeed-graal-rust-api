@@ -39,9 +39,9 @@ impl<E: LastingEvent> Promise<E> {
     /// Waits at most `timeout` for the event (`Promise.awaitWithoutException`).
     ///
     /// Returns [`Error::Timeout`] when the timeout expires: a positive timeout then cancels the promise, as in Java,
-    /// while a zero timeout only checks it and leaves it pending. Returns [`Error::Java`] when the promise has completed
-    /// exceptionally or was cancelled. The timeout is rounded up to whole
-    /// milliseconds; one over 24 days waits 24 days.
+    /// while a zero timeout only checks it and leaves it pending. Returns [`Error::Java`] when the promise has
+    /// completed exceptionally or was cancelled. The timeout is rounded up to whole milliseconds; one over 24 days
+    /// waits 24 days.
     ///
     /// A positive timeout inside an event listener returns [`Error::InCallback`]: the listener thread delivers the
     /// events the promise may be waiting for.
@@ -66,8 +66,7 @@ impl<E: LastingEvent> Promise<E> {
         if timed_out {
             return Err(Error::Timeout);
         }
-        self.result()?
-            .ok_or_else(|| Error::Java(JavaException::from_message("the completed promise has no result")))
+        self.completed_result()
     }
 
     /// The event if the promise has completed with it, `None` while it is pending (`Promise.getResult`).
@@ -78,11 +77,16 @@ impl<E: LastingEvent> Promise<E> {
         if !self.is_done()? {
             return Ok(None);
         }
+        self.completed_result().map(Some)
+    }
+
+    /// The event of a completed promise, or its exception.
+    fn completed_result(&self) -> Result<E> {
         let promise = self.handle.as_ptr();
         // SAFETY: the promise is live and the out-pointer is valid for writes.
         if let Some(event) = take_event(|t, out| unsafe { sys::dxfg_v4_Promise_EventType_getResult(t, promise, out) })?
         {
-            return Ok(Some(event));
+            return Ok(event);
         }
         Err(Error::Java(self.exception()?.unwrap_or_else(JavaException::lost)))
     }

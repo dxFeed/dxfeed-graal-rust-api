@@ -2,7 +2,7 @@
 
 use dxfeed_graal_sys as sys;
 
-use super::flags::{self, MAX_SEQUENCE};
+use super::flags;
 use super::format::{JavaChar, JavaDouble, Time};
 use crate::error::Result;
 
@@ -61,7 +61,7 @@ fn quote_time(bid_time: i64, ask_time: i64, time_millis_sequence: i32) -> i64 {
         .max(ask_time)
         .div_euclid(1000)
         .wrapping_mul(1000)
-        .wrapping_add(i64::from((time_millis_sequence as u32) >> 22))
+        .wrapping_add(i64::from(flags::MILLIS.get32(time_millis_sequence)))
 }
 
 impl Quote {
@@ -93,7 +93,7 @@ impl Quote {
 
     fn recompute_time_millis(&mut self) {
         let millis = self.bid_time.max(self.ask_time).rem_euclid(1000) as i32;
-        self.time_millis_sequence = (millis << 22) | (self.time_millis_sequence & MAX_SEQUENCE);
+        self.time_millis_sequence = flags::MILLIS.set32(self.time_millis_sequence, millis);
     }
 }
 

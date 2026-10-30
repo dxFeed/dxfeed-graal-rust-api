@@ -59,13 +59,13 @@ order_base_fields! {
             /// The time in force of the order.
             #[doc(alias = "getTimeInForce")]
             fn time_in_force(nuam_flags) -> NuamTimeInForceType {
-                NuamTimeInForceType::from_code(NUAM_TIME_IN_FORCE.get(nuam_flags.into()))
+                NuamTimeInForceType::from_code(NUAM_TIME_IN_FORCE.get32(nuam_flags))
             }
 
             /// The type of the order.
             #[doc(alias = "getOrderType")]
             fn order_type(nuam_flags) -> NuamOrderType {
-                NuamOrderType::from_code(NUAM_ORDER_TYPE.get(nuam_flags.into()))
+                NuamOrderType::from_code(NUAM_ORDER_TYPE.get32(nuam_flags))
             }
         }
     }

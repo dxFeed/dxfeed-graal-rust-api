@@ -76,8 +76,7 @@ impl<T: SdkHandle> Handle<T> {
         }
         let mut raw = std::ptr::null_mut();
         call(|t| f(t, &mut raw))?;
-        let handle =
-            NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned NULL")))?;
+        let handle = NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::null_result()))?;
         LIVE.fetch_add(1, Ordering::SeqCst);
         Ok(Handle(handle))
     }

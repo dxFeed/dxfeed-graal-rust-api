@@ -469,6 +469,11 @@ impl SysEvents {
         })
     }
 
+    /// The SDK events, valid while `self` is neither moved nor dropped.
+    pub(crate) fn pointers(&self) -> &[*mut sys::dxfg_event_type_t] {
+        &self.pointers
+    }
+
     /// The SDK list over the events, valid while `self` is neither moved nor dropped.
     pub(crate) fn list(&mut self) -> sys::dxfg_event_type_list {
         debug_assert_eq!(self.events.len(), self.pointers.len());

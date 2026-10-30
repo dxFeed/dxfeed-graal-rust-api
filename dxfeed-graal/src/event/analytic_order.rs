@@ -28,7 +28,7 @@ order_base_fields! {
             /// The type of the iceberg.
             #[doc(alias = "getIcebergType")]
             fn iceberg_type(iceberg_flags) -> super::IcebergType {
-                super::IcebergType::from_code(super::flags::ICEBERG_TYPE.get(iceberg_flags.into()))
+                super::IcebergType::from_code(super::flags::ICEBERG_TYPE.get32(iceberg_flags))
             }
         }
     }

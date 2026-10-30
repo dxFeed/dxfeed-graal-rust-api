@@ -28,37 +28,37 @@ order_base_fields! {
             /// Whether the quote is open: it is eligible for execution.
             #[doc(alias = "isOpen")]
             fn is_open(otc_markets_flags) -> bool {
-                OTC_OPEN.get(otc_markets_flags.into()) != 0
+                OTC_OPEN.is_set32(otc_markets_flags)
             }
 
             /// Whether the quote is unsolicited: a broker enters it for a customer.
             #[doc(alias = "isUnsolicited")]
             fn is_unsolicited(otc_markets_flags) -> bool {
-                OTC_UNSOLICITED.get(otc_markets_flags.into()) != 0
+                OTC_UNSOLICITED.is_set32(otc_markets_flags)
             }
 
             /// The price type of the quote.
             #[doc(alias = "getOtcMarketsPriceType")]
             fn otc_markets_price_type(otc_markets_flags) -> OtcMarketsPriceType {
-                OtcMarketsPriceType::from_code(OTC_PRICE_TYPE.get(otc_markets_flags.into()))
+                OtcMarketsPriceType::from_code(OTC_PRICE_TYPE.get32(otc_markets_flags))
             }
 
             /// Whether the quote is saturated: a market maker has too many quotes at the price.
             #[doc(alias = "isSaturated")]
             fn is_saturated(otc_markets_flags) -> bool {
-                OTC_SATURATED.get(otc_markets_flags.into()) != 0
+                OTC_SATURATED.is_set32(otc_markets_flags)
             }
 
             /// Whether the quote is eligible for automatic execution.
             #[doc(alias = "isAutoExecution")]
             fn is_auto_execution(otc_markets_flags) -> bool {
-                OTC_AUTO_EXECUTION.get(otc_markets_flags.into()) != 0
+                OTC_AUTO_EXECUTION.is_set32(otc_markets_flags)
             }
 
             /// Whether the quote is NMS conditional: it may be executed only at its full size.
             #[doc(alias = "isNmsConditional")]
             fn is_nms_conditional(otc_markets_flags) -> bool {
-                OTC_NMS_CONDITIONAL.get(otc_markets_flags.into()) != 0
+                OTC_NMS_CONDITIONAL.is_set32(otc_markets_flags)
             }
         }
     }

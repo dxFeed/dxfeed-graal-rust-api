@@ -16,7 +16,8 @@ pub trait MarketEvent: EventKind {
 }
 
 /// An event whose last value a feed keeps for each symbol, as Java's `LastingEvent`: a new event replaces the previous
-/// one. A feed returns the last value with [`DXFeed::get_last_event_if_subscribed`](crate::DXFeed::get_last_event_if_subscribed),
+/// one. A feed returns the last value with
+/// [`DXFeed::get_last_event_if_subscribed`](crate::DXFeed::get_last_event_if_subscribed),
 /// [`DXFeed::get_last_event`](crate::DXFeed::get_last_event) and
 /// [`DXFeed::get_last_event_promise`](crate::DXFeed::get_last_event_promise).
 ///

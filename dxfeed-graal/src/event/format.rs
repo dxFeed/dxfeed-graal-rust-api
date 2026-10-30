@@ -30,9 +30,11 @@ impl Display for JavaDouble {
         }
         if (1e-3..1e7).contains(&a) {
             // Rust prints the same shortest digits without an exponent, but no `.0` for whole numbers.
-            let plain = a.to_string();
-            f.write_str(&plain)?;
-            return if plain.contains('.') { Ok(()) } else { f.write_str(".0") };
+            return if a.fract() == 0.0 {
+                write!(f, "{a}.0")
+            } else {
+                write!(f, "{a}")
+            };
         }
         let (digits, exponent) = java_digits(a);
         let (first, rest) = digits.split_at(1);
@@ -125,8 +127,11 @@ fn time_format(with_millis: bool) -> Option<&'static TimeFormat> {
         let mut default = ptr::null_mut();
         // SAFETY: the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
-        if default.is_null() || !with_millis {
-            return (!default.is_null()).then_some(TimeFormat(default));
+        if default.is_null() {
+            return None;
+        }
+        if !with_millis {
+            return Some(TimeFormat(default));
         }
         let mut millis = ptr::null_mut();
         // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
@@ -191,6 +196,8 @@ impl Display for WideDecimal {
 /// use: a 56-bit significand and an 8-bit rank in one `long`, the value being `significand * 10^(BIAS - rank)`; rank
 /// 0 is NaN or an infinity by the sign of the significand.
 mod wide {
+    use std::sync::OnceLock;
+
     const BIAS: i32 = 128;
     const MAX_SIGNIFICAND: i64 = i64::MAX >> 8;
     const MIN_SIGNIFICAND: i64 = i64::MIN >> 8;
@@ -205,7 +212,11 @@ mod wide {
 
     /// `10^e` as Java's `Double.parseDouble("1E" + e)` gives it.
     fn pow10(e: i32) -> f64 {
-        format!("1E{e}").parse().expect("a power of 10")
+        // The ranks give exponents from -127 to 127.
+        static POWERS: OnceLock<[f64; 256]> = OnceLock::new();
+        let powers = POWERS
+            .get_or_init(|| std::array::from_fn(|i| format!("1E{}", i as i32 - BIAS).parse().expect("a power of 10")));
+        powers[(e + BIAS) as usize]
     }
 
     fn long_pow10(e: i32) -> i64 {
