@@ -8,13 +8,17 @@ use std::sync::{Arc, Barrier, Mutex};
 use std::time::Duration;
 
 use dxfeed_graal::event::{
-    Candle, DailyCandle, Greeks, NuamTimeAndSale, NuamTrade, OptionSale, Profile, Quote, QuoteRef, Series, Summary,
-    TheoPrice, TimeAndSale, Trade, TradeETH, Underlying,
+    AnalyticOrder, Candle, DailyCandle, EventFlags, Greeks, MarketMaker, NuamOrder, NuamTimeAndSale, NuamTrade,
+    OptionSale, Order, OrderImbalance, OtcMarketsOrder, Profile, Quote, QuoteRef, Scope, Series, Side, SpreadOrder,
+    Summary, TheoPrice, TimeAndSale, Trade, TradeETH, Underlying,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
 };
-use support::{Hub, all_events, candle_symbol, collect, delivered, quote, quote_with_bid, trade};
+use support::{
+    Hub, all_events, candle_symbol, collect, delivered, market_maker, order, order_base, quote, quote_with_bid,
+    same_events, trade,
+};
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
 /// nanosecond part of a quote through the hub, they come back as zero.
@@ -39,6 +43,23 @@ fn delivered_trade(sent: Trade) -> Trade {
 
 fn received(receiver: &Receiver<Event>) -> Vec<Event> {
     receiver.try_iter().collect()
+}
+
+/// Splits the orders with a special source, the price levels that the feed builds from quotes and market makers, off
+/// the other events.
+fn split_price_levels(events: Vec<Event>) -> (Vec<Event>, Vec<Order>) {
+    let mut levels = Vec::new();
+    let others = events
+        .into_iter()
+        .filter_map(|event| match event {
+            Event::Order(order) if (1..=9).contains(&order.source()) => {
+                levels.push(order);
+                None
+            }
+            other => Some(other),
+        })
+        .collect();
+    (others, levels)
 }
 
 #[test]
@@ -561,7 +582,7 @@ fn hub_with_pending_tasks_drops_quickly() {
 }
 
 /// Every mapped type, in the order of [`all_events`].
-const ALL_TYPES: [EventType; 15] = [
+const ALL_TYPES: [EventType; 22] = [
     EventType::Quote,
     EventType::Profile,
     EventType::Summary,
@@ -577,6 +598,13 @@ const ALL_TYPES: [EventType; 15] = [
     EventType::OptionSale,
     EventType::Candle,
     EventType::DailyCandle,
+    EventType::Order,
+    EventType::AnalyticOrder,
+    EventType::OtcMarketsOrder,
+    EventType::SpreadOrder,
+    EventType::NuamOrder,
+    EventType::MarketMaker,
+    EventType::OrderImbalance,
 ];
 
 #[test]
@@ -589,11 +617,15 @@ fn every_type_round_trips() {
         .unwrap();
     hub.publish_and_process(&all_events("AAPL"));
     // The hub keeps the order within a type only: a series may come after a later Nuam trade. The candles arrive
-    // with the symbol they were sent with.
-    let received = received(&events);
+    // with the symbol they were sent with; the quote and the market maker also arrive as two price levels each.
+    let (received, levels) = split_price_levels(received(&events));
+    assert_eq!(levels.len(), 4, "{levels:?}");
     assert_eq!(received.len(), ALL_TYPES.len(), "{received:?}");
     for expected in all_events("AAPL").into_iter().map(delivered) {
-        assert!(received.contains(&expected), "{expected:?} not in {received:?}");
+        assert!(
+            received.iter().any(|e| same_events(e, &expected)),
+            "{expected:?} not in {received:?}"
+        );
     }
 }
 
@@ -617,7 +649,12 @@ where
 fn typed_subscriptions_receive_only_their_type() {
     let all = all_events("AAPL");
     let check = |received: Vec<Event>, index: usize| {
-        assert_eq!(received, vec![delivered(all[index].clone())], "{:?}", ALL_TYPES[index]);
+        let expected = [delivered(all[index].clone())];
+        assert!(
+            same_events(&received[..], &expected[..]),
+            "{:?}: {received:?}",
+            ALL_TYPES[index]
+        );
     };
     check(receive_typed::<Quote>(), 0);
     check(receive_typed::<Profile>(), 1);
@@ -634,4 +671,101 @@ fn typed_subscriptions_receive_only_their_type() {
     check(receive_typed::<OptionSale>(), 12);
     check(receive_typed::<Candle>(), 13);
     check(receive_typed::<DailyCandle>(), 14);
+    let (orders, levels) = split_price_levels(receive_typed::<Order>());
+    assert_eq!(levels.len(), 4, "{levels:?}");
+    check(orders, 15);
+    check(receive_typed::<AnalyticOrder>(), 16);
+    check(receive_typed::<OtcMarketsOrder>(), 17);
+    check(receive_typed::<SpreadOrder>(), 18);
+    check(receive_typed::<NuamOrder>(), 19);
+    check(receive_typed::<MarketMaker>(), 20);
+    check(receive_typed::<OrderImbalance>(), 21);
+}
+
+/// Java refuses these orders when they are published, with an `IllegalArgumentException` or, for an order base, a
+/// `NullPointerException`.
+#[test]
+fn invalid_orders_are_refused_by_java() {
+    let hub = Hub::new();
+    let mut undefined_side = order("AAPL");
+    undefined_side.set_order_side(Side::Undefined);
+    let events: [Event; 5] = [
+        order_base("AAPL").into(),
+        Order {
+            index: -1,
+            ..order("AAPL")
+        }
+        .into(),
+        Order {
+            event_flags: EventFlags::SNAPSHOT_END,
+            ..order("AAPL")
+        }
+        .into(),
+        undefined_side.into(),
+        Order {
+            market_maker: Some("ABCDEFGHI".to_owned()),
+            ..order("AAPL")
+        }
+        .into(),
+    ];
+    for event in events {
+        let result = hub.publisher.publish_events(std::slice::from_ref(&event));
+        assert!(matches!(result, Err(Error::Java(_))), "{event}: {result:?}");
+    }
+}
+
+/// The hub keeps 4 characters of the market maker of an order: one of 5 to 8 characters loses the first ones.
+#[test]
+fn order_market_maker_keeps_4_characters() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Order>().unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    let long = Order {
+        market_maker: Some("MM123".to_owned()),
+        ..order("AAPL")
+    };
+    hub.publish_and_process(&[long.into()]);
+    let received = received(&events);
+    assert!(
+        matches!(&received[..], [Event::Order(o)] if o.market_maker.as_deref() == Some("M123")),
+        "{received:?}"
+    );
+}
+
+/// The feed builds orders from quotes and market makers too, as the dxFeed scheme maps the `Quote` and `MarketMaker`
+/// records: the price levels of the composite and the aggregate books, with special sources.
+#[test]
+fn quotes_and_market_makers_arrive_as_price_levels() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Order>().unwrap();
+    let events = collect(&subscription);
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publish_and_process(&[quote("AAPL").into(), market_maker("AAPL").into()]);
+    let (orders, mut levels) = split_price_levels(received(&events));
+    assert!(orders.is_empty(), "{orders:?}");
+    levels.sort_by_key(Order::source);
+    let levels: Vec<_> = levels
+        .iter()
+        .map(|o| {
+            (
+                o.source(),
+                o.scope(),
+                o.order_side(),
+                o.exchange_code(),
+                o.price,
+                o.size,
+                o.market_maker.as_deref(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        levels,
+        [
+            (1, Scope::Composite, Side::Buy, 'Q', 189.5, 100.0, None),
+            (2, Scope::Composite, Side::Sell, 'N', 189.75, 200.0, None),
+            (5, Scope::Aggregate, Side::Buy, 'Q', 189.5, 100.0, Some("MM5")),
+            (6, Scope::Aggregate, Side::Sell, 'Q', 189.75, 200.0, Some("MM5")),
+        ]
+    );
 }

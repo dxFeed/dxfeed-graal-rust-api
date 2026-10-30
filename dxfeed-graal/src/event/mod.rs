@@ -10,16 +10,24 @@ mod table;
 mod flags;
 #[macro_use]
 mod traits;
+mod analytic_order;
 mod candle;
 mod daily_candle;
 mod format;
 mod greeks;
+mod market_maker;
+mod nuam_order;
 mod nuam_time_and_sale;
 mod nuam_trade;
 mod option_sale;
+mod order;
+mod order_base;
+mod order_imbalance;
+mod otc_markets_order;
 mod profile;
 mod quote;
 mod series;
+mod spread_order;
 mod summary;
 mod theo_price;
 mod time_and_sale;
@@ -35,16 +43,27 @@ use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
+pub use analytic_order::{AnalyticOrder, AnalyticOrderRef};
 pub use candle::{Candle, CandleRef};
 pub use daily_candle::{DailyCandle, DailyCandleRef};
-pub use flags::{Direction, EventFlags, PriceType, ShortSaleRestriction, Side, TimeAndSaleType, TradingStatus};
+pub use flags::{
+    AuctionType, Direction, EventFlags, IcebergType, ImbalanceSide, NuamOrderType, NuamTimeInForceType, OrderAction,
+    OtcMarketsPriceType, PriceType, Scope, ShortSaleRestriction, Side, TimeAndSaleType, TradingStatus,
+};
 pub use greeks::{Greeks, GreeksRef};
+pub use market_maker::{MarketMaker, MarketMakerRef};
+pub use nuam_order::{NuamOrder, NuamOrderRef};
 pub use nuam_time_and_sale::{NuamTimeAndSale, NuamTimeAndSaleRef};
 pub use nuam_trade::{NuamTrade, NuamTradeRef};
 pub use option_sale::{OptionSale, OptionSaleRef};
+pub use order::{Order, OrderRef};
+pub use order_base::{OrderBase, OrderBaseRef};
+pub use order_imbalance::{OrderImbalance, OrderImbalanceRef};
+pub use otc_markets_order::{OtcMarketsOrder, OtcMarketsOrderRef};
 pub use profile::{Profile, ProfileRef};
 pub use quote::{Quote, QuoteRef};
 pub use series::{Series, SeriesRef};
+pub use spread_order::{SpreadOrder, SpreadOrderRef};
 pub use summary::{Summary, SummaryRef};
 pub use theo_price::{TheoPrice, TheoPriceRef};
 pub use time_and_sale::{TimeAndSale, TimeAndSaleRef};
@@ -235,14 +254,30 @@ event_types! {
     TradeETH(TradeETHRef) [MarketEvent LastingEvent],
     /// [`TimeAndSale`]: a trade or another market event with a price.
     TimeAndSale(TimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
+    /// [`OrderBase`]: the fields that all the orders share.
+    OrderBase(OrderBaseRef) [MarketEvent IndexedEvent],
+    /// [`Order`]: an order or a price level of an order book.
+    Order(OrderRef) [MarketEvent IndexedEvent],
+    /// [`AnalyticOrder`]: an order with the analytics of its iceberg part.
+    AnalyticOrder(AnalyticOrderRef) [MarketEvent IndexedEvent],
+    /// [`OtcMarketsOrder`]: an order of OTC Markets.
+    OtcMarketsOrder(OtcMarketsOrderRef) [MarketEvent IndexedEvent],
+    /// [`SpreadOrder`]: an order or a price level of an order book for a spread.
+    SpreadOrder(SpreadOrderRef) [MarketEvent IndexedEvent],
     /// [`Series`]: the properties of an option series.
     Series(SeriesRef) [MarketEvent IndexedEvent],
     /// [`OptionSale`]: a trade or another market event with a price for an option.
     OptionSale(OptionSaleRef) [MarketEvent IndexedEvent],
+    /// [`MarketMaker`]: the best bid and ask of a market maker.
+    MarketMaker(MarketMakerRef) [MarketEvent IndexedEvent],
+    /// [`NuamOrder`]: an order of the Nuam exchange.
+    NuamOrder(NuamOrderRef) [MarketEvent IndexedEvent],
     /// [`NuamTimeAndSale`]: a time and sale of the Nuam exchange.
     NuamTimeAndSale(NuamTimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`NuamTrade`]: the last trade of the Nuam exchange.
     NuamTrade(NuamTradeRef) [MarketEvent LastingEvent],
+    /// [`OrderImbalance`]: the imbalance of the orders before an auction.
+    OrderImbalance(OrderImbalanceRef) [MarketEvent],
 }
 
 /// What a [`DXFeedSubscription`](crate::DXFeedSubscription) delivers: an owned event type such as [`Quote`] for a

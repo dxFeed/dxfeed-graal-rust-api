@@ -36,7 +36,14 @@ time_sequence_values! {
             /// The implied simple interest return of the underlying; NaN if unknown.
             interest: f64 [interest] = f64::NAN,
         }
-        derived {}
+        derived {
+            /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's `getSource`
+            /// gives it.
+            #[doc(alias = "getSource")]
+            fn source() -> i32 {
+                0
+            }
+        }
     }
 }
 

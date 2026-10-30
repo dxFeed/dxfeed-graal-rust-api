@@ -6,10 +6,13 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 
 use dxfeed_graal::event::{
-    Candle, CandleRef, DailyCandle, DailyCandleRef, Greeks, GreeksRef, NuamTimeAndSale, NuamTimeAndSaleRef, NuamTrade,
-    NuamTradeRef, OptionSale, OptionSaleRef, PriceType, Profile, ProfileRef, Quote, QuoteRef, Series, SeriesRef,
-    ShortSaleRestriction, Side, Summary, SummaryRef, TheoPrice, TheoPriceRef, TimeAndSale, TimeAndSaleRef,
-    TimeAndSaleType, Trade, TradeETH, TradeETHRef, TradeRef, TradingStatus, Underlying, UnderlyingRef,
+    AnalyticOrder, AnalyticOrderRef, AuctionType, Candle, CandleRef, DailyCandle, DailyCandleRef, Greeks, GreeksRef,
+    IcebergType, ImbalanceSide, MarketMaker, MarketMakerRef, NuamOrder, NuamOrderRef, NuamOrderType, NuamTimeAndSale,
+    NuamTimeAndSaleRef, NuamTimeInForceType, NuamTrade, NuamTradeRef, OptionSale, OptionSaleRef, Order, OrderAction,
+    OrderBase, OrderBaseRef, OrderImbalance, OrderImbalanceRef, OrderRef, OtcMarketsOrder, OtcMarketsOrderRef,
+    OtcMarketsPriceType, PriceType, Profile, ProfileRef, Quote, QuoteRef, Scope, Series, SeriesRef,
+    ShortSaleRestriction, Side, SpreadOrder, SpreadOrderRef, Summary, SummaryRef, TheoPrice, TheoPriceRef, TimeAndSale,
+    TimeAndSaleRef, TimeAndSaleType, Trade, TradeETH, TradeETHRef, TradeRef, TradingStatus, Underlying, UnderlyingRef,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, EventRef, ManualExecutor, Role, SubscriptionItem,
@@ -93,7 +96,15 @@ to_event!(
     NuamTimeAndSaleRef,
     OptionSaleRef,
     CandleRef,
-    DailyCandleRef
+    DailyCandleRef,
+    OrderBaseRef,
+    OrderRef,
+    AnalyticOrderRef,
+    OtcMarketsOrderRef,
+    SpreadOrderRef,
+    NuamOrderRef,
+    MarketMakerRef,
+    OrderImbalanceRef
 );
 
 impl ToEvent for EventRef<'_> {
@@ -427,6 +438,169 @@ pub fn daily_candle(symbol: &str) -> DailyCandle {
     }
 }
 
+/// An order of type `$type` from the default source with a distinct non-zero value in every field of `OrderBase` but
+/// the event flags, and the fields given.
+macro_rules! sample_order {
+    ($type:ident($symbol:expr) { $($field:ident: $value:expr,)* }) => {{
+        let mut order = $type {
+            event_time: 1_700_000_000_500,
+            index: 17,
+            time_sequence: INDEX,
+            time_nano_part: 7,
+            action_time: 1_700_000_000_400,
+            order_id: 1001,
+            aux_order_id: 1002,
+            price: 189.5,
+            size: 300.0,
+            executed_size: 100.0,
+            count: 4,
+            trade_id: 42,
+            trade_price: 189.25,
+            trade_size: 50.0,
+            $($field: $value,)*
+            ..$type::new($symbol)
+        };
+        order.set_action(OrderAction::Partial);
+        order.set_exchange_code('Q').unwrap();
+        order.set_order_side(Side::Buy);
+        order.set_scope(Scope::Order);
+        order
+    }};
+}
+
+/// An order base, which `LOCAL_HUB` does not publish, with the values of [`order`].
+pub fn order_base(symbol: &str) -> OrderBase {
+    sample_order!(OrderBase(symbol) {})
+}
+
+/// An order with a distinct non-zero value in every field but the event flags. The market maker has up to 4
+/// characters: the hub refuses a longer one.
+pub fn order(symbol: &str) -> Order {
+    sample_order!(Order(symbol) {
+        market_maker: Some("MM1".to_owned()),
+    })
+}
+
+/// An analytic order with a distinct non-zero value in every field but the event flags.
+pub fn analytic_order(symbol: &str) -> AnalyticOrder {
+    let mut order = sample_order!(AnalyticOrder(symbol) {
+        market_maker: Some("MM2".to_owned()),
+        iceberg_peak_size: 50.0,
+        iceberg_hidden_size: 250.0,
+        iceberg_executed_size: 25.0,
+    });
+    order.set_iceberg_type(IcebergType::Native);
+    order
+}
+
+/// An OTC Markets order with a distinct non-zero value in every field but the event flags.
+pub fn otc_markets_order(symbol: &str) -> OtcMarketsOrder {
+    let mut order = sample_order!(OtcMarketsOrder(symbol) {
+        market_maker: Some("MM3".to_owned()),
+        quote_access_payment: 15,
+    });
+    order.set_open(true);
+    order.set_otc_markets_price_type(OtcMarketsPriceType::Actual);
+    order.set_auto_execution(true);
+    order
+}
+
+/// A spread order with a distinct non-zero value in every field but the event flags.
+pub fn spread_order(symbol: &str) -> SpreadOrder {
+    sample_order!(SpreadOrder(symbol) {
+        spread_symbol: Some("=AAPL-MSFT".to_owned()),
+    })
+}
+
+/// A Nuam order with a distinct non-zero value in every field but the event flags.
+pub fn nuam_order(symbol: &str) -> NuamOrder {
+    let mut order = sample_order!(NuamOrder(symbol) {
+        market_maker: Some("MM4".to_owned()),
+        actor_id: 1,
+        participant_id: 2,
+        submitter_id: 3,
+        on_behalf_of_submitter_id: 4,
+        client_order_id: Some("cid".to_owned()),
+        customer_account: Some("acct".to_owned()),
+        customer_info: Some("cinfo".to_owned()),
+        exchange_info: Some("einfo".to_owned()),
+        time_in_force_data: 5,
+        trigger_order_book_id: 6,
+        trigger_price: 188.0,
+        trigger_session_type: 7,
+        order_quantity: 400.0,
+        display_quantity: 100.0,
+        refresh_quantity: 50.0,
+        leaves_quantity: 200.0,
+        matched_quantity: 100.0,
+    });
+    order.set_time_in_force(NuamTimeInForceType::Gtc);
+    order.set_order_type(NuamOrderType::Limit);
+    order
+}
+
+/// A market maker with a distinct non-zero value in every field but the event flags.
+pub fn market_maker(symbol: &str) -> MarketMaker {
+    let mut market_maker = MarketMaker {
+        event_time: 1_700_000_000_500,
+        bid_time: 1_700_000_000_000,
+        bid_price: 189.5,
+        bid_size: 100.0,
+        bid_count: 3,
+        ask_time: 1_700_000_001_000,
+        ask_price: 189.75,
+        ask_size: 200.0,
+        ask_count: 4,
+        ..MarketMaker::new(symbol)
+    };
+    market_maker.set_exchange_code('Q').unwrap();
+    market_maker.set_market_maker("MM5").unwrap();
+    market_maker
+}
+
+/// An order imbalance from the default source with a distinct non-zero value in every other field.
+pub fn order_imbalance(symbol: &str) -> OrderImbalance {
+    let mut imbalance = OrderImbalance {
+        event_time: 1_700_000_000_500,
+        time_sequence: INDEX,
+        ref_price: 189.5,
+        paired_size: 1000.0,
+        imbalance_size: 250.0,
+        near_price: 189.6,
+        far_price: 189.4,
+        ..OrderImbalance::new(symbol)
+    };
+    imbalance.set_imbalance_side(ImbalanceSide::Sell);
+    imbalance.set_auction_type(AuctionType::Closing);
+    imbalance
+}
+
+/// The order as `LOCAL_HUB` delivers it: the SDK does not carry through the hub the event time, the nanosecond part,
+/// the action time, the order ids, the executed size and the trade of an order; they come back as zero or NaN.
+macro_rules! delivered_order {
+    ($type:ident($sent:expr) { $($field:ident: $value:expr,)* }) => {
+        $type {
+            event_time: 0,
+            time_nano_part: 0,
+            action_time: 0,
+            order_id: 0,
+            aux_order_id: 0,
+            executed_size: f64::NAN,
+            trade_id: 0,
+            trade_price: f64::NAN,
+            trade_size: f64::NAN,
+            $($field: $value,)*
+            ..$sent
+        }
+        .into()
+    };
+}
+
+/// Whether the events are the same, NaN values included: their `Debug` texts are equal.
+pub fn same_events<T: std::fmt::Debug + ?Sized>(a: &T, b: &T) -> bool {
+    format!("{a:?}") == format!("{b:?}")
+}
+
 /// The candle symbol of the samples of candles for `symbol`: its daily candles.
 pub fn candle_symbol(symbol: &str) -> String {
     format!("{symbol}{{=d}}")
@@ -450,12 +624,20 @@ pub fn all_events(symbol: &str) -> Vec<Event> {
         option_sale(symbol).into(),
         candle(&candle_symbol(symbol)).into(),
         daily_candle(&candle_symbol(symbol)).into(),
+        order(symbol).into(),
+        analytic_order(symbol).into(),
+        otc_markets_order(symbol).into(),
+        spread_order(symbol).into(),
+        nuam_order(symbol).into(),
+        market_maker(symbol).into(),
+        order_imbalance(symbol).into(),
     ]
 }
 
 /// The event as `LOCAL_HUB` delivers it: the SDK does not carry through the hub the event time of any event, the
-/// millisecond-sequence of a quote, the nanosecond part of the trades and sales, and the buyer and the seller of a
-/// time and sale; they come back as zero or `None`.
+/// millisecond-sequence of a quote, the nanosecond part of the trades and sales, the buyer and the seller of a time
+/// and sale, the fields of [`delivered_order!`] and the iceberg of an analytic order, and the market maker of a Nuam
+/// order; they come back as zero, NaN or `None`. Compare with [`same_events`]: NaN is not equal to itself.
 pub fn delivered(event: Event) -> Event {
     match event {
         Event::Quote(e) => Quote {
@@ -513,6 +695,20 @@ pub fn delivered(event: Event) -> Event {
         .into(),
         Event::Candle(e) => Candle { event_time: 0, ..e }.into(),
         Event::DailyCandle(e) => DailyCandle { event_time: 0, ..e }.into(),
+        Event::Order(e) => delivered_order!(Order(e) {}),
+        Event::AnalyticOrder(e) => delivered_order!(AnalyticOrder(e) {
+            iceberg_peak_size: f64::NAN,
+            iceberg_hidden_size: f64::NAN,
+            iceberg_executed_size: f64::NAN,
+            iceberg_flags: 0,
+        }),
+        Event::OtcMarketsOrder(e) => delivered_order!(OtcMarketsOrder(e) {}),
+        Event::SpreadOrder(e) => delivered_order!(SpreadOrder(e) {}),
+        Event::NuamOrder(e) => delivered_order!(NuamOrder(e) {
+            market_maker: None,
+        }),
+        Event::MarketMaker(e) => MarketMaker { event_time: 0, ..e }.into(),
+        Event::OrderImbalance(e) => OrderImbalance { event_time: 0, ..e }.into(),
         other => panic!("no delivered form of {other}"),
     }
 }

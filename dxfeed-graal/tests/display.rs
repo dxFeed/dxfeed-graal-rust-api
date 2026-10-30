@@ -5,8 +5,10 @@ mod support;
 use std::sync::mpsc;
 
 use dxfeed_graal::event::{
-    Candle, DailyCandle, Direction, EventFlags, Greeks, IndexedEvent, MarketEvent, NuamTimeAndSale, NuamTrade,
-    OptionSale, PriceType, Profile, Quote, Series, ShortSaleRestriction, Side, Summary, TheoPrice, TimeAndSale,
+    AnalyticOrder, AuctionType, Candle, DailyCandle, Direction, EventFlags, Greeks, IcebergType, ImbalanceSide,
+    IndexedEvent, MarketEvent, MarketMaker, NuamOrder, NuamOrderType, NuamTimeAndSale, NuamTimeInForceType, NuamTrade,
+    OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OtcMarketsOrder, OtcMarketsPriceType, PriceType,
+    Profile, Quote, Scope, Series, ShortSaleRestriction, Side, SpreadOrder, Summary, TheoPrice, TimeAndSale,
     TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH, TradingStatus, Underlying,
 };
 use dxfeed_graal::{Error, Event, EventRef, EventType};
@@ -806,4 +808,321 @@ fn sale_values_have_typed_accessors() {
         is_time(field(&text, "time")) && field(&text, "time").ends_with(".789"),
         "{text}"
     );
+}
+
+/// The text that Java 3.356 prints for `OrderBase.baseFieldsToString` of a new order, after the source.
+const NEW_ORDER_BASE: &str = "eventFlags=0x0, index=0x0, time=0, sequence=0, timeNanoPart=0, action=UNDEFINED, \
+                              actionTime=0, orderId=0, auxOrderId=0, price=NaN, size=NaN, executedSize=NaN, count=0, \
+                              exchange=\\0, side=UNDEFINED, scope=COMPOSITE, tradeId=0, tradePrice=NaN, tradeSize=NaN";
+
+/// The strings Java 3.356 prints for `new Order("AAPL")` and the other order-book events.
+#[test]
+fn new_order_events_print_as_in_java() {
+    let base = format!("AAPL, eventTime=0, source=DEFAULT, {NEW_ORDER_BASE}");
+    let cases: [(String, String); 8] = [
+        (OrderBase::new("AAPL").to_string(), format!("OrderBase{{{base}}}")),
+        (
+            Order::new("AAPL").to_string(),
+            format!("Order{{{base}, marketMaker='null'}}"),
+        ),
+        (
+            AnalyticOrder::new("AAPL").to_string(),
+            format!(
+                "AnalyticOrder{{{base}, marketMaker='null', icebergPeakSize=NaN, icebergHiddenSize=NaN, \
+                 icebergExecutedSize=NaN, icebergType=UNDEFINED}}"
+            ),
+        ),
+        (
+            SpreadOrder::new("AAPL").to_string(),
+            format!("SpreadOrder{{{base}, spreadSymbol='null'}}"),
+        ),
+        (
+            OtcMarketsOrder::new("AAPL").to_string(),
+            format!(
+                "OtcMarketsOrder{{{base}, marketMaker='null', QAP=0, open=false, unsolicited=false, \
+                 priceType=UNPRICED, saturated=false, autoEx=false, NMS=false}}"
+            ),
+        ),
+        (
+            NuamOrder::new("AAPL").to_string(),
+            format!(
+                "NuamOrder{{{base}, marketMaker='null', actorId=0, participantId=0, submitterId=0, \
+                 onBehalfOfSubmitterId=0, clientOrderId='null', customerAccount='null', customerInfo='null', \
+                 timeInForce=UNDEFINED, timeInForceData=0, triggerOrderBookId=0, triggerPrice=NaN, \
+                 triggerSessionType=0, orderType=UNDEFINED, orderQuantity=NaN, displayQuantity=NaN, \
+                 refreshQuantity=NaN, leavesQuantity=NaN, matchedQuantity=NaN}}"
+            ),
+        ),
+        (
+            MarketMaker::new("AAPL").to_string(),
+            "MarketMaker{AAPL, eventTime=0, source=DEFAULT, eventFlags=0x0, index=0x0, time=0, exchange=\\0, \
+             marketMaker='null', bidTime=0, bidPrice=NaN, bidSize=NaN, bidCount=0, askTime=0, askPrice=NaN, \
+             askSize=NaN, askCount=0}"
+                .to_owned(),
+        ),
+        (
+            OrderImbalance::new("AAPL").to_string(),
+            "OrderImbalance{AAPL, eventTime=0, source=DEFAULT, time=0, sequence=0, refPrice=NaN, pairedSize=NaN, \
+             imbalanceSize=NaN, nearPrice=NaN, farPrice=NaN, imbalanceSide=UNDEFINED, auctionType=UNDEFINED}"
+                .to_owned(),
+        ),
+    ];
+    for (rust, java) in cases {
+        assert_eq!(rust, java);
+    }
+}
+
+/// The id of Java's order source `NTV`.
+const NTV: i32 = 0x4e5456;
+
+/// Fills an order as Java's reference strings do: `setIndex(17)`, `setSource(NTV)`, `setSequence(5)`,
+/// `setTimeNanoPart(7)`, `setAction(NEW)`, `setOrderId(1001)`, `setAuxOrderId(1002)`, `setPrice(1.5)`, `setSize(10)`,
+/// `setExecutedSize(2.25)`, `setCount(3)`, `setExchangeCode('Q')`, `setOrderSide(SELL)`, `setScope(ORDER)`,
+/// `setTradeId(42)`, `setTradePrice(1.0E7)` and `setTradeSize(4.5)`.
+macro_rules! fill_order_base {
+    ($order:expr) => {
+        $order.index = 17;
+        $order.set_source(NTV).unwrap();
+        $order.set_sequence(5).unwrap();
+        $order.time_nano_part = 7;
+        $order.set_action(OrderAction::New);
+        $order.order_id = 1001;
+        $order.aux_order_id = 1002;
+        $order.price = 1.5;
+        $order.size = 10.0;
+        $order.executed_size = 2.25;
+        $order.count = 3;
+        $order.set_exchange_code('Q').unwrap();
+        $order.set_order_side(Side::Sell);
+        $order.set_scope(Scope::Order);
+        $order.trade_id = 42;
+        $order.trade_price = 1e7;
+        $order.trade_size = 4.5;
+        assert_eq!(($order.index, $order.flags), (0x4e_5456_0000_0011, 0xd1b));
+    };
+}
+
+/// The strings Java 3.356 prints for order-book events filled through the Java setters of the same names.
+#[test]
+fn filled_order_events_print_as_in_java() {
+    let base = "AAPL, eventTime=0, source=NTV, eventFlags=0x0, index=0x4e545600000011, time=0, sequence=5, \
+                timeNanoPart=7, action=NEW, actionTime=0, orderId=1001, auxOrderId=1002, price=1.5, size=10.0, \
+                executedSize=2.25, count=3, exchange=Q, side=SELL, scope=ORDER, tradeId=42, tradePrice=1.0E7, \
+                tradeSize=4.5";
+
+    let mut order_base = OrderBase::new("AAPL");
+    fill_order_base!(order_base);
+    assert_eq!(order_base.to_string(), format!("OrderBase{{{base}}}"));
+
+    let mut order = Order {
+        market_maker: Some("MM1".to_owned()),
+        ..Order::new("AAPL")
+    };
+    fill_order_base!(order);
+    assert_eq!(order.to_string(), format!("Order{{{base}, marketMaker='MM1'}}"));
+
+    let mut analytic = AnalyticOrder {
+        market_maker: Some("MM1".to_owned()),
+        iceberg_peak_size: 1.5,
+        iceberg_hidden_size: 2.25,
+        iceberg_executed_size: 10.0,
+        ..AnalyticOrder::new("AAPL")
+    };
+    fill_order_base!(analytic);
+    analytic.set_iceberg_type(IcebergType::Synthetic);
+    assert_eq!(
+        analytic.to_string(),
+        format!(
+            "AnalyticOrder{{{base}, marketMaker='MM1', icebergPeakSize=1.5, icebergHiddenSize=2.25, \
+             icebergExecutedSize=10.0, icebergType=SYNTHETIC}}"
+        )
+    );
+
+    let mut spread = SpreadOrder {
+        spread_symbol: Some("SPR".to_owned()),
+        ..SpreadOrder::new("AAPL")
+    };
+    fill_order_base!(spread);
+    assert_eq!(spread.to_string(), format!("SpreadOrder{{{base}, spreadSymbol='SPR'}}"));
+
+    let mut otc = OtcMarketsOrder {
+        market_maker: Some("MM1".to_owned()),
+        quote_access_payment: 15,
+        ..OtcMarketsOrder::new("AAPL")
+    };
+    fill_order_base!(otc);
+    otc.set_open(true);
+    otc.set_unsolicited(true);
+    otc.set_otc_markets_price_type(OtcMarketsPriceType::Actual);
+    otc.set_saturated(true);
+    otc.set_auto_execution(true);
+    otc.set_nms_conditional(true);
+    assert_eq!(otc.otc_markets_flags, 0x77);
+    assert_eq!(
+        otc.to_string(),
+        format!(
+            "OtcMarketsOrder{{{base}, marketMaker='MM1', QAP=15, open=true, unsolicited=true, priceType=ACTUAL, \
+             saturated=true, autoEx=true, NMS=true}}"
+        )
+    );
+
+    let mut nuam = NuamOrder {
+        market_maker: Some("MM1".to_owned()),
+        actor_id: 1,
+        participant_id: 2,
+        submitter_id: 3,
+        on_behalf_of_submitter_id: 4,
+        client_order_id: Some("cid".to_owned()),
+        customer_account: Some("acct".to_owned()),
+        customer_info: Some("cinfo".to_owned()),
+        exchange_info: Some("einfo".to_owned()),
+        time_in_force_data: 5,
+        trigger_order_book_id: 6,
+        trigger_price: 1.5,
+        trigger_session_type: 7,
+        order_quantity: 1e7,
+        display_quantity: 2.25,
+        refresh_quantity: 3.5,
+        leaves_quantity: 4.5,
+        matched_quantity: 5.5,
+        ..NuamOrder::new("AAPL")
+    };
+    fill_order_base!(nuam);
+    nuam.set_time_in_force(NuamTimeInForceType::Gtc);
+    nuam.set_order_type(NuamOrderType::Limit);
+    assert_eq!(nuam.nuam_flags, 0x21);
+    assert_eq!(
+        nuam.to_string(),
+        format!(
+            "NuamOrder{{{base}, marketMaker='MM1', actorId=1, participantId=2, submitterId=3, \
+             onBehalfOfSubmitterId=4, clientOrderId='cid', customerAccount='acct', customerInfo='cinfo', \
+             timeInForce=GTC, timeInForceData=5, triggerOrderBookId=6, triggerPrice=1.5, triggerSessionType=7, \
+             orderType=LIMIT, orderQuantity=1.0E7, displayQuantity=2.25, refreshQuantity=3.5, leavesQuantity=4.5, \
+             matchedQuantity=5.5}}"
+        )
+    );
+
+    let mut market_maker = MarketMaker {
+        bid_price: 1.5,
+        bid_size: 10.0,
+        bid_count: 3,
+        ask_price: 2.25,
+        ask_size: 1e7,
+        ask_count: 4,
+        ..MarketMaker::new("AAPL")
+    };
+    market_maker.set_exchange_code('Q').unwrap();
+    market_maker.set_market_maker("MM1").unwrap();
+    assert_eq!(
+        market_maker.to_string(),
+        "MarketMaker{AAPL, eventTime=0, source=DEFAULT, eventFlags=0x0, index=0x51004d4d31, time=0, exchange=Q, \
+         marketMaker='MM1', bidTime=0, bidPrice=1.5, bidSize=10.0, bidCount=3, askTime=0, askPrice=2.25, \
+         askSize=1.0E7, askCount=4}"
+    );
+
+    let mut imbalance = OrderImbalance {
+        source_id: NTV,
+        ref_price: 1.5,
+        paired_size: 10.0,
+        imbalance_size: 2.25,
+        near_price: 1e7,
+        far_price: 3.5,
+        ..OrderImbalance::new("AAPL")
+    };
+    imbalance.set_sequence(5).unwrap();
+    imbalance.set_imbalance_side(ImbalanceSide::Sell);
+    imbalance.set_auction_type(AuctionType::Closing);
+    assert_eq!(imbalance.flags, 18);
+    assert_eq!(
+        imbalance.to_string(),
+        "OrderImbalance{AAPL, eventTime=0, source=NTV, time=0, sequence=5, refPrice=1.5, pairedSize=10.0, \
+         imbalanceSize=2.25, nearPrice=1.0E7, farPrice=3.5, imbalanceSide=SELL, auctionType=CLOSING}"
+    );
+}
+
+#[test]
+fn order_values_have_typed_accessors() {
+    let mut order = Order::new("AAPL");
+    fill_order_base!(order);
+    assert_eq!(
+        (
+            order.source(),
+            order.action(),
+            order.exchange_code(),
+            order.order_side(),
+            order.scope()
+        ),
+        (NTV, OrderAction::New, 'Q', Side::Sell, Scope::Order)
+    );
+    assert_eq!(
+        (IndexedEvent::source(&order), IndexedEvent::index(&order)),
+        (NTV, order.index)
+    );
+    assert_eq!(MarketEvent::symbol(&order), "AAPL");
+
+    // A special source moves to bits 48 to 63 and back; the low bits stay.
+    order.set_source(3).unwrap();
+    assert_eq!((order.index, order.source()), (0x3_0000_0000_0011, 3));
+    assert!(field(&order.to_string(), "source").starts_with("REGIONAL_BID"));
+    order.set_source(0).unwrap();
+    assert_eq!((order.index, order.source()), (17, 0));
+    for bad in [10, 65535, -1, i32::MAX] {
+        assert!(matches!(order.set_source(bad), Err(Error::InvalidArgument(_))), "{bad}");
+    }
+    assert_eq!(order.index, 17);
+
+    // The flags keep 7 bits of the exchange code.
+    order.set_exchange_code('\u{7f}').unwrap();
+    assert!(matches!(
+        order.set_exchange_code('\u{80}'),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert_eq!(
+        (order.exchange_code(), order.order_side(), order.action()),
+        ('\u{7f}', Side::Sell, OrderAction::New)
+    );
+
+    order.set_time_nanos(1_700_000_000_123_456_789);
+    assert_eq!(
+        (order.time(), order.time_nano_part, order.time_nanos(), order.sequence()),
+        (1_700_000_000_123, 456_789, 1_700_000_000_123_456_789, 5)
+    );
+
+    // A source that Java refuses prints as its id.
+    let imbalance = OrderImbalance {
+        source_id: 10,
+        ..OrderImbalance::new("AAPL")
+    };
+    assert_eq!(field(&imbalance.to_string(), "source"), "10");
+
+    // The time of a market maker is the later of its bid and ask times.
+    let mut market_maker = MarketMaker {
+        bid_time: 1_700_000_000_000,
+        ask_time: 1_700_000_001_000,
+        ..MarketMaker::new("AAPL")
+    };
+    assert_eq!(
+        (market_maker.time(), IndexedEvent::source(&market_maker)),
+        (1_700_000_001_000, 0)
+    );
+    market_maker.set_market_maker("ABCD").unwrap();
+    assert!(matches!(
+        market_maker.set_market_maker("ABCDE"),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        market_maker.set_exchange_code('\u{10000}'),
+        Err(Error::InvalidArgument(_))
+    ));
+    market_maker.set_exchange_code('\u{ffff}').unwrap();
+    assert_eq!(
+        (market_maker.exchange_code(), market_maker.market_maker().as_deref()),
+        ('\u{ffff}', Some("ABCD"))
+    );
+
+    let analytic = AnalyticOrder {
+        iceberg_flags: 1,
+        ..AnalyticOrder::new("AAPL")
+    };
+    assert_eq!(analytic.iceberg_type(), IcebergType::Native);
 }

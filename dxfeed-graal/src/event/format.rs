@@ -163,6 +163,19 @@ impl Display for Quoted<'_> {
     }
 }
 
+/// The id of an order source by its name, as Java's `OrderSource.toString` prints it (`DEFAULT`, `NTV`); an id that
+/// Java refuses, and the event with it cannot print, prints as a decimal number.
+pub(super) struct SourceName(pub(super) i32);
+
+impl Display for SourceName {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        match super::flags::source_name(self.0) {
+            Some(name) => f.write_str(&name),
+            None => write!(f, "{}", self.0),
+        }
+    }
+}
+
 /// A `double` as Java prints `WideDecimal.toString(WideDecimal.composeWide(d))`: the shares and the free float of a
 /// profile. The value is rounded to a decimal with a 56-bit significand; plain notation is used for at most 6 leading
 /// or trailing zeros (`1000`, `0.0001`, `1E7`).

@@ -360,7 +360,16 @@ macro_rules! time_series_fields {
                     index: i64 [$($p.)* index] = 0,
                     $($fields)*
                 }
-                derived { $($derived)* }
+                derived {
+                    /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's
+                    /// `getSource` gives it.
+                    #[doc(alias = "getSource")]
+                    fn source() -> i32 {
+                        0
+                    }
+
+                    $($derived)*
+                }
             }
         }
     };
@@ -519,7 +528,20 @@ macro_rules! sale_fields {
                 /// [`sequence`](Self::sequence) read them.
                 time_sequence: i64 [$($p.)* time_sequence] = 0,
             }
-            $cb! { head { $(#[$doc])* $name, $($head)* } fields { $($fields)* } derived { $($derived)* } }
+            $cb! {
+                head { $(#[$doc])* $name, $($head)* }
+                fields { $($fields)* }
+                derived {
+                    /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's
+                    /// `getSource` gives it.
+                    #[doc(alias = "getSource")]
+                    fn source() -> i32 {
+                        0
+                    }
+
+                    $($derived)*
+                }
+            }
         }
     };
     (
@@ -831,6 +853,199 @@ macro_rules! candle_fields {
                     $($fields)*
                 }
                 derived { $($derived)* }
+            }
+        }
+    };
+}
+
+/// The fields, values and setters of Java's `OrderBase` at the path `[p]`, for [`event_type!`].
+macro_rules! order_base_fields {
+    (
+        [$($p:ident).*]
+        $cb:ident! {
+            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            fields { $($fields:tt)* }
+            derived { $($derived:tt)* }
+        }
+    ) => {
+        impl $name {
+            /// Writes the text of Java's `OrderBase.baseFieldsToString` after `{`: the symbol to `tradeSize=...`.
+            fn fmt_order_base(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
+                use $crate::event::format::{JavaChar, JavaDouble, SourceName, Time};
+                write!(
+                    f,
+                    "{}, eventTime={}, source={}, eventFlags=0x{:x}, index=0x{:x}, time={}, sequence={}, \
+                     timeNanoPart={}, action={}, actionTime={}, orderId={}, auxOrderId={}, price={}, size={}, \
+                     executedSize={}, count={}, exchange={}, side={}, scope={}, tradeId={}, tradePrice={}, \
+                     tradeSize={}",
+                    self.symbol,
+                    Time(self.event_time),
+                    SourceName(self.source()),
+                    self.event_flags,
+                    self.index,
+                    Time(self.time()),
+                    self.sequence(),
+                    self.time_nano_part,
+                    self.action(),
+                    Time(self.action_time),
+                    self.order_id,
+                    self.aux_order_id,
+                    JavaDouble(self.price),
+                    JavaDouble(self.size),
+                    JavaDouble(self.executed_size),
+                    self.count,
+                    JavaChar(self.exchange_code()),
+                    self.order_side(),
+                    self.scope(),
+                    self.trade_id,
+                    JavaDouble(self.trade_price),
+                    JavaDouble(self.trade_size),
+                )
+            }
+
+            /// Changes the source of the order and keeps the low bits of the index, as Java's `setSource` does: a
+            /// special source (`1` to `9`) goes to bits 48 to 63, any other to bits 32 to 63. Change the
+            /// [`index`](Self::index) first: a new index replaces the source.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if Java has no source with the id: one to
+            /// four letters and digits packed big-endian, such as `0x4e5456` for `NTV`, or `0` to `9`.
+            #[doc(alias = "setSource")]
+            pub fn set_source(&mut self, source: i32) -> $crate::Result<()> {
+                if $crate::event::flags::source_name(source).is_none() {
+                    return Err($crate::Error::InvalidArgument(format!("{source} is not an order source id")));
+                }
+                self.index = $crate::event::flags::with_source(self.index, source);
+                Ok(())
+            }
+
+            /// Changes the time of the order and its nanoseconds part, as Java's `setTimeNanos` does.
+            #[doc(alias = "setTimeNanos")]
+            pub fn set_time_nanos(&mut self, time_nanos: i64) {
+                let (time, nano_part) = $crate::event::flags::split_nanos(time_nanos);
+                self.set_time(time);
+                self.time_nano_part = nano_part;
+            }
+
+            /// Changes the action of the order.
+            #[doc(alias = "setAction")]
+            pub fn set_action(&mut self, action: $crate::event::OrderAction) {
+                self.flags = $crate::event::flags::ORDER_ACTION.set32(self.flags, action.code());
+            }
+
+            /// Changes the exchange code of the order.
+            ///
+            /// # Errors
+            ///
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the code is not an ASCII character: the
+            /// flags keep 7 bits of it.
+            #[doc(alias = "setExchangeCode")]
+            pub fn set_exchange_code(&mut self, code: char) -> $crate::Result<()> {
+                if !code.is_ascii() {
+                    return Err($crate::Error::InvalidArgument(format!(
+                        "exchange code {code:?} of an order is not ASCII"
+                    )));
+                }
+                self.flags = $crate::event::flags::ORDER_EXCHANGE.set32(self.flags, code as i32);
+                Ok(())
+            }
+
+            /// Changes the side of the order.
+            #[doc(alias = "setOrderSide")]
+            pub fn set_order_side(&mut self, side: $crate::event::Side) {
+                self.flags = $crate::event::flags::ORDER_SIDE.set32(self.flags, side.code());
+            }
+
+            /// Changes the scope of the order.
+            #[doc(alias = "setScope")]
+            pub fn set_scope(&mut self, scope: $crate::event::Scope) {
+                self.flags = $crate::event::flags::ORDER_SCOPE.set32(self.flags, scope.code());
+            }
+        }
+
+        time_sequence_values! {
+            time_sequence
+            $cb! {
+            head { $(#[$doc])* $name, $($head)* }
+            fields {
+                /// The flags of the event in a transaction or a snapshot.
+                event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
+                /// The index of the order among the orders of its symbol, with the source of the order in the high
+                /// bits: see [`source`](Self::source).
+                index: i64 [$($p.)* index] = 0,
+                /// The time and the sequence of the order, packed as [`time`](Self::time) and
+                /// [`sequence`](Self::sequence) read them.
+                time_sequence: i64 [$($p.)* time_sequence] = 0,
+                /// The microseconds and nanoseconds part of the time of the order.
+                time_nano_part: i32 [$($p.)* time_nano_part] = 0,
+                /// The time of the last action of the order, in milliseconds since the Unix epoch.
+                action_time: i64 [$($p.)* action_time] = 0,
+                /// The identifier of the order; `0` if unknown.
+                order_id: i64 [$($p.)* order_id] = 0,
+                /// The auxiliary identifier of the order, such as the order that it replaces; `0` if unknown.
+                aux_order_id: i64 [$($p.)* aux_order_id] = 0,
+                /// The price; NaN if unknown.
+                price: f64 [$($p.)* price] = f64::NAN,
+                /// The size; NaN if unknown.
+                size: f64 [$($p.)* size] = f64::NAN,
+                /// The executed size; NaN if unknown.
+                executed_size: f64 [$($p.)* executed_size] = f64::NAN,
+                /// The number of the individual orders at the price level.
+                count: i64 [$($p.)* count] = 0,
+                /// The flags of the order, packed as the SDK keeps them: the action in bits 11 to 14, the exchange
+                /// code in bits 4 to 10, the side in bits 2 and 3, the scope in bits 0 and 1.
+                flags: i32 [$($p.)* flags] = 0,
+                /// The identifier of the trade of an execution; `0` if none.
+                trade_id: i64 [$($p.)* trade_id] = 0,
+                /// The price of the trade of an execution; NaN if unknown.
+                trade_price: f64 [$($p.)* trade_price] = f64::NAN,
+                /// The size of the trade of an execution; NaN if unknown.
+                trade_size: f64 [$($p.)* trade_size] = f64::NAN,
+                $($fields)*
+            }
+            derived {
+                /// The id of the source of the order, from the high bits of the [`index`](Self::index): `0` for the
+                /// default source `DEFAULT`, `1` to `9` for the special sources (`COMPOSITE_BID` to `AGGREGATE`), or
+                /// one to four letters and digits packed big-endian, such as `0x4e5456` for `NTV`. A later version
+                /// returns the source itself.
+                #[doc(alias = "getSource")]
+                fn source(index) -> i32 {
+                    $crate::event::flags::source_of(index)
+                }
+
+                /// The time of the order, in nanoseconds since the Unix epoch.
+                #[doc(alias = "getTimeNanos")]
+                fn time_nanos(time_sequence, time_nano_part) -> i64 {
+                    $crate::event::flags::nanos($crate::event::flags::time_of(time_sequence), time_nano_part)
+                }
+
+                /// The action of the order.
+                #[doc(alias = "getAction")]
+                fn action(flags) -> $crate::event::OrderAction {
+                    $crate::event::OrderAction::from_code($crate::event::flags::ORDER_ACTION.get(flags.into()))
+                }
+
+                /// The exchange code of the order; `'\0'` if unknown.
+                #[doc(alias = "getExchangeCode")]
+                fn exchange_code(flags) -> char {
+                    char::from($crate::event::flags::ORDER_EXCHANGE.get(flags.into()) as u8)
+                }
+
+                /// The side of the order.
+                #[doc(alias = "getOrderSide")]
+                fn order_side(flags) -> $crate::event::Side {
+                    $crate::event::Side::from_code($crate::event::flags::ORDER_SIDE.get(flags.into()))
+                }
+
+                /// The scope of the order: composite, regional, aggregate or an individual order.
+                #[doc(alias = "getScope")]
+                fn scope(flags) -> $crate::event::Scope {
+                    $crate::event::Scope::from_code($crate::event::flags::ORDER_SCOPE.get(flags.into()))
+                }
+
+                $($derived)*
+            }
             }
         }
     };

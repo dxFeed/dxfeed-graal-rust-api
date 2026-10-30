@@ -64,6 +64,119 @@ pub(crate) const SALE_VALID_TICK: Bits = Bits::new(1, 2);
 /// The type of a sale in its flags.
 pub(crate) const SALE_TYPE: Bits = Bits::new(2, 0);
 
+/// The action in the flags of an order.
+pub(crate) const ORDER_ACTION: Bits = Bits::new(4, 11);
+/// The exchange code, a 7-bit ASCII character, in the flags of an order.
+pub(crate) const ORDER_EXCHANGE: Bits = Bits::new(7, 4);
+/// The side in the flags of an order.
+pub(crate) const ORDER_SIDE: Bits = Bits::new(2, 2);
+/// The scope in the flags of an order.
+pub(crate) const ORDER_SCOPE: Bits = Bits::new(2, 0);
+/// The iceberg type in the iceberg flags of an analytic order.
+pub(crate) const ICEBERG_TYPE: Bits = Bits::new(2, 0);
+/// The NMS conditional bit in the flags of an OTC Markets order.
+pub(crate) const OTC_NMS_CONDITIONAL: Bits = Bits::new(1, 6);
+/// The auto execution bit in the flags of an OTC Markets order.
+pub(crate) const OTC_AUTO_EXECUTION: Bits = Bits::new(1, 5);
+/// The saturated bit in the flags of an OTC Markets order.
+pub(crate) const OTC_SATURATED: Bits = Bits::new(1, 4);
+/// The price type in the flags of an OTC Markets order.
+pub(crate) const OTC_PRICE_TYPE: Bits = Bits::new(2, 2);
+/// The unsolicited bit in the flags of an OTC Markets order.
+pub(crate) const OTC_UNSOLICITED: Bits = Bits::new(1, 1);
+/// The open bit in the flags of an OTC Markets order.
+pub(crate) const OTC_OPEN: Bits = Bits::new(1, 0);
+/// The time in force in the flags of a Nuam order.
+pub(crate) const NUAM_TIME_IN_FORCE: Bits = Bits::new(4, 4);
+/// The order type in the flags of a Nuam order.
+pub(crate) const NUAM_ORDER_TYPE: Bits = Bits::new(4, 0);
+/// The side of the imbalance in the flags of an order imbalance.
+pub(crate) const IMBALANCE_SIDE: Bits = Bits::new(3, 0);
+/// The auction type in the flags of an order imbalance.
+pub(crate) const IMBALANCE_AUCTION_TYPE: Bits = Bits::new(3, 3);
+/// The exchange code, a Java `char`, in the index of a market maker.
+pub(crate) const MARKET_MAKER_EXCHANGE: Bits = Bits::new(16, 32);
+/// The packed market maker identifier in the index of a market maker.
+pub(crate) const MARKET_MAKER_ID: Bits = Bits::new(32, 0);
+
+/// The names of the special order sources, ids 1 to 9, as Java's `OrderSource` names them.
+const SPECIAL_SOURCES: [&str; 9] = [
+    "COMPOSITE_BID",
+    "COMPOSITE_ASK",
+    "REGIONAL_BID",
+    "REGIONAL_ASK",
+    "AGGREGATE_BID",
+    "AGGREGATE_ASK",
+    "COMPOSITE",
+    "REGIONAL",
+    "AGGREGATE",
+];
+
+/// Whether `id` is a special order source (`COMPOSITE_BID` to `AGGREGATE`), kept in bits 48 to 63 of an index.
+fn is_special_source(id: i64) -> bool {
+    (1..=9).contains(&id)
+}
+
+/// The id of the order source in the index of an order, as Java's `OrderBase.getSource` reads it: a special source
+/// in bits 48 to 63, any other in bits 32 to 63.
+pub(crate) fn source_of(index: i64) -> i32 {
+    let special = index >> 48;
+    if is_special_source(special) {
+        special as i32
+    } else {
+        (index >> 32) as i32
+    }
+}
+
+/// `index` with another order source, as Java's `OrderBase.setSource` writes it: the low bits of the current format are
+/// kept.
+pub(crate) fn with_source(index: i64, id: i32) -> i64 {
+    let keep = if is_special_source(index >> 48) {
+        !(-1 << 48)
+    } else {
+        !(-1 << 32)
+    };
+    let shift = if is_special_source(id.into()) { 48 } else { 32 };
+    (i64::from(id) << shift) | (index & keep)
+}
+
+/// The name of the order source `id`, as Java's `OrderSource.valueOf(id)` gives it: `DEFAULT`, a special source, or one
+/// to four letters and digits packed big-endian; `None` if Java refuses the id.
+pub(crate) fn source_name(id: i32) -> Option<String> {
+    match id {
+        0 => return Some("DEFAULT".to_owned()),
+        1..=9 => return Some(SPECIAL_SOURCES[id as usize - 1].to_owned()),
+        _ => {}
+    }
+    let bytes = id.to_be_bytes();
+    let name = &bytes[bytes.iter().position(|&b| b != 0)?..];
+    name.iter()
+        .all(u8::is_ascii_alphanumeric)
+        .then(|| String::from_utf8_lossy(name).into_owned())
+}
+
+/// The market maker identifier packed in `bits`, as Java's `ShortString.decode` reads it: big-endian characters
+/// without the zero bytes; `None` for `0`.
+pub(crate) fn decode_short_string(bits: i32) -> Option<String> {
+    let text: String = bits
+        .to_be_bytes()
+        .iter()
+        .filter(|&&b| b != 0)
+        .map(|&b| char::from(b))
+        .collect();
+    (!text.is_empty()).then_some(text)
+}
+
+/// The market maker identifier packed as Java's `ShortString.encode` packs it.
+pub(crate) fn encode_short_string(text: &str) -> Result<i32> {
+    if text.len() > 4 || !text.bytes().all(|b| b.is_ascii() && b != 0) {
+        return Err(Error::InvalidArgument(format!(
+            "market maker {text:?} is not up to 4 ASCII characters"
+        )));
+    }
+    Ok(text.bytes().fold(0, |bits, b| (bits << 8) | i32::from(b)))
+}
+
 /// The largest sequence that fits the packed time and sequence fields.
 pub(crate) const MAX_SEQUENCE: i32 = (1 << 22) - 1;
 /// The sequence in the low bits of a packed time and sequence.
@@ -213,6 +326,140 @@ flag_enum! {
         Buy = 1 "BUY",
         /// A sell: an ask order or a trade initiated by a seller.
         Sell = 2 "SELL",
+    }
+}
+
+flag_enum! {
+    /// The scope of an order (`Scope`).
+    Scope {
+        /// The best bid and offer of all the exchanges.
+        Composite = 0 "COMPOSITE",
+        /// The best bid and offer of one exchange.
+        Regional = 1 "REGIONAL",
+        /// A price level of the order book.
+        Aggregate = 2 "AGGREGATE",
+        /// An individual order.
+        Order = 3 "ORDER",
+    }
+}
+
+flag_enum! {
+    /// The action of an order in the order book (`OrderAction`).
+    OrderAction {
+        /// The action is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// A new order.
+        New = 1 "NEW",
+        /// An order replaces an earlier one.
+        Replace = 2 "REPLACE",
+        /// An order changes its price or size.
+        Modify = 3 "MODIFY",
+        /// An order is removed.
+        Delete = 4 "DELETE",
+        /// An order is partially executed.
+        Partial = 5 "PARTIAL",
+        /// An order is fully executed.
+        Execute = 6 "EXECUTE",
+        /// A trade not tied to an order of the book.
+        Trade = 7 "TRADE",
+        /// A trade is cancelled.
+        Bust = 8 "BUST",
+    }
+}
+
+flag_enum! {
+    /// The type of an iceberg order (`IcebergType`).
+    IcebergType {
+        /// The type is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// An iceberg of the exchange.
+        Native = 1 "NATIVE",
+        /// An iceberg that the data provider reconstructs.
+        Synthetic = 2 "SYNTHETIC",
+    }
+}
+
+flag_enum! {
+    /// The price type of an OTC Markets order (`OtcMarketsPriceType`).
+    OtcMarketsPriceType {
+        /// An unpriced quote.
+        Unpriced = 0 "UNPRICED",
+        /// An actual priced quote.
+        Actual = 1 "ACTUAL",
+        /// An offer wanted or a bid wanted.
+        Wanted = 2 "WANTED",
+    }
+}
+
+flag_enum! {
+    /// The type of a Nuam order (`NuamOrderType`).
+    NuamOrderType {
+        /// The type is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// A limit order.
+        Limit = 1 "LIMIT",
+        /// A market order.
+        Market = 2 "MARKET",
+        /// A market order that becomes a limit order at the price of its execution.
+        MarketToLimit = 3 "MARKET_TO_LIMIT",
+        /// An order at the best price of the book.
+        BestOrder = 4 "BEST_ORDER",
+        /// An imbalance order.
+        Imbalance = 5 "IMBALANCE",
+    }
+}
+
+flag_enum! {
+    /// The time in force of a Nuam order (`NuamTimeInForceType`).
+    NuamTimeInForceType {
+        /// The time in force is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// The order is valid until the end of the day.
+        RestOfDay = 1 "REST_OF_DAY",
+        /// The order is valid until it is cancelled.
+        Gtc = 2 "GTC",
+        /// The order is executed at once, and the rest is cancelled.
+        ImmediateOrCancel = 3 "IMMEDIATE_OR_CANCEL",
+        /// The order is executed at once in full or cancelled.
+        FillOrKill = 4 "FILL_OR_KILL",
+        /// The order is valid until the end of the session.
+        GoodTilSession = 5 "GOOD_TIL_SESSION",
+        /// The order is valid for a number of days.
+        NumberOfDays = 6 "NUMBER_OF_DAYS",
+    }
+}
+
+flag_enum! {
+    /// The side of an order imbalance (`ImbalanceSide`).
+    ImbalanceSide {
+        /// The side is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// More buy orders than sell orders.
+        Buy = 1 "BUY",
+        /// More sell orders than buy orders.
+        Sell = 2 "SELL",
+        /// No imbalance.
+        NoImbalance = 3 "NO_IMBALANCE",
+        /// Too few orders to compute the imbalance.
+        InsufficientOrders = 4 "INSUFFICIENT_ORDERS",
+        /// The imbalance is paused.
+        Paused = 5 "PAUSED",
+    }
+}
+
+flag_enum! {
+    /// The type of an auction (`AuctionType`).
+    AuctionType {
+        /// The type is unknown.
+        Undefined = 0 "UNDEFINED",
+        /// The opening auction.
+        Opening = 1 "OPENING",
+        /// The closing auction.
+        Closing = 2 "CLOSING",
+        /// An auction that reopens trading after a halt.
+        Reopening = 3 "REOPENING",
+        /// Another auction.
+        Other = 4 "OTHER",
     }
 }
 
@@ -393,6 +640,49 @@ mod tests {
         for code in 0..4 {
             assert_eq!(PriceType::from_code(code).code(), code);
         }
+        assert_eq!(
+            names(10, |c| OrderAction::from_code(c).to_string()),
+            "UNDEFINED NEW REPLACE MODIFY DELETE PARTIAL EXECUTE TRADE BUST UNDEFINED"
+        );
+        assert_eq!(
+            names(5, |c| Scope::from_code(c).to_string()),
+            "COMPOSITE REGIONAL AGGREGATE ORDER COMPOSITE"
+        );
+        assert_eq!(
+            names(4, |c| IcebergType::from_code(c).to_string()),
+            "UNDEFINED NATIVE SYNTHETIC UNDEFINED"
+        );
+        assert_eq!(
+            names(4, |c| OtcMarketsPriceType::from_code(c).to_string()),
+            "UNPRICED ACTUAL WANTED UNPRICED"
+        );
+        assert_eq!(
+            names(7, |c| NuamOrderType::from_code(c).to_string()),
+            "UNDEFINED LIMIT MARKET MARKET_TO_LIMIT BEST_ORDER IMBALANCE UNDEFINED"
+        );
+        assert_eq!(
+            names(8, |c| NuamTimeInForceType::from_code(c).to_string()),
+            "UNDEFINED REST_OF_DAY GTC IMMEDIATE_OR_CANCEL FILL_OR_KILL GOOD_TIL_SESSION NUMBER_OF_DAYS UNDEFINED"
+        );
+        assert_eq!(
+            names(7, |c| ImbalanceSide::from_code(c).to_string()),
+            "UNDEFINED BUY SELL NO_IMBALANCE INSUFFICIENT_ORDERS PAUSED UNDEFINED"
+        );
+        assert_eq!(
+            names(6, |c| AuctionType::from_code(c).to_string()),
+            "UNDEFINED OPENING CLOSING REOPENING OTHER UNDEFINED"
+        );
+        for code in 0..9 {
+            assert_eq!(OrderAction::from_code(code).code(), code);
+        }
+        for code in 0..6 {
+            assert_eq!(NuamTimeInForceType::from_code(code).code(), code);
+            assert_eq!(ImbalanceSide::from_code(code).code(), code);
+        }
+        assert_eq!(Scope::from_code(3).code(), 3);
+        assert_eq!(AuctionType::from_code(4).code(), 4);
+        assert_eq!(NuamOrderType::from_code(5).code(), 5);
+        assert_eq!(Scope::default(), Scope::Composite);
         assert_eq!(PriceType::default(), PriceType::Regular);
     }
 
@@ -413,6 +703,73 @@ mod tests {
         flags |= EventFlags::REMOVE_EVENT;
         flags &= EventFlags::REMOVE_EVENT | EventFlags::SNAPSHOT_SNIP;
         assert_eq!(flags, EventFlags::REMOVE_EVENT);
+    }
+
+    #[test]
+    fn order_sources_decode_as_in_java() {
+        let named = |id| source_name(id).unwrap_or_else(|| "THROWS".to_owned());
+        let ids = [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            100,
+            12345,
+            65535,
+            65536,
+            0x4e5456,
+            0x6e7476,
+            0x41,
+            0x4142,
+            0x414243,
+            0x4142_4344,
+            0x5a39,
+            0x6162_6364,
+            -1,
+            i32::MAX,
+        ];
+        assert_eq!(
+            ids.map(named).join(" "),
+            "DEFAULT COMPOSITE_BID COMPOSITE_ASK REGIONAL_BID REGIONAL_ASK AGGREGATE_BID AGGREGATE_ASK COMPOSITE \
+             REGIONAL AGGREGATE THROWS d 09 THROWS THROWS NTV ntv A AB ABC ABCD Z9 abcd THROWS THROWS"
+        );
+        // The index formats of Java's reference strings.
+        assert_eq!(with_source(17, 0x4e5456), 0x4e_5456_0000_0011);
+        assert_eq!(with_source(17, 3), 0x3_0000_0000_0011);
+        assert_eq!(with_source(0x3_0000_0000_0011, 0x41), 0x41_0000_0011);
+        assert_eq!(with_source(0x4e_5456_0000_0011, 0), 17);
+        assert_eq!(source_of(0x4e_5456_0000_0011), 0x4e5456);
+        assert_eq!(source_of(0x9_0000_0000_0000), 9);
+        assert_eq!(source_of(0x4142_4344_0000_0000), 0x4142_4344);
+        assert_eq!(source_of(17), 0);
+    }
+
+    #[test]
+    fn market_makers_pack_as_in_java() {
+        assert_eq!(encode_short_string("MM1").unwrap(), 0x4d4d31);
+        assert_eq!(decode_short_string(0x4d4d31).as_deref(), Some("MM1"));
+        assert_eq!(decode_short_string(0x4d00_4d31).as_deref(), Some("MM1"));
+        assert_eq!(decode_short_string(0), None);
+        assert_eq!(encode_short_string("").unwrap(), 0);
+        assert_eq!(
+            decode_short_string(encode_short_string("ABCD").unwrap()).as_deref(),
+            Some("ABCD")
+        );
+        for bad in ["ABCDE", "\u{e9}", "A\0"] {
+            assert!(
+                matches!(encode_short_string(bad), Err(Error::InvalidArgument(_))),
+                "{bad:?}"
+            );
+        }
+        assert_eq!(MARKET_MAKER_EXCHANGE.get(0x51_004d_4d31), 0x51);
+        assert_eq!(MARKET_MAKER_ID.get(0x51_004d_4d31), 0x4d4d31);
     }
 
     #[test]

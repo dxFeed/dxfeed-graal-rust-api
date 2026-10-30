@@ -27,7 +27,9 @@ impl DXPublisher {
     ///
     /// Fails with [`Error::InvalidArgument`](crate::Error::InvalidArgument), publishing nothing, when a string holds a
     /// NUL byte or an exchange code does not fit a Java `char`; with [`Error::Java`](crate::Error::Java) when the SDK
-    /// refuses the events.
+    /// refuses the events. Java refuses an [`OrderBase`](crate::event::OrderBase) and an order with a negative index,
+    /// with `SNAPSHOT_END` or `SNAPSHOT_SNIP` and a non-zero index, with an undefined side unless it is empty, or with
+    /// a market maker over 8 characters; of a market maker of 5 to 8 characters it keeps the last 4.
     #[doc(alias = "publishEvents")]
     pub fn publish_events(&self, events: &[Event]) -> Result<()> {
         let mut sys_events = SysEvents::new(events)?;

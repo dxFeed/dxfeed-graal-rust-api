@@ -32,6 +32,11 @@ pub trait IndexedEvent: EventKind {
     /// The flags of the event in a transaction or a snapshot.
     #[doc(alias = "getEventFlags")]
     fn event_flags(&self) -> EventFlags;
+
+    /// The id of the source of the event: `0` (`DEFAULT`) for all but the orders, whose index keeps it. A later version
+    /// returns the source itself.
+    #[doc(alias = "getSource")]
+    fn source(&self) -> i32;
 }
 
 /// An indexed event with a time, as Java's `TimeSeriesEvent`: the index of the event is its time and sequence.
@@ -67,6 +72,10 @@ macro_rules! impl_event_trait {
 
             fn event_flags(&self) -> EventFlags {
                 self.event_flags
+            }
+
+            fn source(&self) -> i32 {
+                $name::source(self)
             }
         }
     };
