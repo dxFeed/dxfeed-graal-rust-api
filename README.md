@@ -323,7 +323,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
   demonstrates how to build an order book of a symbol and an order source with `IndexedEventTxModel`
 - [x] [inc_order_snapshot](dxfeed-graal/examples/model/inc_order_snapshot.rs)
   demonstrates how to subscribe to the `Order` event and handle snapshots and updates
-- [ ] multiple_market_depth
+- [x] [multiple_market_depth](dxfeed-graal/examples/model/multiple_market_depth.rs)
   demonstrates how to use the `MarketDepthModel` to manage and display order books for multiple symbols
 - [ ] price_level_book
   demonstrates how to compile a price level book (market by price) that aggregates individual orders (market by
