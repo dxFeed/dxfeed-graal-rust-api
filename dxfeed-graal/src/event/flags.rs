@@ -110,7 +110,7 @@ pub(crate) const MARKET_MAKER_EXCHANGE: Bits = Bits::new(16, 32);
 pub(crate) const MARKET_MAKER_ID: Bits = Bits::new(32, 0);
 
 /// The names of the special order sources, ids 1 to 9, as Java's `OrderSource` names them.
-const SPECIAL_SOURCES: [&str; 9] = [
+pub(super) const SPECIAL_SOURCES: [&str; 9] = [
     "COMPOSITE_BID",
     "COMPOSITE_ASK",
     "REGIONAL_BID",

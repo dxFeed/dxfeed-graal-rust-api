@@ -117,7 +117,9 @@ mod listener;
 mod promise;
 mod publisher;
 mod subscription;
+mod symbol;
 pub mod system;
+mod time_format;
 
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, Result};
@@ -128,9 +130,11 @@ pub use executor::ManualExecutor;
 pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
-pub use promise::Promise;
+pub use promise::{Promise, PromiseResult};
 pub use publisher::DXPublisher;
-pub use subscription::{DXFeedSubscription, ListenerId};
+pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
+pub use symbol::Symbol;
+pub use time_format::TimeFormat;
 
 /// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {

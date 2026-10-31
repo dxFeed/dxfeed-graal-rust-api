@@ -11,6 +11,7 @@ mod flags;
 mod traits;
 mod analytic_order;
 mod candle;
+mod candle_symbol;
 mod configuration;
 mod daily_candle;
 mod format;
@@ -29,6 +30,7 @@ mod profile;
 mod quote;
 pub(crate) mod sdk_event;
 mod series;
+mod source;
 mod spread_order;
 mod summary;
 mod text_configuration;
@@ -49,6 +51,9 @@ use dxfeed_graal_sys as sys;
 
 pub use analytic_order::{AnalyticOrder, AnalyticOrderRef};
 pub use candle::{Candle, CandleRef};
+pub use candle_symbol::{
+    CandleAlignment, CandleAttribute, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
+};
 pub use configuration::{Configuration, ConfigurationRef};
 pub use daily_candle::{DailyCandle, DailyCandleRef};
 pub use flags::{
@@ -69,6 +74,7 @@ pub use otc_markets_order::{OtcMarketsOrder, OtcMarketsOrderRef};
 pub use profile::{Profile, ProfileRef};
 pub use quote::{Quote, QuoteRef};
 pub use series::{Series, SeriesRef};
+pub use source::{IndexedEventSource, OrderSource};
 pub use spread_order::{SpreadOrder, SpreadOrderRef};
 pub use summary::{Summary, SummaryRef};
 pub use text_configuration::{TextConfiguration, TextConfigurationRef};

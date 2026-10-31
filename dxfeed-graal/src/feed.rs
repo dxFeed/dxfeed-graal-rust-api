@@ -6,11 +6,14 @@ use dxfeed_graal_sys as sys;
 
 use crate::endpoint::{DXEndpoint, EndpointState};
 use crate::error::{Error, JavaException, Result};
-use crate::event::sdk_event::{SdkSymbol, take_event};
-use crate::event::{Event, EventKind, EventType, LastingEvent, SysEvents};
+use crate::event::sdk_event::{SdkSymbol, needs_candle_symbol, take_event};
+use crate::event::{
+    Event, EventKind, EventType, IndexedEvent, IndexedEventSource, LastingEvent, SysEvents, TimeSeriesEvent,
+};
 use crate::handle::Handle;
 use crate::promise::Promise;
-use crate::subscription::DXFeedSubscription;
+use crate::subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription};
+use crate::symbol::{Symbol, SymbolArena};
 
 /// The feed of a [`DXEndpoint`](crate::DXEndpoint): creates subscriptions to events and returns the last events of the
 /// [`LastingEvent`] types (`DXFeed`).
@@ -97,6 +100,102 @@ impl DXFeed {
         Ok(DXFeedSubscription::new(handle, self.clone()))
     }
 
+    /// Creates a subscription to the time-series events of type `E`, such as [`Candle`](crate::event::Candle), from
+    /// a time on, attached to this feed (`createTimeSeriesSubscription`).
+    ///
+    /// Its symbols get the time of [`set_from_time`](DXFeedTimeSeriesSubscription::set_from_time), and no events
+    /// come until it is set (the time is `i64::MAX`); it is used as a [`DXFeedSubscription`] otherwise.
+    ///
+    /// ```no_run
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use dxfeed_graal::DXEndpoint;
+    /// use dxfeed_graal::event::Candle;
+    ///
+    /// let subscription = DXEndpoint::create()?.feed().create_time_series_subscription::<Candle>()?;
+    /// subscription.set_from_time(0)?;
+    /// subscription.add_symbols(["AAPL{=d}"])?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[doc(alias = "createTimeSeriesSubscription")]
+    pub fn create_time_series_subscription<E: TimeSeriesEvent>(&self) -> Result<DXFeedTimeSeriesSubscription<E>> {
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed is live and the out-pointer is valid for writes; a time-series subscription starts with
+        // the fields of a subscription.
+        let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_subscription_t| unsafe {
+            sys::dxfg_v4_DXFeed_createTimeSeriesSubscription(t, feed, E::TYPE.to_sys(), out.cast())
+        })?;
+        Ok(DXFeedTimeSeriesSubscription::new(DXFeedSubscription::new(
+            handle,
+            self.clone(),
+        )))
+    }
+
+    /// Requests the time-series events of type `E` for `symbol` from `from_time` to `to_time`, in milliseconds since
+    /// the Unix epoch, and returns the promise of the list, ordered by time (`getTimeSeriesPromise`).
+    ///
+    /// The request needs no subscription. A string symbol of candles is passed as a
+    /// [`CandleSymbol`](crate::event::CandleSymbol). The promise completes exceptionally when the events are permanently
+    /// unavailable; it keeps the endpoint open while it lives.
+    ///
+    /// ```no_run
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use std::time::Duration;
+    ///
+    /// use dxfeed_graal::DXEndpoint;
+    /// use dxfeed_graal::event::Candle;
+    ///
+    /// let endpoint = DXEndpoint::create()?;
+    /// endpoint.connect("demo.dxfeed.com:7300")?;
+    /// let to = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
+    /// let candles = endpoint
+    ///     .feed()
+    ///     .get_time_series_promise::<Candle>("AAPL{=d}", to - 20 * 86_400_000, to)?
+    ///     .wait(Duration::from_secs(5))?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[doc(alias = "getTimeSeriesPromise")]
+    pub fn get_time_series_promise<E: TimeSeriesEvent>(
+        &self,
+        symbol: impl Into<Symbol>,
+        from_time: i64,
+        to_time: i64,
+    ) -> Result<Promise<Vec<E>>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed and the symbol are live; the SDK only reads the symbol. The out-pointer is valid for writes,
+        // and a promise of a list starts with the fields of a promise.
+        let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
+            sys::dxfg_v4_DXFeed_getTimeSeriesPromise(t, feed, E::TYPE.to_sys(), symbol, from_time, to_time, out.cast())
+        })?;
+        Ok(Promise::new(handle, self.clone()))
+    }
+
+    /// Requests the indexed events of type `E` for `symbol` from `source` and returns the promise of the list, ordered
+    /// by index (`getIndexedEventsPromise`).
+    ///
+    /// The request needs no subscription. The promise completes with the snapshot of the events that the uplink sends;
+    /// it keeps the endpoint open while it lives.
+    #[doc(alias = "getIndexedEventsPromise")]
+    pub fn get_indexed_events_promise<E: IndexedEvent>(
+        &self,
+        symbol: impl Into<Symbol>,
+        source: IndexedEventSource,
+    ) -> Result<Promise<Vec<E>>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
+        let source = arena.source(source);
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed, the symbol and the source are live; the SDK only reads them. The out-pointer is valid for
+        // writes, and a promise of a list starts with the fields of a promise.
+        let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
+            sys::dxfg_v4_DXFeed_getIndexedEventsPromise(t, feed, E::TYPE.to_sys(), symbol, source, out.cast())
+        })?;
+        Ok(Promise::new(handle, self.clone()))
+    }
+
     /// Returns the last event of type `E` for `symbol` from the local cache of the feed, or `None` if no subscription
     /// of this feed is subscribed to them (`DXFeed.getLastEventIfSubscribed`).
     ///
@@ -178,8 +277,8 @@ impl DXFeed {
         let symbol = sdk_symbol.as_mut_ptr();
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the symbol are live; the SDK only reads the symbol. The out-pointer is valid for writes.
-        let handle = Handle::create(|t, out| unsafe {
-            sys::dxfg_v4_DXFeed_getLastEventPromise(t, feed, E::TYPE.to_sys(), symbol, out)
+        let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
+            sys::dxfg_v4_DXFeed_getLastEventPromise(t, feed, E::TYPE.to_sys(), symbol, out.cast())
         })?;
         Ok(Promise::new(handle, self.clone()))
     }

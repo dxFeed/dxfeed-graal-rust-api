@@ -27,7 +27,7 @@ pub trait LastingEvent: EventKind + Clone + Into<Event> + TryFrom<Event, Error =
 /// An event that a source and an index tell apart from the other events of its symbol, as Java's `IndexedEvent`.
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait IndexedEvent: EventKind {
+pub trait IndexedEvent: EventKind + Clone + Into<Event> + TryFrom<Event, Error = Event> {
     /// The index of the event among the events of its symbol and source.
     #[doc(alias = "getIndex")]
     fn index(&self) -> i64;
@@ -36,8 +36,8 @@ pub trait IndexedEvent: EventKind {
     #[doc(alias = "getEventFlags")]
     fn event_flags(&self) -> EventFlags;
 
-    /// The id of the source of the event: `0` (`DEFAULT`) for all but the orders, whose index keeps it. A later version
-    /// returns the source itself.
+    /// The id of the source of the event: `0` (`DEFAULT`) for all but the orders, whose index keeps it;
+    /// [`IndexedEventSource::from_id`](super::IndexedEventSource::from_id) gives the source.
     #[doc(alias = "getSource")]
     fn source(&self) -> i32;
 }

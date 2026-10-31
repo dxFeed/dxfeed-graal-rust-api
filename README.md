@@ -241,8 +241,8 @@ The samples follow the samples of the dxFeed Java API, as those of the C++ and .
 grouped in [dxfeed-graal/examples](dxfeed-graal/examples). Run a sample with `cargo run --example <name> -- <arguments>`; started without its required
 arguments, it prints its usage.
 
-A sample that connects to a feed takes the address as an optional last argument (`request_profile` takes it first, as
-the original does):
+A sample that connects to a feed takes the address as an optional last argument (`connect`, `candle` and
+`request_profile` take it first, as the originals do):
 
 ```bash
 cargo run --example print_quote_events -- AAPL demo.dxfeed.com:7300
@@ -268,7 +268,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] [auth](dxfeed-graal/examples/api/auth.rs)
   demonstrates how to connect to an endpoint that requires an authentication token, subscribe to market data events,
   and handle periodic token updates
-- [ ] connect
+- [x] [connect](dxfeed-graal/examples/api/connect.rs)
   demonstrates how to connect to the endpoint and subscribe to various market events
 - [x] [print_quote_events](dxfeed-graal/examples/api/print_quote_events.rs)
   is a simple demonstration of how to subscribe to the `Quote` event, using the `DXFeed` instance singleton and the
@@ -286,11 +286,11 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 ### Candle
 
-- [ ] candle
+- [x] [candle](dxfeed-graal/examples/candle/candle.rs)
   demonstrates how to subscribe to `Candle` events from a time with the candle symbol attributes
 - [ ] candle_data
   demonstrates how to query the CandleData service using the `HistoryEndpoint`
-- [ ] fetch_daily_candles
+- [x] [fetch_daily_candles](dxfeed-graal/examples/candle/fetch_daily_candles.rs)
   demonstrates how to fetch the candles of the last N days for a symbol
 
 ### Console
@@ -301,7 +301,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 ### File
 
-- [ ] convert_tape_file
+- [x] [convert_tape_file](dxfeed-graal/examples/file/convert_tape_file.rs)
   demonstrates how to convert one tape file to another tape file with optional intermediate processing or filtering
 - [x] [file_parser](dxfeed-graal/examples/file/file_parser.rs)
   demonstrates how to read events from a tape file
@@ -393,14 +393,17 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 - [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
   endpoint and feed (`get_instance`)
-- [x] Typed and untyped subscriptions to string symbols, listeners, publishing
+- [x] Typed and untyped subscriptions, listeners, publishing
+- [x] Symbols: strings, candle symbols with their attributes, the wildcard, indexed event sources and time series
+- [x] Time series subscriptions, `get_time_series_promise` and `get_indexed_events_promise`
+- [x] `TimeFormat`: parsing and formatting of times like the other APIs
 - [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_event_promise` and `Promise`
 - [x] Events printed in the format of Java's `toString`
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
 - [x] Event type names: `EventType::name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
-- [ ] Time series subscriptions, models, IPF, schedules, other symbol types
+- [ ] Models, IPF, schedules, the history endpoint, on-demand
 
 ## Development
 

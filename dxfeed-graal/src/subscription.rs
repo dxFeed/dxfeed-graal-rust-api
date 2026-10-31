@@ -1,17 +1,19 @@
 //! Subscriptions to events.
 
 use std::marker::PhantomData;
+use std::ops::Deref;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, Result, c_string};
-use crate::event::{Event, Events, SubscriptionItem};
+use crate::error::{Error, Result};
+use crate::event::{Event, Events, SubscriptionItem, TimeSeriesEvent};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::EventListener;
+use crate::symbol::{Symbol, SymbolArena};
 
 /// Identifies a listener added by [`DXFeedSubscription::add_event_listener`] or
 /// [`DXEndpoint::add_state_listener`](crate::DXEndpoint::add_state_listener).
@@ -89,24 +91,25 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         self.remove(listener)
     }
 
-    /// Adds symbols: any iterable of strings, e.g. `["AAPL", "IBM"]`, a `Vec<String>` or `std::iter::once("AAPL")`.
+    /// Adds symbols: any iterable of strings or [`Symbol`]s, e.g. `["AAPL", "IBM"]`, a `Vec<String>`,
+    /// `std::iter::once("AAPL")` or `[Symbol::Wildcard]`.
     #[doc(alias = "addSymbols")]
-    pub fn add_symbols(&self, symbols: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
+    pub fn add_symbols(&self, symbols: impl IntoIterator<Item: Into<Symbol>>) -> Result<()> {
+        let mut arena = SymbolArena::new();
+        let list = arena.list(symbols)?;
         let s = self.handle.as_ptr();
-        with_symbols(symbols, |list| {
-            // SAFETY: the subscription and the list are live.
-            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addSymbols(t, s, list) })
-        })
+        // SAFETY: the subscription and the list are live; the SDK only reads the list.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addSymbols(t, s, list) })
     }
 
     /// Removes symbols; takes the same iterables as [`add_symbols`](Self::add_symbols).
     #[doc(alias = "removeSymbols")]
-    pub fn remove_symbols(&self, symbols: impl IntoIterator<Item: AsRef<str>>) -> Result<()> {
+    pub fn remove_symbols(&self, symbols: impl IntoIterator<Item: Into<Symbol>>) -> Result<()> {
+        let mut arena = SymbolArena::new();
+        let list = arena.list(symbols)?;
         let s = self.handle.as_ptr();
-        with_symbols(symbols, |list| {
-            // SAFETY: the subscription and the list are live.
-            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeSymbols(t, s, list) })
-        })
+        // SAFETY: the subscription and the list are live; the SDK only reads the list.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeSymbols(t, s, list) })
     }
 
     /// Closes the subscription: it detaches from the feed and its listeners get no new events, except possibly one
@@ -145,29 +148,38 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
     }
 }
 
-/// Calls `f` with an SDK list of string symbols.
-fn with_symbols(
-    symbols: impl IntoIterator<Item: AsRef<str>>,
-    f: impl FnOnce(*mut sys::dxfg_v4_symbol_list) -> Result<()>,
-) -> Result<()> {
-    let strings = symbols
-        .into_iter()
-        .map(|s| c_string(s.as_ref(), "symbol"))
-        .collect::<Result<Vec<_>>>()?;
-    let mut structs: Vec<sys::dxfg_string_symbol_t> = strings
-        .iter()
-        .map(|s| sys::dxfg_string_symbol_t {
-            supper: sys::dxfg_symbol_t { type_: sys::STRING },
-            symbol: s.as_ptr(),
-        })
-        .collect();
-    let mut pointers: Vec<*mut sys::dxfg_symbol_t> = structs
-        .iter_mut()
-        .map(|s| (s as *mut sys::dxfg_string_symbol_t).cast())
-        .collect();
-    let mut list = sys::dxfg_symbol_list {
-        size: pointers.len() as i32,
-        elements: pointers.as_mut_ptr(),
-    };
-    f(&mut list)
+/// A subscription to the time-series events of type `E` from a time on (`DXFeedTimeSeriesSubscription`), created with
+/// [`DXFeed::create_time_series_subscription`].
+///
+/// It is a [`DXFeedSubscription`], whose methods it has through `Deref`, that wraps each symbol it adds in a
+/// [`Symbol::TimeSeriesSubscription`] from the time of [`set_from_time`](Self::set_from_time).
+pub struct DXFeedTimeSeriesSubscription<E: TimeSeriesEvent> {
+    subscription: DXFeedSubscription<E>,
+}
+
+impl<E: TimeSeriesEvent> DXFeedTimeSeriesSubscription<E> {
+    pub(crate) fn new(subscription: DXFeedSubscription<E>) -> Self {
+        DXFeedTimeSeriesSubscription { subscription }
+    }
+
+    /// Sets the time, in milliseconds since the Unix epoch, of the first events of all its symbols, those added before
+    /// and after (`setFromTime`).
+    #[doc(alias = "setFromTime")]
+    pub fn set_from_time(&self, from_time: i64) -> Result<()> {
+        let s = self
+            .subscription
+            .handle
+            .as_ptr()
+            .cast::<sys::dxfg_v4_time_series_subscription_t>();
+        // SAFETY: the subscription was created as a time-series subscription and is live.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedTimeSeriesSubscription_setFromTime(t, s, from_time) })
+    }
+}
+
+impl<E: TimeSeriesEvent> Deref for DXFeedTimeSeriesSubscription<E> {
+    type Target = DXFeedSubscription<E>;
+
+    fn deref(&self) -> &DXFeedSubscription<E> {
+        &self.subscription
+    }
 }

@@ -24,6 +24,10 @@ name = "auth"
 path = "examples/api/auth.rs"
 
 [[example]]
+name = "connect"
+path = "examples/api/connect.rs"
+
+[[example]]
 name = "print_quote_events"
 path = "examples/api/print_quote_events.rs"
 
@@ -40,8 +44,20 @@ name = "request_profile"
 path = "examples/api/request_profile.rs"
 
 [[example]]
+name = "candle"
+path = "examples/candle/candle.rs"
+
+[[example]]
+name = "fetch_daily_candles"
+path = "examples/candle/fetch_daily_candles.rs"
+
+[[example]]
 name = "last_event_console"
 path = "examples/console/last_event_console.rs"
+
+[[example]]
+name = "convert_tape_file"
+path = "examples/file/convert_tape_file.rs"
 
 [[example]]
 name = "file_parser"

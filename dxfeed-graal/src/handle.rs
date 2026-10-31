@@ -43,11 +43,12 @@ sdk_handle!(
     sys::dxfg_v4_endpoint_state_change_listener_t
 );
 
-// SAFETY: the promise of an event nests its Java object handle one level deeper, in `handler.handler`.
-unsafe impl SdkHandle for sys::dxfg_v4_promise_event_t {
+// SAFETY: a promise keeps its Java object handle in `handler`; the promises of an event and of a list start with a
+// promise, so their handles are released through it.
+unsafe impl SdkHandle for sys::dxfg_v4_promise_t {
     unsafe fn handler(this: *mut Self) -> *mut sys::dxfg_v4_java_object_handler {
         // SAFETY: the caller guarantees `this` is live.
-        unsafe { &raw mut (*this).handler.handler }
+        unsafe { &raw mut (*this).handler }
     }
 }
 

@@ -2,12 +2,9 @@
 //! `WideDecimal`, `TimeFormat` and `DayUtil`.
 
 use std::fmt::{self, Display, Formatter, Write};
-use std::ptr;
-use std::sync::{Mutex, OnceLock};
 
-use dxfeed_graal_sys as sys;
-
-use crate::isolate::{self, call};
+use crate::TimeFormat;
+use crate::isolate;
 
 /// A `double` as Java's `Double.toString` prints it.
 pub(super) struct JavaDouble(pub(super) f64);
@@ -110,53 +107,16 @@ fn write_time(f: &mut Formatter<'_>, millis: i64, with_millis: bool) -> fmt::Res
     }
 }
 
-/// A `TimeFormat` of the SDK; never released.
-struct TimeFormat(*mut sys::dxfg_v4_time_format_t);
-
-// SAFETY: the handle is a pointer to SDK memory usable from any attached thread, and Java's `TimeFormat` is
-// thread-safe.
-unsafe impl Send for TimeFormat {}
-// SAFETY: as above.
-unsafe impl Sync for TimeFormat {}
-
-/// `TimeFormat.DEFAULT.withMillis()`, or `TimeFormat.DEFAULT`.
-fn time_format(with_millis: bool) -> Option<&'static TimeFormat> {
-    static FORMATS: [OnceLock<TimeFormat>; 2] = [const { OnceLock::new() }; 2];
-    static INIT: Mutex<()> = Mutex::new(());
-    let init = || {
-        let mut default = ptr::null_mut();
-        // SAFETY: the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut default) }).ok()?;
-        if default.is_null() {
-            return None;
-        }
-        if !with_millis {
-            return Some(TimeFormat(default));
-        }
-        let mut millis = ptr::null_mut();
-        // SAFETY: `default` is a live time format and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_TimeFormat_withMillis(t, default, &mut millis) }).ok()?;
-        (!millis.is_null()).then_some(TimeFormat(millis))
-    };
-    crate::get_or_try_init(&FORMATS[usize::from(with_millis)], &INIT, || init().ok_or(())).ok()
-}
-
 fn format_time(millis: i64, with_millis: bool) -> Option<String> {
     if isolate::exiting() {
         return None;
     }
-    let format = time_format(with_millis)?.0;
-    let mut text = ptr::null();
-    // SAFETY: the time format is live and the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_TimeFormat_format(t, format, millis, &mut text) }).ok()?;
-    if text.is_null() {
-        return None;
-    }
-    // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
-    let copy = unsafe { isolate::string(text) }.into_owned();
-    // SAFETY: `text` came from dxfg_v4_TimeFormat_format and is released once.
-    let _ = call(|t| unsafe { sys::dxfg_v4_String_release(t, text) });
-    Some(copy)
+    let format = if with_millis {
+        TimeFormat::DEFAULT.with_millis()
+    } else {
+        TimeFormat::DEFAULT
+    };
+    format.format(millis).ok()
 }
 
 /// A nullable string in single quotes, as Java's `toString` of events prints it: `'text'`, or `'null'`.

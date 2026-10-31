@@ -1,4 +1,4 @@
-//! The promise of a last event.
+//! The promise of a result of a feed request: a last event or a list of events.
 
 use std::marker::PhantomData;
 use std::ptr;
@@ -7,8 +7,8 @@ use std::time::Duration;
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, JavaException, Result};
-use crate::event::LastingEvent;
-use crate::event::sdk_event::take_event;
+use crate::event::sdk_event::{take_event, take_events};
+use crate::event::{IndexedEvent, LastingEvent};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, Thread, call};
@@ -16,27 +16,64 @@ use crate::isolate::{self, Thread, call};
 /// What `dxfg_v4_Promise_awaitWithoutException` returns when the wait timed out (`DXFG_PROMISE_AWAIT_TIMED_OUT`).
 const AWAIT_TIMED_OUT: i32 = 1;
 
-/// The result of [`DXFeed::get_last_event_promise`] that becomes known later (`Promise`).
+/// The result of a feed request that becomes known later (`Promise`): an event of [`DXFeed::get_last_event_promise`],
+/// or a `Vec` of events of [`DXFeed::get_time_series_promise`] and [`DXFeed::get_indexed_events_promise`].
 ///
 /// [`wait`](Self::wait) blocks for it; [`result`](Self::result), [`is_done`](Self::is_done),
 /// [`is_cancelled`](Self::is_cancelled) and [`cancel`](Self::cancel) do not block. Dropping a promise does not cancel
 /// the request, as in Java. The promise keeps the endpoint of its feed open while it lives.
-pub struct Promise<E: LastingEvent> {
-    handle: Handle<sys::dxfg_v4_promise_event_t>,
+pub struct Promise<T: PromiseResult> {
+    handle: Handle<sys::dxfg_v4_promise_t>,
     _feed: DXFeed,
-    _event: PhantomData<fn() -> E>,
+    _result: PhantomData<fn() -> T>,
 }
 
-impl<E: LastingEvent> Promise<E> {
-    pub(crate) fn new(handle: Handle<sys::dxfg_v4_promise_event_t>, feed: DXFeed) -> Self {
+/// What a [`Promise`] completes with: a [`LastingEvent`], or a `Vec` of an [`IndexedEvent`] type.
+///
+/// The trait is sealed: only this crate implements it.
+pub trait PromiseResult: sealed::Sealed {}
+
+mod sealed {
+    use dxfeed_graal_sys as sys;
+
+    use crate::error::Result;
+
+    pub trait Sealed: Sized {
+        /// Copies the result of a completed promise; `None` if it has none.
+        fn take(promise: *mut sys::dxfg_v4_promise_t) -> Result<Option<Self>>;
+    }
+}
+
+impl<E: LastingEvent> PromiseResult for E {}
+
+impl<E: LastingEvent> sealed::Sealed for E {
+    fn take(promise: *mut sys::dxfg_v4_promise_t) -> Result<Option<Self>> {
+        let promise = promise.cast::<sys::dxfg_v4_promise_event_t>();
+        // SAFETY: the promise of a single event is live and the out-pointer is valid for writes.
+        take_event(|t, out| unsafe { sys::dxfg_v4_Promise_EventType_getResult(t, promise, out) })
+    }
+}
+
+impl<E: IndexedEvent> PromiseResult for Vec<E> {}
+
+impl<E: IndexedEvent> sealed::Sealed for Vec<E> {
+    fn take(promise: *mut sys::dxfg_v4_promise_t) -> Result<Option<Self>> {
+        let promise = promise.cast::<sys::dxfg_v4_promise_events_t>();
+        // SAFETY: the promise of a list is live and the out-pointer is valid for writes.
+        take_events(|t, out| unsafe { sys::dxfg_v4_Promise_List_EventType_getResult(t, promise, out) })
+    }
+}
+
+impl<T: PromiseResult> Promise<T> {
+    pub(crate) fn new(handle: Handle<sys::dxfg_v4_promise_t>, feed: DXFeed) -> Self {
         Promise {
             handle,
             _feed: feed,
-            _event: PhantomData,
+            _result: PhantomData,
         }
     }
 
-    /// Waits at most `timeout` for the event (`Promise.awaitWithoutException`).
+    /// Waits at most `timeout` for the result (`Promise.awaitWithoutException`).
     ///
     /// Returns [`Error::Timeout`] when the timeout expires: a positive timeout then cancels the promise, as in Java,
     /// while a zero timeout only checks it and leaves it pending. Returns [`Error::Java`] when the promise has
@@ -50,7 +87,7 @@ impl<E: LastingEvent> Promise<E> {
     /// events the promise may be waiting for.
     #[doc(alias = "await")]
     #[doc(alias = "awaitWithoutException")]
-    pub fn wait(&self, timeout: Duration) -> Result<E> {
+    pub fn wait(&self, timeout: Duration) -> Result<T> {
         if timeout.is_zero() {
             return self.result()?.ok_or(Error::Timeout);
         }
@@ -72,29 +109,29 @@ impl<E: LastingEvent> Promise<E> {
         self.completed_result()
     }
 
-    /// The event if the promise has completed with it, `None` while it is pending (`Promise.getResult`).
+    /// The result if the promise has completed with it, `None` while it is pending (`Promise.getResult`).
     ///
     /// Returns [`Error::Java`] when the promise has completed exceptionally or was cancelled.
     #[doc(alias = "getResult")]
-    pub fn result(&self) -> Result<Option<E>> {
+    pub fn result(&self) -> Result<Option<T>> {
         if !self.is_done()? {
             return Ok(None);
         }
         self.completed_result().map(Some)
     }
 
-    /// The event of a completed promise, or its exception.
-    fn completed_result(&self) -> Result<E> {
-        let promise = self.handle.as_ptr();
-        // SAFETY: the promise is live and the out-pointer is valid for writes.
-        if let Some(event) = take_event(|t, out| unsafe { sys::dxfg_v4_Promise_EventType_getResult(t, promise, out) })?
+    /// The result of a completed promise, or its exception.
+    fn completed_result(&self) -> Result<T> {
+        // A promise of a list gives an empty list without a result, so the result is taken only when there is one.
+        if self.flag(sys::dxfg_v4_Promise_hasResult)?
+            && let Some(result) = T::take(self.handle.as_ptr())?
         {
-            return Ok(event);
+            return Ok(result);
         }
         Err(Error::Java(self.exception()?.unwrap_or_else(JavaException::lost)))
     }
 
-    /// Whether the promise has completed: with the event, exceptionally or by cancellation (`Promise.isDone`).
+    /// Whether the promise has completed: with the result, exceptionally or by cancellation (`Promise.isDone`).
     #[doc(alias = "isDone")]
     pub fn is_done(&self) -> Result<bool> {
         self.flag(sys::dxfg_v4_Promise_isDone)
@@ -117,8 +154,7 @@ impl<E: LastingEvent> Promise<E> {
 
     /// The promise as the functions of all promises take it.
     fn as_promise(&self) -> *mut sys::dxfg_v4_promise_t {
-        // SAFETY: the promise is live while `self` lives.
-        unsafe { &raw mut (*self.handle.as_ptr()).handler }
+        self.handle.as_ptr()
     }
 
     /// Reads a flag of the promise with an SDK function.
@@ -131,7 +167,7 @@ impl<E: LastingEvent> Promise<E> {
     }
 
     /// The exception of the promise: `CancellationException` for a cancelled one, `None` while it is pending or after
-    /// it has completed with the event.
+    /// it has completed with the result.
     fn exception(&self) -> Result<Option<JavaException>> {
         let promise = self.as_promise();
         let mut exception = ptr::null_mut();
