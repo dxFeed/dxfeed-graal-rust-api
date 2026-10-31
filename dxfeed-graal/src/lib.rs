@@ -118,6 +118,7 @@ mod listener;
 mod observable;
 mod promise;
 mod publisher;
+pub mod schedule;
 mod subscription;
 mod symbol;
 pub mod system;

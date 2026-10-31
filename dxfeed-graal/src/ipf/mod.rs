@@ -3,7 +3,7 @@
 
 pub mod live;
 pub mod option;
-mod profile;
+pub(crate) mod profile;
 mod reader;
 
 pub use profile::InstrumentProfile;

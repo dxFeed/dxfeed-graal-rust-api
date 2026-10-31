@@ -49,7 +49,12 @@ sdk_handle!(
     sys::dxfg_v4_ipf_connection_t,
     sys::dxfg_v4_iterable_ip_t,
     sys::dxfg_v4_ipf_update_listener_t,
-    sys::dxfg_v4_ipf_connection_state_change_listener_t
+    sys::dxfg_v4_ipf_connection_state_change_listener_t,
+    sys::dxfg_v4_schedule_t,
+    sys::dxfg_v4_day_t,
+    sys::dxfg_v4_session_t,
+    sys::dxfg_v4_day_filter_t,
+    sys::dxfg_v4_session_filter_t
 );
 
 // SAFETY: a promise keeps its Java object handle in `handler`; the promises of an event and of a list start with a
@@ -82,14 +87,29 @@ impl<T: SdkHandle> Handle<T> {
     /// Calls an SDK function that writes a new handle to its out-pointer and takes ownership of it.
     /// Returns [`Error::ShutDown`] after [`crate::system::shutdown`].
     pub(crate) fn create(f: impl FnOnce(Thread, *mut *mut T) -> i32) -> Result<Self> {
+        Self::create_optional(f)?.ok_or_else(|| Error::Java(JavaException::null_result()))
+    }
+
+    /// Like [`create`](Self::create), for SDK functions that write NULL when there is no object: that gives `None`.
+    pub(crate) fn create_optional(f: impl FnOnce(Thread, *mut *mut T) -> i32) -> Result<Option<Self>> {
         if isolate::shut_down() {
             return Err(Error::ShutDown);
         }
         let mut raw = std::ptr::null_mut();
         call(|t| f(t, &mut raw))?;
-        let handle = NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::null_result()))?;
+        // SAFETY: the SDK wrote a new handle or NULL, which is ours.
+        Ok(unsafe { Self::from_raw(raw) })
+    }
+
+    /// Takes ownership of a handle that the SDK returned, such as an element of a list; NULL gives `None`.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must be NULL or a live handle that the caller owns and releases nowhere else.
+    pub(crate) unsafe fn from_raw(raw: *mut T) -> Option<Self> {
+        let handle = NonNull::new(raw)?;
         LIVE.fetch_add(1, Ordering::SeqCst);
-        Ok(Handle(handle))
+        Some(Handle(handle))
     }
 
     /// The raw pointer, valid while `self` lives.

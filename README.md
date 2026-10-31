@@ -333,7 +333,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 ### Schedule
 
-- [ ] schedule
+- [x] [schedule](dxfeed-graal/examples/schedule/schedule.rs)
   demonstrates how to get various scheduling information for instruments
 
 ### OnDemand
@@ -405,7 +405,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Event type names: `EventType::name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [x] Instrument profiles: reading files and URLs, a collector, a live connection and option chains
-- [ ] Models, schedules, the history endpoint, on-demand
+- [x] Trading schedules: days, sessions, holidays, venues and the schedule defaults
+- [ ] Models, the history endpoint, on-demand
 
 ## Development
 
