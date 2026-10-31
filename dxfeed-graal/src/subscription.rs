@@ -61,8 +61,8 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     ///
     /// The batch iterates `&QuoteRef` for a subscription to quotes, `&TradeRef` for one to trades and
     /// [`EventRef`](crate::EventRef) for an untyped one. Add listeners before symbols, so the first events are not
-    /// missed. A panic in `f` is caught and printed to stderr; the listener stays active. The events are valid during
-    /// the call only: copy what you keep with `to_owned()`.
+    /// missed. A panic in `f` is caught and goes to [`ErrorManager`](crate::ErrorManager); the listener stays active.
+    /// The events are valid during the call only: copy what you keep with `to_owned()`.
     #[doc(alias = "addEventListener")]
     pub fn add_event_listener(&self, mut f: impl FnMut(Events<'_, E>) + Send + 'static) -> Result<ListenerId> {
         let listener = EventListener::new(Box::new(move |events: Events<'_>| f(events.typed())))?;
@@ -174,10 +174,11 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
         }
         let listeners = std::mem::take(&mut *self.lock());
         for (_, listener) in listeners {
-            let _ = self.remove(listener);
+            crate::error_manager::report_release("DXFeedSubscription", self.remove(listener));
         }
-        self.change_listeners.remove_all(|l| self.remove_change(l));
-        let _ = self.close();
+        self.change_listeners
+            .remove_all("DXFeedSubscription", |l| self.remove_change(l));
+        crate::error_manager::report_release("DXFeedSubscription", self.close());
     }
 }
 

@@ -125,7 +125,10 @@ impl InstrumentProfileReader {
         // SAFETY: the SDK filled the list, which is released once after the copy.
         let profiles = unsafe { profiles(list) };
         // SAFETY: as above; nothing uses it afterwards.
-        let _ = call(|t| unsafe { sys::dxfg_v4_instrument_profile_data_list_release(t, list) });
+        crate::error_manager::report_release(
+            "InstrumentProfileReader",
+            call(|t| unsafe { sys::dxfg_v4_instrument_profile_data_list_release(t, list) }),
+        );
         profiles
     }
 }

@@ -93,11 +93,11 @@ impl Drop for InstrumentProfileConnection {
             return;
         }
         let c = self.handle.as_ptr();
-        self.listeners.remove_all(|l| {
+        self.listeners.remove_all("InstrumentProfileConnection", |l| {
             // SAFETY: the connection and the listener are live.
             call(|t| unsafe { sys::dxfg_v4_InstrumentProfileConnection_removeStateChangeListener(t, c, l) })
         });
-        let _ = self.close();
+        crate::error_manager::report_release("InstrumentProfileConnection", self.close());
     }
 }
 

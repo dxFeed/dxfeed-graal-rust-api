@@ -149,7 +149,7 @@ impl Drop for PriceLevelService {
             // No SDK calls from destructors while the process exits.
             return;
         }
-        let _ = self.close();
+        crate::error_manager::report_release("PriceLevelService", self.close());
     }
 }
 
@@ -183,7 +183,10 @@ impl AuthOrderSource {
             .collect();
         if !list.is_null() {
             // SAFETY: the list is released once, after the copy.
-            let _ = call(|t| unsafe { sys::dxfg_v4_symbols_by_order_source_id_map_entry_list_release(t, list) });
+            crate::error_manager::report_release(
+                "AuthOrderSource",
+                call(|t| unsafe { sys::dxfg_v4_symbols_by_order_source_id_map_entry_list_release(t, list) }),
+            );
         }
         Ok(entries)
     }
@@ -209,7 +212,10 @@ impl AuthOrderSource {
             .collect();
         if !list.is_null() {
             // SAFETY: the list is released once, after the copy.
-            let _ = call(|t| unsafe { sys::dxfg_v4_symbols_by_order_source_map_entry_list_release(t, list) });
+            crate::error_manager::report_release(
+                "AuthOrderSource",
+                call(|t| unsafe { sys::dxfg_v4_symbols_by_order_source_map_entry_list_release(t, list) }),
+            );
         }
         entries
     }

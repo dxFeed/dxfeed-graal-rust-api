@@ -401,7 +401,10 @@ fn normalize(symbol: &str) -> Result<String> {
             .map(|text| isolate::string(text).into_owned())
     };
     // SAFETY: the symbol came from dxfg_v4_Symbol_new and is released once; a failed release leaks it.
-    let _ = call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol.as_ptr()) });
+    crate::error_manager::report_release(
+        "CandleSymbol",
+        call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol.as_ptr()) }),
+    );
     normalized.ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned no candle symbol")))
 }
 

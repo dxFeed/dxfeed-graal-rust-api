@@ -300,7 +300,7 @@ impl<K: Kind> Drop for Core<K> {
             return;
         }
         // The feeds go last, after the listener: they may close their endpoints.
-        let _ = self.close_model();
+        crate::error_manager::report_release("TxModel", self.close_model());
         let listener = self.listener.get_mut().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(listener) = listener {
             listener.release();
@@ -361,7 +361,7 @@ macro_rules! builder_methods {
         /// the events of that source the listener got before.
         ///
         /// The events are valid during the call only: copy what you keep with `to_owned()`. A panic in `f` is
-        /// caught and printed to stderr.
+        /// caught and goes to [`ErrorManager`](crate::ErrorManager).
         #[doc(alias = "withListener")]
         pub fn with_listener(
             mut self,
@@ -463,7 +463,10 @@ impl<E: IndexedEvent> IndexedTxModel<E> {
             .map(|source| IndexedEventSource::from_id(source.id).unwrap_or_default())
             .collect();
         // SAFETY: the list is ours and nothing uses it afterwards.
-        let _ = call(|t| unsafe { sys::dxfg_v4_indexed_event_source_list_release(t, list) });
+        crate::error_manager::report_release(
+            "IndexedEventSource",
+            call(|t| unsafe { sys::dxfg_v4_indexed_event_source_list_release(t, list) }),
+        );
         Ok(sources)
     }
 

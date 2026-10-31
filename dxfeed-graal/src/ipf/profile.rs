@@ -322,7 +322,10 @@ unsafe fn custom_fields(
     };
     let result = read();
     // SAFETY: the list came from the SDK and is released once.
-    let _ = call(|t| unsafe { sys::dxfg_v4_string_list_release(t, names) });
+    crate::error_manager::report_release(
+        "InstrumentProfile",
+        call(|t| unsafe { sys::dxfg_v4_string_list_release(t, names) }),
+    );
     result.map(|()| fields)
 }
 
@@ -336,7 +339,10 @@ pub(crate) unsafe fn take_string(s: *const c_char) -> String {
     let copy = unsafe { isolate::string(s) }.into_owned();
     if !s.is_null() {
         // SAFETY: the string is the caller's and is released once.
-        let _ = call(|t| unsafe { sys::dxfg_v4_String_release(t, s) });
+        crate::error_manager::report_release(
+            "InstrumentProfile",
+            call(|t| unsafe { sys::dxfg_v4_String_release(t, s) }),
+        );
     }
     copy
 }

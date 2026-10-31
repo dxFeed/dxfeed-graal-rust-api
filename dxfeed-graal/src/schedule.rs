@@ -328,7 +328,10 @@ impl Schedule {
             }
         };
         // SAFETY: as above; nothing uses it afterwards.
-        let _ = call(|t| unsafe { sys::dxfg_v4_string_list_release(t, list) });
+        crate::error_manager::report_release(
+            "Schedule",
+            call(|t| unsafe { sys::dxfg_v4_string_list_release(t, list) }),
+        );
         Ok(venues)
     }
 
@@ -581,7 +584,10 @@ impl Day {
             }
         };
         // SAFETY: as above; the sessions are kept.
-        let _ = call(|t| unsafe { sys::dxfg_v4_session_list_wrapper_release(t, list) });
+        crate::error_manager::report_release(
+            "Schedule",
+            call(|t| unsafe { sys::dxfg_v4_session_list_wrapper_release(t, list) }),
+        );
         Ok(sessions)
     }
 

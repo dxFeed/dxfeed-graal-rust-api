@@ -215,7 +215,12 @@ set before the first endpoint is created.
 - All types are `Send` and `Sync`. Threads are attached to the SDK on their first call and detached when they exit.
 - A listener's closure runs on a thread of the endpoint's executor, or inside `ManualExecutor::process_all_pending`.
   The calls of one listener do not overlap. The events are valid during the call only: copy what you keep with
-  `to_owned()`. A panic in a closure is caught and printed to stderr; the listener stays active.
+  `to_owned()`. A panic in a closure is caught and goes to `ErrorManager`, as the C++ API does; the listener stays
+  active.
+- Errors without a caller (panics of listeners, data the API cannot read, failed releases of native data on drop) go
+  to `ErrorManager`: its default handler writes one line per error to stderr, `ErrorManager::set_handler` replaces it,
+  and a journal keeps the last errors (`get_errors`, `get_last_error`). The handler runs on the thread of the error;
+  for a listener, inside its call, so like the listener it must not wait for a thread that removes that listener.
 - Add listeners before symbols.
 - Removing a listener or dropping its subscription waits for its running calls (inside a callback it does not), and so
   does dropping the last owner of an endpoint with state listeners. So do not hold a lock that a closure takes while
@@ -403,6 +408,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] On-demand historical data replay: `OnDemandService`
 - [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
+- [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 ## Development
 

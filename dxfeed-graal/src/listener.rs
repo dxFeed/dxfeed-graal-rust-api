@@ -213,7 +213,10 @@ impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listener<H, C> {
         let Listener { handle, state } = self;
         // While the process is exiting, the release reports success without calling the SDK, so `exiting` is checked
         // after it: a release that reached the SDK just before the exit started is then leaked too, which is harmless.
-        if handle.release().is_ok() && !isolate::exiting() {
+        let released = handle.release();
+        let ok = released.is_ok();
+        crate::error_manager::report_release("JavaObjectHandler", released);
+        if ok && !isolate::exiting() {
             // SAFETY: the SDK released the handle, so it no longer calls the trampoline with `state`; its reference
             // is ours to drop.
             drop(unsafe { Arc::from_raw(state) });
@@ -282,9 +285,14 @@ unsafe extern "C" fn event_trampoline(
 ) {
     // SAFETY: `user_data` is the state of an event listener, and the SDK keeps the list alive until this call returns.
     unsafe {
-        dispatch::<EventClosure>(thread, user_data, "an event listener", Nested::Warn, |closure| {
-            closure(Events::new(events))
-        })
+        dispatch::<EventClosure>(
+            thread,
+            user_data,
+            "DXFeedSubscription",
+            "an event listener",
+            Nested::Warn,
+            |closure| closure(Events::new(events)),
+        )
     };
 }
 
@@ -305,6 +313,7 @@ unsafe extern "C" fn tx_trampoline(
         dispatch::<TxClosure>(
             thread,
             user_data,
+            "TxModel",
             "a transactional model listener",
             Nested::Warn,
             |closure| closure(source, Events::new(events), is_snapshot != 0),
@@ -324,6 +333,7 @@ unsafe extern "C" fn event_tx_trampoline(
         dispatch::<EventTxClosure>(
             thread,
             user_data,
+            "IndexedEventTxModel",
             "an indexed event transactional model listener",
             Nested::Warn,
             |closure| closure(Events::new(events), is_snapshot != 0),
@@ -346,6 +356,7 @@ unsafe extern "C" fn state_trampoline(
         dispatch::<StateClosure>(
             thread,
             user_data,
+            "DXEndpoint",
             "an endpoint state listener",
             Nested::Warn,
             |closure| closure(old_state, new_state),
@@ -363,6 +374,7 @@ unsafe extern "C" fn symbols_added_trampoline(
         dispatch::<ChangeClosure>(
             thread,
             user_data,
+            "ObservableSubscription",
             "a subscription change listener",
             Nested::WarnThenClose(close_change_listener),
             |listener| listener.symbols_added(&Symbol::list_from_sys(symbols)),
@@ -380,6 +392,7 @@ unsafe extern "C" fn symbols_removed_trampoline(
         dispatch::<ChangeClosure>(
             thread,
             user_data,
+            "ObservableSubscription",
             "a subscription change listener",
             Nested::WarnThenClose(close_change_listener),
             |listener| listener.symbols_removed(&Symbol::list_from_sys(symbols)),
@@ -393,6 +406,7 @@ unsafe extern "C" fn subscription_closed_trampoline(thread: *mut sys::graal_isol
         dispatch::<ChangeClosure>(
             thread,
             user_data,
+            "ObservableSubscription",
             "a subscription change listener",
             Nested::Defer,
             close_change_listener,
@@ -415,11 +429,12 @@ unsafe extern "C" fn update_trampoline(
         dispatch::<UpdateClosure>(
             thread,
             user_data,
+            "InstrumentProfileCollector",
             "an instrument profile update listener",
             Nested::Warn,
             |closure| match crate::ipf::live::collect(profiles) {
                 Ok(profiles) => closure(&profiles),
-                Err(e) => eprintln!("dxfeed-graal: could not read the updated instrument profiles: {e}"),
+                Err(e) => crate::ErrorManager::report_error("InstrumentProfileCollector", &e),
             },
         )
     };
@@ -436,6 +451,7 @@ unsafe extern "C" fn ipf_state_trampoline(
         dispatch::<IpfStateClosure>(
             thread,
             user_data,
+            "InstrumentProfileConnection",
             "an instrument profile connection state listener",
             Nested::Warn,
             |closure| match (
@@ -443,7 +459,7 @@ unsafe extern "C" fn ipf_state_trampoline(
                 ConnectionState::from_sys(new_state),
             ) {
                 (Ok(old_state), Ok(new_state)) => closure(old_state, new_state),
-                _ => eprintln!("dxfeed-graal: skipped an unknown instrument profile connection state"),
+                _ => crate::ErrorManager::report("InstrumentProfileConnection", "skipped an unknown connection state"),
             },
         )
     };
@@ -492,10 +508,10 @@ impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listeners<H, C> {
     }
 
     /// Removes every listener with `remove` and releases it, ignoring errors.
-    pub(crate) fn remove_all(&self, remove: impl Fn(*mut H) -> Result<()>) {
+    pub(crate) fn remove_all(&self, component: &str, remove: impl Fn(*mut H) -> Result<()>) {
         let listeners = std::mem::take(&mut *crate::lock(&self.listeners));
         for (_, listener) in listeners {
-            let _ = remove(listener.as_ptr());
+            crate::error_manager::report_release(component, remove(listener.as_ptr()));
             listener.release();
         }
     }
@@ -512,18 +528,19 @@ impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Drop for Listeners<H, C
 
 /// What [`dispatch`] does with a call nested in a running call of the same listener on its thread.
 enum Nested<C: ?Sized> {
-    /// Skips it with a warning: the SDK serializes the calls of a listener, so this is a guard against a deadlock on
-    /// the closure lock, not an expected path.
+    /// Skips it and reports it to `ErrorManager`: the SDK serializes the calls of a listener, so this is a guard
+    /// against a deadlock on the closure lock, not an expected path.
     Warn,
-    /// Skips it with a warning, and after the running call, runs the close deferred during it.
+    /// Skips it and reports it to `ErrorManager`, and after the running call, runs the close deferred during it.
     WarnThenClose(fn(&mut C)),
     /// Defers it until the running call returns: the close of a change listener that removes itself or closes its
     /// subscription or endpoint in its own call.
     Defer,
 }
 
-/// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `what` names the
-/// listener in messages, and `nested` tells what to do with a nested call.
+/// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `component` and
+/// `what` name the listener in the reports to [`ErrorManager`](crate::ErrorManager), and `nested` tells what to
+/// do with a nested call.
 ///
 /// # Safety
 ///
@@ -531,6 +548,7 @@ enum Nested<C: ?Sized> {
 unsafe fn dispatch<C: ?Sized>(
     thread: *mut sys::graal_isolatethread_t,
     user_data: *mut c_void,
+    component: &str,
     what: &str,
     nested: Nested<C>,
     call: impl FnOnce(&mut C),
@@ -551,32 +569,29 @@ unsafe fn dispatch<C: ?Sized>(
         if state.running.load(Ordering::Acquire) == me {
             match nested {
                 Nested::Defer => state.close_deferred.store(true, Ordering::Release),
-                Nested::Warn | Nested::WarnThenClose(_) => {
-                    eprintln!("dxfeed-graal: skipped a nested call of {what} on the thread that runs it")
-                }
+                Nested::Warn | Nested::WarnThenClose(_) => crate::ErrorManager::report(
+                    component,
+                    format!("skipped a nested call of {what} on the thread that runs it"),
+                ),
             }
             return;
         }
         let mut closure = crate::lock(&state.closure);
         state.running.store(me, Ordering::Release);
-        report(what, panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure))));
+        crate::error_manager::report_panic(
+            component,
+            what,
+            panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure))),
+        );
         if let Nested::WarnThenClose(close) = nested
             && state.close_deferred.swap(false, Ordering::AcqRel)
         {
-            report(what, panic::catch_unwind(AssertUnwindSafe(|| close(&mut **closure))));
+            crate::error_manager::report_panic(
+                component,
+                what,
+                panic::catch_unwind(AssertUnwindSafe(|| close(&mut **closure))),
+            );
         }
         state.running.store(0, Ordering::Release);
     }));
-}
-
-/// Prints the panic of a call of a listener named by `what`, if it panicked.
-pub(crate) fn report(what: &str, result: std::thread::Result<()>) {
-    if let Err(payload) = result {
-        let message = payload
-            .downcast_ref::<&str>()
-            .copied()
-            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-            .unwrap_or("unknown panic");
-        eprintln!("dxfeed-graal: {what} panicked: {message}");
-    }
 }

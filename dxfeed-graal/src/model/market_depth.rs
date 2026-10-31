@@ -14,7 +14,6 @@ use crate::error::Result;
 use crate::event::{EventFlags, Events, IndexedEventSource, OrderEvent, Scope, Side};
 use crate::feed::DXFeed;
 use crate::isolate;
-use crate::listener::report;
 use crate::symbol::Symbol;
 
 /// The listener of a market depth model: the buy side, then the sell side.
@@ -141,7 +140,7 @@ impl<O: OrderEvent> Drop for MarketDepthModel<O> {
         if isolate::exiting() {
             return;
         }
-        let _ = self.close();
+        crate::error_manager::report_release("MarketDepthModel", self.close());
         let timer = crate::lock(&self.shared.state).timer.take();
         let tx = self.tx.take();
         if *crate::lock(&self.shared.notifying) == Some(thread::current().id()) {
@@ -222,7 +221,8 @@ impl<O: OrderEvent> MarketDepthModelBuilder<O> {
     }
 
     /// The listener of the order book (`withListener`): it gets the buy orders, then the sell orders, sorted from the
-    /// best price, at most the depth limit of each. A panic in `f` is caught and printed to stderr.
+    /// best price, at most the depth limit of each. A panic in `f` is caught and goes to
+    /// [`ErrorManager`](crate::ErrorManager).
     #[doc(alias = "withListener")]
     pub fn with_listener(mut self, f: impl FnMut(&[O], &[O]) + Send + 'static) -> Self {
         self.listener = Some(Box::new(f));
@@ -371,7 +371,8 @@ impl<O: OrderEvent> Shared<O> {
                 return;
             };
             *crate::lock(&self.notifying) = Some(current);
-            report(
+            crate::error_manager::report_panic(
+                "MarketDepthModel",
                 "a market depth model listener",
                 panic::catch_unwind(AssertUnwindSafe(|| listener(&buy, &sell))),
             );

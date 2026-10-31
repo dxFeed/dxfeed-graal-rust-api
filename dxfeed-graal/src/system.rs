@@ -36,7 +36,10 @@ pub fn get_property(key: &str) -> Result<Option<String>> {
     // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
     let copy = unsafe { isolate::string(value) }.into_owned();
     // SAFETY: `value` came from dxfg_v4_system_get_property and is released once.
-    let _ = call(|t| unsafe { sys::dxfg_v4_system_release_property(t, value) });
+    crate::error_manager::report_release(
+        "System",
+        call(|t| unsafe { sys::dxfg_v4_system_release_property(t, value) }),
+    );
     Ok(Some(copy))
 }
 

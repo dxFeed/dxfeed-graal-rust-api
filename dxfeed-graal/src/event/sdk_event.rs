@@ -45,7 +45,10 @@ impl Drop for SdkEvent {
         let event = self.0.as_ptr();
         // SAFETY: the event came from the SDK and is released once. Errors are cleared by `call`; a failed release
         // leaks the event.
-        let _ = call(|t| unsafe { sys::dxfg_v4_EventType_release(t, event) });
+        crate::error_manager::report_release(
+            "EventType",
+            call(|t| unsafe { sys::dxfg_v4_EventType_release(t, event) }),
+        );
     }
 }
 
@@ -73,7 +76,10 @@ impl Drop for SdkEventList {
         }
         let list = self.0.as_ptr();
         // SAFETY: the list came from the SDK and is released once, with its events; a failed release leaks it.
-        let _ = call(|t| unsafe { sys::dxfg_v4_event_type_list_release(t, list) });
+        crate::error_manager::report_release(
+            "EventType",
+            call(|t| unsafe { sys::dxfg_v4_event_type_list_release(t, list) }),
+        );
     }
 }
 
@@ -159,7 +165,7 @@ impl Drop for SdkSymbol {
         {
             let symbol = symbol.as_ptr();
             // SAFETY: the symbol came from dxfg_v4_Symbol_new and is released once; a failed release leaks it.
-            let _ = call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol) });
+            crate::error_manager::report_release("Symbol", call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol) }));
         }
     }
 }

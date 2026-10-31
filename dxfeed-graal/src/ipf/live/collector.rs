@@ -34,7 +34,7 @@ impl Drop for CollectorState {
             return;
         }
         let c = self.handle.as_ptr();
-        self.listeners.remove_all(|l| {
+        self.listeners.remove_all("InstrumentProfileCollector", |l| {
             // SAFETY: the collector and the listener are live.
             call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_removeUpdateListener(t, c, l) })
         });
@@ -160,7 +160,10 @@ pub(crate) unsafe fn collect(iterator: *mut sys::dxfg_v4_iterable_ip_t) -> Resul
         // SAFETY: the SDK filled the structure, which is released once after the copy.
         let profile = unsafe { InstrumentProfile::from_sys(data) };
         // SAFETY: as above; nothing uses it afterwards.
-        let _ = call(|t| unsafe { sys::dxfg_v4_instrument_profile_data_release(t, data) });
+        crate::error_manager::report_release(
+            "InstrumentProfileCollector",
+            call(|t| unsafe { sys::dxfg_v4_instrument_profile_data_release(t, data) }),
+        );
         profiles.push(profile?);
     }
 }

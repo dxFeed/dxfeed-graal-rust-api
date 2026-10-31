@@ -258,9 +258,9 @@ impl Drop for EndpointState {
         // The listeners go first, so that no call of them starts once the last owner of the endpoint is gone.
         let listeners = std::mem::take(&mut *self.state_listeners());
         for (_, listener) in listeners {
-            let _ = self.remove_state_listener(listener);
+            crate::error_manager::report_release("DXEndpoint", self.remove_state_listener(listener));
         }
-        let _ = self.close();
+        crate::error_manager::report_release("DXEndpoint", self.close());
     }
 }
 
@@ -450,8 +450,9 @@ impl DXEndpoint {
     /// executor.
     ///
     /// Fast changes are coalesced: `f` may see [`State::NotConnected`] followed by [`State::Connected`]. A panic in `f`
-    /// is caught and printed to stderr; the listener stays active. The listener stays until it is removed or the last
-    /// owner of the endpoint is dropped; a closure that owns the endpoint, its feed or its publisher keeps it open.
+    /// is caught and goes to [`ErrorManager`](crate::ErrorManager); the listener stays active. The listener stays
+    /// until it is removed or the last owner of the endpoint is dropped; a closure that owns the endpoint, its feed
+    /// or its publisher keeps it open.
     #[doc(alias = "addStateChangeListener")]
     pub fn add_state_listener(&self, f: impl FnMut(State, State) + Send + 'static) -> Result<ListenerId> {
         let listener = StateListener::new(Box::new(f))?;

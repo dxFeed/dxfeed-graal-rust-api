@@ -153,6 +153,6 @@ impl<T: SdkHandle> Handle<T> {
 impl<T: SdkHandle> Drop for Handle<T> {
     fn drop(&mut self) {
         // Errors are cleared by `call`; a failed release leaks the Java object.
-        let _ = self.release_now();
+        crate::error_manager::report_release("JavaObjectHandler", self.release_now());
     }
 }

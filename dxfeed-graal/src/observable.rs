@@ -19,7 +19,7 @@ use crate::symbol::Symbol;
 ///
 /// A closure `FnMut(&[Symbol])` is a listener of the added symbols only, as a Java lambda is. The calls of a listener
 /// do not overlap; they run on the thread that changes the subscription, and the first one on the thread that adds the
-/// listener. A panic in a call is caught and printed to stderr; the listener stays active.
+/// listener. A panic in a call is caught and goes to [`ErrorManager`](crate::ErrorManager); the listener stays active.
 ///
 /// ```no_run
 /// # fn main() -> dxfeed_graal::Result<()> {

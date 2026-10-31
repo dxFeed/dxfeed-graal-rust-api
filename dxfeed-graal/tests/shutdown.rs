@@ -85,7 +85,7 @@ fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription<Quote>) {
 #[test]
 fn shutdown_stops_delivery_and_creation() {
     let stderr = run("child_shutdown_stops_delivery_and_creation");
-    assert!(!stderr.contains("dxfeed-graal:"), "{stderr}");
+    assert!(!stderr.contains("[dxfeed-graal]"), "{stderr}");
 }
 
 #[test]

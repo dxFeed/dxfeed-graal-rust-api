@@ -92,7 +92,7 @@ impl TimeFormat {
         // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
         let copy = unsafe { isolate::string(text) }.into_owned();
         // SAFETY: `text` came from dxfg_v4_TimeFormat_format and is released once.
-        let _ = call(|t| unsafe { sys::dxfg_v4_String_release(t, text) });
+        crate::error_manager::report_release("TimeFormat", call(|t| unsafe { sys::dxfg_v4_String_release(t, text) }));
         Ok(copy)
     }
 

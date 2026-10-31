@@ -79,7 +79,7 @@
 //!
 //! A listener's closure runs on a thread of the endpoint's executor, or inside
 //! [`ManualExecutor::process_all_pending`]. The calls of one listener do not overlap. The events are valid during
-//! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and printed to stderr.
+//! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and goes to [`ErrorManager`].
 //!
 //! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running
 //! calls, except inside a callback, and so does dropping the last owner of an endpoint with state listeners. So do not
@@ -108,6 +108,7 @@
 
 mod endpoint;
 mod error;
+mod error_manager;
 pub mod event;
 mod executor;
 mod feed;
@@ -130,6 +131,7 @@ mod time_format;
 
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, Result};
+pub use error_manager::{ErrorInfo, ErrorManager};
 #[doc(hidden)]
 pub use event::sdk_event::live_events;
 pub use event::{Event, EventKind, EventRef, EventType, Events, SubscriptionItem};

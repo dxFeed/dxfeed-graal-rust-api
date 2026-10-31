@@ -92,7 +92,10 @@ impl<E: IndexedEvent> IndexedEventTxModel<E> {
         let id = unsafe { source.as_ref() }.map(|source| source.id);
         if !source.is_null() {
             // SAFETY: the source is ours and nothing uses it afterwards.
-            let _ = call(|t| unsafe { sys::dxfg_v4_IndexedEventSource_release(t, source) });
+            crate::error_manager::report_release(
+                "IndexedEventSource",
+                call(|t| unsafe { sys::dxfg_v4_IndexedEventSource_release(t, source) }),
+            );
         }
         Ok(id
             .and_then(|id| IndexedEventSource::from_id(id).ok())
@@ -145,7 +148,7 @@ impl<E: IndexedEvent> Drop for IndexedEventTxModel<E> {
             // No SDK calls while the process exits; the listener leaks, as the SDK may still call its trampoline.
             return;
         }
-        let _ = self.close_model();
+        crate::error_manager::report_release("IndexedEventTxModel", self.close_model());
         let listener = self.listener.get_mut().unwrap_or_else(|e| e.into_inner()).take();
         if let Some(listener) = listener {
             listener.release();
@@ -228,7 +231,7 @@ impl<E: IndexedEvent> IndexedEventTxModelBuilder<E> {
     /// whether they are a snapshot, which replaces the events the listener got before.
     ///
     /// The events are valid during the call only: copy what you keep with `to_owned()`. A panic in `f` is caught and
-    /// printed to stderr.
+    /// goes to [`ErrorManager`](crate::ErrorManager).
     #[doc(alias = "withListener")]
     pub fn with_listener(mut self, mut f: impl FnMut(Events<'_, E>, bool) + Send + 'static) -> Self {
         self.listener = Some(Box::new(move |events: Events<'_>, is_snapshot| {

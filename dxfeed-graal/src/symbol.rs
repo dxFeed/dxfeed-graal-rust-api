@@ -194,7 +194,10 @@ impl Symbol {
                 .filter_map(|&symbol| {
                     let known = Symbol::from_sys(symbol);
                     if known.is_none() {
-                        eprintln!("dxfeed-graal: skipped a symbol of a kind or source this crate does not know");
+                        crate::ErrorManager::report(
+                            "ObservableSubscription",
+                            "skipped a symbol of a kind or source this crate does not know",
+                        );
                     }
                     known
                 })
