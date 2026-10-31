@@ -38,8 +38,10 @@ use crate::isolate::{self, call};
 use crate::listener::{TxClosure, TxListener};
 use crate::symbol::{Symbol, SymbolArena};
 
+mod indexed_event;
 mod market_depth;
 
+pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder, SubscriptionController};
 pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
 
 type Thread = *mut sys::graal_isolatethread_t;

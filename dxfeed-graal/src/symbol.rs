@@ -326,7 +326,7 @@ impl SymbolArena {
     }
 
     /// A NUL-terminated copy of `text`, valid while the arena lives.
-    fn string(&mut self, text: &str, what: &str) -> Result<*const std::ffi::c_char> {
+    pub(crate) fn string(&mut self, text: &str, what: &str) -> Result<*const std::ffi::c_char> {
         self.strings.push(c_string(text, what)?);
         // The pointer is that of the heap buffer of the string, which does not move with it.
         Ok(self.strings.last().map_or(std::ptr::null(), |s| s.as_ptr()))

@@ -94,3 +94,7 @@ path = "examples/model/inc_order_snapshot.rs"
 [[example]]
 name = "market_depth_model"
 path = "examples/model/market_depth_model.rs"
+
+[[example]]
+name = "simple_order_book"
+path = "examples/model/simple_order_book.rs"

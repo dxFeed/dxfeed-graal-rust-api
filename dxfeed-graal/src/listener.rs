@@ -40,6 +40,10 @@ pub(crate) type IpfStateClosure = dyn FnMut(ConnectionState, ConnectionState) + 
 /// snapshot.
 pub(crate) type TxClosure = dyn FnMut(IndexedEventSource, Events<'_>, bool) + Send;
 
+/// The closure of a listener of an indexed event transactional model: it receives the events and whether they are a
+/// snapshot.
+pub(crate) type EventTxClosure = dyn FnMut(Events<'_>, bool) + Send;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
@@ -57,6 +61,9 @@ pub(crate) type IpfStateListener = Listener<sys::dxfg_v4_ipf_connection_state_ch
 
 /// A listener of a transactional model.
 pub(crate) type TxListener = Listener<sys::dxfg_v4_tx_model_listener_t, TxClosure>;
+
+/// A listener of an indexed event transactional model.
+pub(crate) type EventTxListener = Listener<sys::dxfg_v4_indexed_event_tx_model_listener_t, EventTxClosure>;
 
 /// The change listeners of a subscription.
 pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
@@ -154,6 +161,17 @@ impl TxListener {
         Self::create(closure, |user_data| {
             // SAFETY: as for event listeners, with `tx_trampoline`.
             Handle::create(|t, out| unsafe { sys::dxfg_v4_TxModelListener_new(t, Some(tx_trampoline), user_data, out) })
+        })
+    }
+}
+
+impl EventTxListener {
+    pub(crate) fn new(closure: Box<EventTxClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `event_tx_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_IndexedEventTxModel_Listener_new(t, Some(event_tx_trampoline), user_data, out)
+            })
         })
     }
 }
@@ -290,6 +308,25 @@ unsafe extern "C" fn tx_trampoline(
             "a transactional model listener",
             Nested::Warn,
             |closure| closure(source, Events::new(events), is_snapshot != 0),
+        )
+    };
+}
+
+unsafe extern "C" fn event_tx_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    events: *mut sys::dxfg_event_type_list,
+    is_snapshot: i32,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of an indexed event transactional model listener, and the SDK keeps the list
+    // alive until this call returns.
+    unsafe {
+        dispatch::<EventTxClosure>(
+            thread,
+            user_data,
+            "an indexed event transactional model listener",
+            Nested::Warn,
+            |closure| closure(Events::new(events), is_snapshot != 0),
         )
     };
 }

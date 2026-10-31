@@ -60,6 +60,10 @@ sdk_handle!(
     sys::dxfg_v4_time_series_tx_model_t,
     sys::dxfg_v4_time_series_tx_model_builder_t,
     sys::dxfg_v4_tx_model_listener_t,
+    sys::dxfg_v4_indexed_event_tx_model_t,
+    sys::dxfg_v4_indexed_event_tx_model_builder_t,
+    sys::dxfg_v4_indexed_event_tx_model_listener_t,
+    sys::dxfg_v4_subscription_controller_t,
     sys::dxfg_v4_time_period_t
 );
 
