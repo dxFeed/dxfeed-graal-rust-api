@@ -12,8 +12,8 @@ use crate::event::{Event, Events, SubscriptionItem, TimeSeriesEvent};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
-use crate::listener::EventListener;
-use crate::observable::{ChangeListeners, ObservableSubscriptionChangeListener};
+use crate::listener::{ChangeListener, ChangeListeners, EventListener};
+use crate::observable::ObservableSubscriptionChangeListener;
 use crate::symbol::{Symbol, SymbolArena};
 
 /// Identifies a listener added by [`DXFeedSubscription::add_event_listener`], an `add_change_listener` method or
@@ -51,7 +51,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         DXFeedSubscription {
             handle,
             listeners: Mutex::new(Vec::new()),
-            change_listeners: ChangeListeners::new(),
+            change_listeners: ChangeListeners::new("a change listener of this subscription"),
             _feed: feed,
             _item: PhantomData,
         }
@@ -99,10 +99,11 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     #[doc(alias = "addChangeListener")]
     pub fn add_change_listener(&self, listener: impl ObservableSubscriptionChangeListener) -> Result<ListenerId> {
         let s = self.handle.as_ptr();
-        self.change_listeners.add(listener, |l| {
-            // SAFETY: the subscription and the listener are live.
-            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addChangeListener(t, s, l) })
-        })
+        self.change_listeners
+            .add(ChangeListener::new(Box::new(listener))?, |l| {
+                // SAFETY: the subscription and the listener are live.
+                call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addChangeListener(t, s, l) })
+            })
     }
 
     /// Removes a change listener, which then gets its

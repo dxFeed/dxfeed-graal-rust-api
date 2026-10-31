@@ -13,8 +13,7 @@ use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
-use crate::listener::StateListener;
-use crate::observable::ChangeListeners;
+use crate::listener::{ChangeListeners, StateListener};
 use crate::publisher::DXPublisher;
 use crate::subscription::ListenerId;
 
@@ -213,7 +212,7 @@ impl EndpointState {
     pub(crate) fn publisher_listeners(&self, event_type: EventType) -> Arc<ChangeListeners> {
         crate::lock(&self.publisher_listeners)
             .entry(event_type)
-            .or_insert_with(|| Arc::new(ChangeListeners::new()))
+            .or_insert_with(|| Arc::new(ChangeListeners::new("a change listener of this subscription")))
             .clone()
     }
 

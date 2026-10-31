@@ -1,4 +1,5 @@
-//! Listeners of events, of endpoint states and of subscription changes: their C trampolines and the release thread.
+//! Listeners of events, of endpoint states, of subscription changes and of instrument profiles: their C trampolines,
+//! the release thread and the lists of listeners added to an SDK object.
 
 use std::cell::Cell;
 use std::ffi::c_void;
@@ -10,11 +11,14 @@ use std::sync::{Arc, Mutex, OnceLock};
 use dxfeed_graal_sys as sys;
 
 use crate::endpoint::State;
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::event::Events;
 use crate::handle::{Handle, SdkHandle};
+use crate::ipf::InstrumentProfile;
+use crate::ipf::live::ConnectionState;
 use crate::isolate::{self, CallbackScope};
 use crate::observable::ObservableSubscriptionChangeListener;
+use crate::subscription::ListenerId;
 use crate::symbol::Symbol;
 
 /// The closure of an event listener.
@@ -26,6 +30,12 @@ pub(crate) type StateClosure = dyn FnMut(State, State) + Send;
 /// The closure of a change listener of a subscription.
 pub(crate) type ChangeClosure = dyn ObservableSubscriptionChangeListener;
 
+/// The closure of an update listener of an instrument profile collector.
+pub(crate) type UpdateClosure = dyn FnMut(&[InstrumentProfile]) + Send;
+
+/// The closure of a state listener of an instrument profile connection: it receives the old and the new state.
+pub(crate) type IpfStateClosure = dyn FnMut(ConnectionState, ConnectionState) + Send;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
@@ -34,6 +44,21 @@ pub(crate) type StateListener = Listener<sys::dxfg_v4_endpoint_state_change_list
 
 /// A change listener of a subscription.
 pub(crate) type ChangeListener = Listener<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
+
+/// An update listener of an instrument profile collector.
+pub(crate) type UpdateListener = Listener<sys::dxfg_v4_ipf_update_listener_t, UpdateClosure>;
+
+/// A state listener of an instrument profile connection.
+pub(crate) type IpfStateListener = Listener<sys::dxfg_v4_ipf_connection_state_change_listener_t, IpfStateClosure>;
+
+/// The change listeners of a subscription.
+pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
+
+/// The update listeners of an instrument profile collector.
+pub(crate) type UpdateListeners = Listeners<sys::dxfg_v4_ipf_update_listener_t, UpdateClosure>;
+
+/// The state listeners of an instrument profile connection.
+pub(crate) type IpfStateListeners = Listeners<sys::dxfg_v4_ipf_connection_state_change_listener_t, IpfStateClosure>;
 
 /// What a trampoline needs; shared by the owner of the listener, the SDK (`user_data`) and running calls.
 struct ListenerState<C: ?Sized> {
@@ -44,7 +69,7 @@ struct ListenerState<C: ?Sized> {
     close_deferred: AtomicBool,
 }
 
-/// A listener added to a subscription or an endpoint: its SDK handle and the SDK's strong reference to its state.
+/// A listener added to an SDK object: its SDK handle and the SDK's strong reference to its state.
 pub(crate) struct Listener<H: SdkHandle, C: ?Sized> {
     handle: Handle<H>,
     state: *const ListenerState<C>,
@@ -90,6 +115,28 @@ impl ChangeListener {
                     user_data,
                     out,
                 )
+            })
+        })
+    }
+}
+
+impl UpdateListener {
+    pub(crate) fn new(closure: Box<UpdateClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `update_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_InstrumentProfileUpdateListener_new(t, Some(update_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+impl IpfStateListener {
+    pub(crate) fn new(closure: Box<IpfStateClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `ipf_state_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_IpfPropertyChangeListener_new(t, Some(ipf_state_trampoline), user_data, out)
             })
         })
     }
@@ -278,6 +325,112 @@ unsafe extern "C" fn subscription_closed_trampoline(thread: *mut sys::graal_isol
 
 fn close_change_listener(listener: &mut ChangeClosure) {
     listener.subscription_closed();
+}
+
+unsafe extern "C" fn update_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    profiles: *mut sys::dxfg_iterable_ip_t,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of an update listener, and the SDK keeps the iterator alive until this call
+    // returns.
+    unsafe {
+        dispatch::<UpdateClosure>(
+            thread,
+            user_data,
+            "an instrument profile update listener",
+            Nested::Warn,
+            |closure| match crate::ipf::live::collect(profiles) {
+                Ok(profiles) => closure(&profiles),
+                Err(e) => eprintln!("dxfeed-graal: could not read the updated instrument profiles: {e}"),
+            },
+        )
+    };
+}
+
+unsafe extern "C" fn ipf_state_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    old_state: sys::dxfg_ipf_connection_state_t,
+    new_state: sys::dxfg_ipf_connection_state_t,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of a connection state listener.
+    unsafe {
+        dispatch::<IpfStateClosure>(
+            thread,
+            user_data,
+            "an instrument profile connection state listener",
+            Nested::Warn,
+            |closure| match (
+                ConnectionState::from_sys(old_state),
+                ConnectionState::from_sys(new_state),
+            ) {
+                (Ok(old_state), Ok(new_state)) => closure(old_state, new_state),
+                _ => eprintln!("dxfeed-graal: skipped an unknown instrument profile connection state"),
+            },
+        )
+    };
+}
+
+/// The listeners added to an SDK object, by id. Dropping them releases those left, which their object no longer
+/// calls: the owner removes them first, or the object is closed.
+pub(crate) struct Listeners<H: SdkHandle + 'static, C: ?Sized + Send + 'static> {
+    listeners: Mutex<Vec<(ListenerId, Listener<H, C>)>>,
+    /// What the listeners are, for errors, such as `a change listener of this subscription`.
+    kind: &'static str,
+}
+
+impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listeners<H, C> {
+    pub(crate) fn new(kind: &'static str) -> Self {
+        Listeners {
+            listeners: Mutex::new(Vec::new()),
+            kind,
+        }
+    }
+
+    /// Adds `listener` to its object with `add` and keeps it, or releases it if that fails.
+    pub(crate) fn add(&self, listener: Listener<H, C>, add: impl FnOnce(*mut H) -> Result<()>) -> Result<ListenerId> {
+        if let Err(e) = add(listener.as_ptr()) {
+            listener.release();
+            return Err(e);
+        }
+        let id = ListenerId::next();
+        crate::lock(&self.listeners).push((id, listener));
+        Ok(id)
+    }
+
+    /// Removes the listener `id` from its object with `remove`, then releases it.
+    pub(crate) fn remove(&self, id: ListenerId, remove: impl FnOnce(*mut H) -> Result<()>) -> Result<()> {
+        let listener = {
+            let mut listeners = crate::lock(&self.listeners);
+            let index = listeners
+                .iter()
+                .position(|(i, _)| *i == id)
+                .ok_or_else(|| Error::InvalidArgument(format!("{id:?} is not {}", self.kind)))?;
+            listeners.swap_remove(index).1
+        };
+        let removed = remove(listener.as_ptr());
+        listener.release();
+        removed
+    }
+
+    /// Removes every listener with `remove` and releases it, ignoring errors.
+    pub(crate) fn remove_all(&self, remove: impl Fn(*mut H) -> Result<()>) {
+        let listeners = std::mem::take(&mut *crate::lock(&self.listeners));
+        for (_, listener) in listeners {
+            let _ = remove(listener.as_ptr());
+            listener.release();
+        }
+    }
+}
+
+impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Drop for Listeners<H, C> {
+    fn drop(&mut self) {
+        let listeners = std::mem::take(&mut *crate::lock(&self.listeners));
+        for (_, listener) in listeners {
+            listener.release();
+        }
+    }
 }
 
 /// What [`dispatch`] does with a call nested in a running call of the same listener on its thread.

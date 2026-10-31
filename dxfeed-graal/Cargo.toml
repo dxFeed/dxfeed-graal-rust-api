@@ -70,3 +70,11 @@ path = "examples/file/file_parser.rs"
 [[example]]
 name = "write_tape_file"
 path = "examples/file/write_tape_file.rs"
+
+[[example]]
+name = "ipf"
+path = "examples/ipf/ipf.rs"
+
+[[example]]
+name = "ipf_live"
+path = "examples/ipf/ipf_live.rs"

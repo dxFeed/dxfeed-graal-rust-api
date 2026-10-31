@@ -2,15 +2,15 @@
 //! `ObservableSubscriptionChangeListener`).
 
 use std::ptr;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::event::EventType;
 use crate::handle::Handle;
 use crate::isolate::call;
-use crate::listener::ChangeListener;
+use crate::listener::{ChangeListener, ChangeListeners};
 use crate::publisher::DXPublisher;
 use crate::subscription::ListenerId;
 use crate::symbol::Symbol;
@@ -138,7 +138,7 @@ impl ObservableSubscription {
     #[doc(alias = "addChangeListener")]
     pub fn add_change_listener(&self, listener: impl ObservableSubscriptionChangeListener) -> Result<ListenerId> {
         let s = self.handle.as_ptr();
-        self.listeners.add(listener, |l| {
+        self.listeners.add(ChangeListener::new(Box::new(listener))?, |l| {
             // SAFETY: the subscription and the listener are live.
             call(|t| unsafe { sys::dxfg_v4_ObservableSubscription_addChangeListener(t, s, l) })
         })
@@ -149,7 +149,7 @@ impl ObservableSubscription {
     /// (`removeChangeListener`). Called outside the listener, it returns once no call of the listener runs; called
     /// from the listener, it returns at once and the listener is released in the background.
     ///
-    /// Returns [`Error::InvalidArgument`] if the listener is not in this subscription.
+    /// Returns [`Error::InvalidArgument`](crate::Error::InvalidArgument) if the listener is not in this subscription.
     #[doc(alias = "removeChangeListener")]
     pub fn remove_change_listener(&self, id: ListenerId) -> Result<()> {
         let s = self.handle.as_ptr();
@@ -157,71 +157,6 @@ impl ObservableSubscription {
             // SAFETY: the subscription and the listener are live.
             call(|t| unsafe { sys::dxfg_v4_ObservableSubscription_removeChangeListener(t, s, l) })
         })
-    }
-}
-
-/// The change listeners of a subscription; dropping them releases those left.
-pub(crate) struct ChangeListeners(Mutex<Vec<(ListenerId, ChangeListener)>>);
-
-impl ChangeListeners {
-    pub(crate) fn new() -> Self {
-        ChangeListeners(Mutex::new(Vec::new()))
-    }
-
-    /// Creates the SDK listener of `listener` and adds it to the subscription with `add`.
-    pub(crate) fn add(
-        &self,
-        listener: impl ObservableSubscriptionChangeListener,
-        add: impl FnOnce(*mut sys::dxfg_v4_observable_subscription_change_listener_t) -> Result<()>,
-    ) -> Result<ListenerId> {
-        let listener = ChangeListener::new(Box::new(listener))?;
-        if let Err(e) = add(listener.as_ptr()) {
-            listener.release();
-            return Err(e);
-        }
-        let id = ListenerId::next();
-        crate::lock(&self.0).push((id, listener));
-        Ok(id)
-    }
-
-    /// Removes the listener `id` from the subscription with `remove`, then releases it.
-    pub(crate) fn remove(
-        &self,
-        id: ListenerId,
-        remove: impl FnOnce(*mut sys::dxfg_v4_observable_subscription_change_listener_t) -> Result<()>,
-    ) -> Result<()> {
-        let listener = {
-            let mut listeners = crate::lock(&self.0);
-            let index = listeners.iter().position(|(i, _)| *i == id).ok_or_else(|| {
-                Error::InvalidArgument(format!("{id:?} is not a change listener of this subscription"))
-            })?;
-            listeners.swap_remove(index).1
-        };
-        let removed = remove(listener.as_ptr());
-        listener.release();
-        removed
-    }
-
-    /// Removes every listener with `remove` and releases it, ignoring errors.
-    pub(crate) fn remove_all(
-        &self,
-        remove: impl Fn(*mut sys::dxfg_v4_observable_subscription_change_listener_t) -> Result<()>,
-    ) {
-        let listeners = std::mem::take(&mut *crate::lock(&self.0));
-        for (_, listener) in listeners {
-            let _ = remove(listener.as_ptr());
-            listener.release();
-        }
-    }
-}
-
-impl Drop for ChangeListeners {
-    fn drop(&mut self) {
-        // The listeners left belong to a closed subscription or endpoint, which no longer calls them.
-        let listeners = std::mem::take(&mut *crate::lock(&self.0));
-        for (_, listener) in listeners {
-            listener.release();
-        }
     }
 }
 
