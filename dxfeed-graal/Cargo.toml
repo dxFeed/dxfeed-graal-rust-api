@@ -110,3 +110,7 @@ path = "examples/model/price_level_book.rs"
 [[example]]
 name = "on_demand"
 path = "examples/ondemand/on_demand.rs"
+
+[[example]]
+name = "price_level_service_client"
+path = "examples/orcs/price_level_service_client.rs"

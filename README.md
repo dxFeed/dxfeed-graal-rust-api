@@ -343,7 +343,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 ### ORCS
 
-- [ ] price_level_service_client
+- [x] [price_level_service_client](dxfeed-graal/examples/orcs/price_level_service_client.rs)
   demonstrates how to get the price levels and the quotes of a symbol for a period from the Order Reconstruction
   Service (ORCS) with `PriceLevelService`
 
@@ -409,7 +409,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`, `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
 - [x] On-demand historical data replay: `OnDemandService`
-- [ ] The price level service, the history endpoint
+- [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`
+- [ ] The history endpoint
 
 ## Development
 
