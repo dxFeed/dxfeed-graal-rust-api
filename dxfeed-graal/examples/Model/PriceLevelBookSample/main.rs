@@ -29,7 +29,7 @@ fn main() -> dxfeed_graal::Result<()> {
             }
 
             println!("{:=^66}", "");
-            println!("{:^31} || {:^31}", "ASK", "BID");
+            println!("{:^31} || {:^31}", "BID", "ASK");
             println!("{0:^15}|{1:^15} || {0:^15}|{1:^15}", "Price", "Size");
             println!("{:-^66}", "");
 

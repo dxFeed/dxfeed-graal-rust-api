@@ -13,7 +13,7 @@ use legacy as otp;
 
 fn draw_header() {
     println!("{:=^78}", "");
-    println!("{:^38}||{:^38}", "ASK", "BID");
+    println!("{:^38}||{:^38}", "BID", "ASK");
     println!(
         "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}||{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
         "EX", "Source", "MM", "Price", "Size"
@@ -62,8 +62,16 @@ fn render(buy: &[Order], sell: &[Order], depth: usize) {
 
 fn main() -> dxfeed_graal::Result<()> {
     otp::VirtualTerminal::enable();
-    otp::hide_cursor();
+    print!("{}", otp::hide_cursor());
 
+    // The cursor comes back on the normal exit and on an error.
+    let result = run();
+    print!("{}", otp::show_cursor());
+    let _ = std::io::stdout().flush();
+    result
+}
+
+fn run() -> dxfeed_graal::Result<()> {
     let address = "demo.dxfeed.com:7300";
     let symbol = "AAPL";
     let sources = "NTV";
@@ -101,7 +109,6 @@ fn main() -> dxfeed_graal::Result<()> {
 
     let _ = std::io::stdin().read_line(&mut String::new());
 
-    otp::show_cursor();
     Ok(())
 }
 

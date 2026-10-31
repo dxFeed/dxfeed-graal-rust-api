@@ -37,7 +37,8 @@ fn test_quote_promises(symbol: &str) -> dxfeed_graal::Result<()> {
     // The endpoint address to use is stored in the "dxfeed.system.properties" file.
 
     let feed = DXFeed::get_instance()?;
-    let promises = [symbol]
+    let symbols = [symbol];
+    let promises = symbols
         .into_iter()
         .map(|symbol| feed.get_last_event_promise::<Quote>(symbol))
         .collect::<dxfeed_graal::Result<Vec<_>>>()?;
@@ -50,9 +51,11 @@ fn test_quote_promises(symbol: &str) -> dxfeed_graal::Result<()> {
     }
 
     // now iterate the promises to retrieve results
-    for promise in &promises {
-        if let Ok(Some(q)) = promise.get_result() {
-            println!("Mid = {:.6}", (q.bid_price + q.ask_price) / 2.0);
+    // a promise that is not done by the deadline has no result
+    for (symbol, promise) in symbols.into_iter().zip(&promises) {
+        match promise.get_result() {
+            Ok(Some(q)) => println!("Mid = {:.6}", (q.bid_price + q.ask_price) / 2.0),
+            _ => println!("No quote for {symbol}"),
         }
     }
 
