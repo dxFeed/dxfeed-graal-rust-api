@@ -59,6 +59,15 @@ macro_rules! event_type {
         }
 
         #[doc = concat!(
+            "The default values of Java's `new ", stringify!($name), "()`, with an empty symbol in place of null."
+        )]
+        impl Default for $name {
+            fn default() -> Self {
+                $name::new("")
+            }
+        }
+
+        #[doc = concat!(
             "A [`", stringify!($name), "`] received by a listener, borrowed from the SDK: valid during the listener ",
             "call only."
         )]
@@ -293,6 +302,9 @@ macro_rules! time_sequence_values {
         }
     ) => {
         impl $name {
+            /// The largest sequence of the event, `(1 << 22) - 1`.
+            pub const MAX_SEQUENCE: i32 = $crate::event::flags::MAX_SEQUENCE;
+
             /// Changes the time of the event and keeps the sequence, as Java's `setTime` does: the seconds are clamped
             /// to 32 bits.
             #[doc(alias = "setTime")]
@@ -305,7 +317,7 @@ macro_rules! time_sequence_values {
             /// # Errors
             ///
             /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the sequence is negative or above
-            /// `(1 << 22) - 1`.
+            /// [`MAX_SEQUENCE`](Self::MAX_SEQUENCE).
             #[doc(alias = "setSequence")]
             pub fn set_sequence(&mut self, sequence: i32) -> $crate::Result<()> {
                 self.$ts = $crate::event::flags::with_sequence(self.$ts, sequence)?;
@@ -463,6 +475,20 @@ macro_rules! trade_base_fields {
                 $($fields)*
             }
             derived {
+                /// The size as a whole number, as Java's `getSize` gives it:
+                /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                #[doc(alias = "getSize")]
+                fn size_as_long(size) -> i64 {
+                    size as i64
+                }
+
+                /// The day volume as a whole number, as Java's `getDayVolume` gives it:
+                /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                #[doc(alias = "getDayVolume")]
+                fn day_volume_as_long(day_volume) -> i64 {
+                    day_volume as i64
+                }
+
                 /// The time of the trade, in nanoseconds since the Unix epoch.
                 #[doc(alias = "getTimeNanos")]
                 fn time_nanos(time_sequence, time_nano_part) -> i64 {
@@ -778,7 +804,16 @@ macro_rules! time_and_sale_fields {
                     seller: string [$($p.)* seller] = None,
                     $($fields)*
                 }
-                derived { $($derived)* }
+                derived {
+                    /// The size as a whole number, as Java's `getSize` gives it:
+                    /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                    #[doc(alias = "getSize")]
+                    fn size_as_long(size) -> i64 {
+                        size as i64
+                    }
+
+                    $($derived)*
+                }
             }
         }
     };
@@ -852,7 +887,37 @@ macro_rules! candle_fields {
                     open_interest: f64 [$($p.)* open_interest] = f64::NAN,
                     $($fields)*
                 }
-                derived { $($derived)* }
+                derived {
+                    /// The volume as a whole number, as Java's `getVolume` gives it:
+                    /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                    #[doc(alias = "getVolume")]
+                    fn volume_as_long(volume) -> i64 {
+                        volume as i64
+                    }
+
+                    /// The bid volume as a whole number, as Java's `getBidVolume` gives it:
+                    /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                    #[doc(alias = "getBidVolume")]
+                    fn bid_volume_as_long(bid_volume) -> i64 {
+                        bid_volume as i64
+                    }
+
+                    /// The ask volume as a whole number, as Java's `getAskVolume` gives it:
+                    /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                    #[doc(alias = "getAskVolume")]
+                    fn ask_volume_as_long(ask_volume) -> i64 {
+                        ask_volume as i64
+                    }
+
+                    /// The open interest as a whole number, as Java's `getOpenInterest` gives it:
+                    /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                    #[doc(alias = "getOpenInterest")]
+                    fn open_interest_as_long(open_interest) -> i64 {
+                        open_interest as i64
+                    }
+
+                    $($derived)*
+                }
             }
         }
     };
@@ -1005,6 +1070,13 @@ macro_rules! order_base_fields {
                 $($fields)*
             }
             derived {
+                /// The size as a whole number, as Java's `getSize` gives it:
+                /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+                #[doc(alias = "getSize")]
+                fn size_as_long(size) -> i64 {
+                    size as i64
+                }
+
                 /// The id of the source of the order, from the high bits of the [`index`](Self::index): `0` for the
                 /// default source `DEFAULT`, `1` to `9` for the special sources (`COMPOSITE_BID` to `AGGREGATE`), or
                 /// one to four letters and digits packed big-endian, such as `0x4e5456` for `NTV`. A later version

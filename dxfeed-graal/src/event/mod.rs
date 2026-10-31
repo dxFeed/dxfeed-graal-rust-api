@@ -17,6 +17,8 @@ mod daily_candle;
 mod format;
 pub(crate) use format::{JavaDouble, year_month_day};
 mod greeks;
+#[doc(alias = "MarketEventSymbols")]
+pub mod market_event_symbols;
 mod market_maker;
 mod message;
 mod nuam_order;

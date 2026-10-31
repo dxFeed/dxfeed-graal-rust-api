@@ -252,6 +252,10 @@ macro_rules! flag_enum {
         }
 
         impl $name {
+            #[doc = concat!("Every value, in the order of Java's `", stringify!($name), ".values()`.")]
+            #[doc(alias = "values")]
+            pub const ALL: &'static [$name] = &[$name::$first, $( $name::$variant, )*];
+
             /// The code of the value, as Java's `getCode` gives it.
             #[doc(alias = "getCode")]
             pub const fn get_code(self) -> i32 {
@@ -269,6 +273,24 @@ macro_rules! flag_enum {
                 match code {
                     $( $code => $name::$variant, )*
                     _ => $name::$first,
+                }
+            }
+        }
+
+        impl ::std::str::FromStr for $name {
+            type Err = Error;
+
+            /// Parses the Java name of a value, as Java's `valueOf(String)` does; the case matters.
+            ///
+            /// Returns [`Error::InvalidArgument`] for any other string.
+            fn from_str(name: &str) -> Result<Self> {
+                match name {
+                    $fjava => Ok($name::$first),
+                    $( $java => Ok($name::$variant), )*
+                    _ => Err(Error::InvalidArgument(format!(
+                        concat!("unknown ", stringify!($name), " {:?}"),
+                        name
+                    ))),
                 }
             }
         }

@@ -35,6 +35,20 @@ event_type! {
         ask_size: f64 [ask_size] = f64::NAN,
     }
     derived {
+        /// The bid size as a whole number, as Java's `getBidSize` gives it:
+        /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+        #[doc(alias = "getBidSize")]
+        fn bid_size_as_long(bid_size) -> i64 {
+            bid_size as i64
+        }
+
+        /// The ask size as a whole number, as Java's `getAskSize` gives it:
+        /// the fraction is dropped, NaN gives `0` and the values beyond `i64` saturate.
+        #[doc(alias = "getAskSize")]
+        fn ask_size_as_long(ask_size) -> i64 {
+            ask_size as i64
+        }
+
         /// The time of the last bid or ask change, in milliseconds since the Unix epoch.
         #[doc(alias = "getTime")]
         fn time(bid_time, ask_time, time_millis_sequence) -> i64 {
@@ -65,6 +79,9 @@ fn quote_time(bid_time: i64, ask_time: i64, time_millis_sequence: i32) -> i64 {
 }
 
 impl Quote {
+    /// The largest sequence of the quote, `(1 << 22) - 1`.
+    pub const MAX_SEQUENCE: i32 = flags::MAX_SEQUENCE;
+
     /// Changes the time of the last bid change and the milliseconds of the quote time, as Java's `setBidTime` does.
     #[doc(alias = "setBidTime")]
     pub fn set_bid_time(&mut self, bid_time: i64) {
@@ -84,7 +101,7 @@ impl Quote {
     /// # Errors
     ///
     /// [`Error::InvalidArgument`](crate::Error::InvalidArgument) if the sequence is negative or above
-    /// `(1 << 22) - 1`.
+    /// [`MAX_SEQUENCE`](Self::MAX_SEQUENCE).
     #[doc(alias = "setSequence")]
     pub fn set_sequence(&mut self, sequence: i32) -> Result<()> {
         self.time_millis_sequence = flags::with_sequence(self.time_millis_sequence.into(), sequence)? as i32;
