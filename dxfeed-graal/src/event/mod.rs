@@ -134,7 +134,7 @@ macro_rules! event_types {
 
         impl Display for EventType {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.name())
+                f.pad(self.name())
             }
         }
 

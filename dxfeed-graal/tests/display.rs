@@ -1191,3 +1191,16 @@ fn message_and_configuration_events_print_as_in_java() {
         "{text}"
     );
 }
+
+#[test]
+fn names_take_the_width_and_the_alignment() {
+    use dxfeed_graal::State;
+    use dxfeed_graal::event::{CandleSymbol, IndexedEventSource};
+
+    assert_eq!(format!("[{:^11}]", IndexedEventSource::DEFAULT), "[  DEFAULT  ]");
+    assert_eq!(format!("[{:<11}]", State::Connected), "[CONNECTED  ]");
+    assert_eq!(format!("[{:>7}]", Side::Buy), "[    BUY]");
+    assert_eq!(format!("[{:>7}]", EventType::Quote), "[  Quote]");
+    let symbol = CandleSymbol::value_of("AAPL{=d}").unwrap();
+    assert_eq!(format!("[{:>10}]", symbol), "[  AAPL{=d}]");
+}

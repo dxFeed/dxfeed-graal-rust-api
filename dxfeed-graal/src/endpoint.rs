@@ -90,7 +90,7 @@ impl State {
 
 impl fmt::Display for State {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(match self {
+        f.pad(match self {
             State::NotConnected => "NOT_CONNECTED",
             State::Connecting => "CONNECTING",
             State::Connected => "CONNECTED",

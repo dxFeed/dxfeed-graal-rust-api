@@ -68,7 +68,7 @@ impl CandleSymbol {
 
 impl Display for CandleSymbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.0)
+        f.pad(&self.0)
     }
 }
 
@@ -257,7 +257,7 @@ macro_rules! candle_enum {
 
         impl Display for $name {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.write_str(self.as_str())
+                f.pad(self.as_str())
             }
         }
 

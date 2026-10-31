@@ -302,7 +302,7 @@ impl Default for IndexedEventSource {
 
 impl Display for IndexedEventSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.get_name())
+        f.pad(&self.get_name())
     }
 }
 
