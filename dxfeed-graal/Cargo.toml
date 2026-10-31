@@ -78,3 +78,7 @@ path = "examples/ipf/ipf.rs"
 [[example]]
 name = "ipf_live"
 path = "examples/ipf/ipf_live.rs"
+
+[[example]]
+name = "option_chain"
+path = "examples/ipf/option_chain.rs"

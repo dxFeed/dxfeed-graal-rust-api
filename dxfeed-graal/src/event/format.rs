@@ -7,7 +7,7 @@ use crate::TimeFormat;
 use crate::isolate;
 
 /// A `double` as Java's `Double.toString` prints it.
-pub(super) struct JavaDouble(pub(super) f64);
+pub(crate) struct JavaDouble(pub(crate) f64);
 
 impl Display for JavaDouble {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
@@ -381,7 +381,7 @@ mod wide {
 
 /// The `yyyymmdd` number of a day id, the days since 1970-01-01, as Java's `DayUtil.getYearMonthDayByDayId` gives it:
 /// proleptic Gregorian, negative for years before 0.
-pub(super) fn year_month_day(day_id: i32) -> i32 {
+pub(crate) fn year_month_day(day_id: i32) -> i32 {
     // Howard Hinnant's `civil_from_days`.
     let z = i64::from(day_id) + 719_468;
     let era = z.div_euclid(146_097);

@@ -314,7 +314,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
   is a simple demonstration of how to get instrument profiles
 - [x] [ipf_live](dxfeed-graal/examples/ipf/ipf_live.rs)
   is a simple demonstration of how to get live updates of instrument profiles
-- [ ] option_chain
+- [x] [option_chain](dxfeed-graal/examples/ipf/option_chain.rs)
   demonstrates how to build option chains, and prints quotes for nearby option strikes
 
 ### Model
@@ -404,7 +404,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
 - [x] Event type names: `EventType::name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
-- [x] Instrument profiles: reading files and URLs, a collector and a live connection
+- [x] Instrument profiles: reading files and URLs, a collector, a live connection and option chains
 - [ ] Models, schedules, the history endpoint, on-demand
 
 ## Development
