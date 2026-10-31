@@ -114,6 +114,7 @@ mod feed;
 mod handle;
 mod isolate;
 mod listener;
+mod observable;
 mod promise;
 mod publisher;
 mod subscription;
@@ -130,6 +131,7 @@ pub use executor::ManualExecutor;
 pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
+pub use observable::{ObservableSubscription, ObservableSubscriptionChangeListener};
 pub use promise::{Promise, PromiseResult};
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};

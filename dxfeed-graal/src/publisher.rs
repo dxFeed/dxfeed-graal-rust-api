@@ -6,8 +6,10 @@ use dxfeed_graal_sys as sys;
 
 use crate::endpoint::EndpointState;
 use crate::error::Result;
-use crate::event::{Event, SysEvents};
+use crate::event::{Event, EventKind, SysEvents};
+use crate::handle::Handle;
 use crate::isolate::call;
+use crate::observable::ObservableSubscription;
 
 /// The publisher of a [`DXEndpoint`](crate::DXEndpoint): publishes events to its subscribers (`DXPublisher`).
 ///
@@ -37,5 +39,33 @@ impl DXPublisher {
         let p = self.state.publisher.as_ptr();
         // SAFETY: the publisher and the list are live; the SDK only reads the list and the events.
         call(|t| unsafe { sys::dxfg_v4_DXPublisher_publishEvents(t, p, &mut list) })
+    }
+
+    /// The subscription of the publisher to the events of type `E`, such as [`Profile`](crate::event::Profile): its
+    /// change listeners learn the symbols that the subscribers of the endpoint ask for (`getSubscription`).
+    ///
+    /// ```no_run
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use dxfeed_graal::event::Profile;
+    /// use dxfeed_graal::{DXEndpoint, Role, Symbol};
+    ///
+    /// let endpoint = DXEndpoint::create_with_role(Role::Publisher)?;
+    /// let subscription = endpoint.publisher().subscription::<Profile>()?;
+    /// subscription.add_change_listener(|symbols: &[Symbol]| println!("subscribed to {symbols:?}"))?;
+    /// endpoint.connect(":7700")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[doc(alias = "getSubscription")]
+    pub fn subscription<E: EventKind>(&self) -> Result<ObservableSubscription> {
+        let p = self.state.publisher.as_ptr();
+        // SAFETY: the publisher is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create(|t, out| unsafe { sys::dxfg_v4_DXPublisher_getSubscription(t, p, E::TYPE.to_sys(), out) })?;
+        Ok(ObservableSubscription::new(
+            handle,
+            self.state.publisher_listeners(E::TYPE),
+            self.clone(),
+        ))
     }
 }

@@ -1,6 +1,6 @@
 //! The symbols of subscriptions (`WildcardSymbol`, `IndexedEventSubscriptionSymbol`, `TimeSeriesSubscriptionSymbol`).
 
-use std::ffi::CString;
+use std::ffi::{CString, c_char};
 use std::fmt::{self, Display, Formatter};
 
 use dxfeed_graal_sys as sys;
@@ -8,6 +8,7 @@ use dxfeed_graal_sys as sys;
 use crate::TimeFormat;
 use crate::error::{Result, c_string};
 use crate::event::{CandleSymbol, IndexedEventSource};
+use crate::isolate;
 
 /// A symbol that a subscription adds or removes, or that a feed request takes.
 ///
@@ -136,6 +137,80 @@ impl From<&Symbol> for Symbol {
     fn from(symbol: &Symbol) -> Self {
         symbol.clone()
     }
+}
+
+impl Symbol {
+    /// The symbol of an SDK struct; `None` for NULL or a kind or source this crate does not know.
+    ///
+    /// # Safety
+    ///
+    /// `symbol` must be NULL or point to a live SDK symbol struct of the layout its `type_` names.
+    pub(crate) unsafe fn from_sys(symbol: *const sys::dxfg_symbol_t) -> Option<Symbol> {
+        // SAFETY: the caller guarantees that the struct is live and that its `type_` tells its layout; the nested
+        // symbols and sources belong to it.
+        unsafe {
+            let kind = symbol.as_ref()?.type_;
+            Some(match kind {
+                sys::STRING => Symbol::String(text((*symbol.cast::<sys::dxfg_string_symbol_t>()).symbol)?),
+                sys::CANDLE => Symbol::Candle(CandleSymbol::from_normalized(text(
+                    (*symbol.cast::<sys::dxfg_candle_symbol_t>()).symbol,
+                )?)),
+                sys::WILDCARD => Symbol::Wildcard,
+                sys::INDEXED_EVENT_SUBSCRIPTION => {
+                    let indexed = &*symbol.cast::<sys::dxfg_indexed_event_subscription_symbol_t>();
+                    Symbol::IndexedEventSubscription {
+                        symbol: Box::new(Symbol::from_sys(indexed.symbol)?),
+                        source: IndexedEventSource::from_id(indexed.source.as_ref()?.id).ok()?,
+                    }
+                }
+                sys::TIME_SERIES_SUBSCRIPTION => {
+                    let time_series = &*symbol.cast::<sys::dxfg_time_series_subscription_symbol_t>();
+                    Symbol::TimeSeriesSubscription {
+                        symbol: Box::new(Symbol::from_sys(time_series.symbol)?),
+                        from_time: time_series.from_time,
+                    }
+                }
+                _ => return None,
+            })
+        }
+    }
+
+    /// The symbols of an SDK list, without those [`from_sys`](Self::from_sys) does not know.
+    ///
+    /// # Safety
+    ///
+    /// `list` must be NULL or point to a live SDK list of live symbol structs.
+    pub(crate) unsafe fn list_from_sys(list: *const sys::dxfg_symbol_list) -> Vec<Symbol> {
+        // SAFETY: the caller guarantees that the list and its `size` elements are live.
+        unsafe {
+            let Some(list) = list.as_ref() else {
+                return Vec::new();
+            };
+            if list.elements.is_null() || list.size <= 0 {
+                return Vec::new();
+            }
+            std::slice::from_raw_parts(list.elements, list.size as usize)
+                .iter()
+                .filter_map(|&symbol| {
+                    let known = Symbol::from_sys(symbol);
+                    if known.is_none() {
+                        eprintln!("dxfeed-graal: skipped a symbol of a kind or source this crate does not know");
+                    }
+                    known
+                })
+                .collect()
+        }
+    }
+}
+
+/// A copy of an SDK string; `None` for NULL.
+///
+/// # Safety
+///
+/// `text` must be NULL or a live NUL-terminated string.
+unsafe fn text(text: *const c_char) -> Option<String> {
+    // SAFETY: the caller guarantees that a non-NULL string is live and NUL-terminated.
+    (!text.is_null()).then(|| unsafe { isolate::string(text) }.into_owned())
 }
 
 /// The SDK structs of the symbols of one call, freed when the arena is dropped.

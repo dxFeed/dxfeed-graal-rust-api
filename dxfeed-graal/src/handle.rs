@@ -40,7 +40,9 @@ sdk_handle!(
     sys::dxfg_v4_executor_t,
     sys::dxfg_v4_subscription_t,
     sys::dxfg_v4_feed_event_listener_t,
-    sys::dxfg_v4_endpoint_state_change_listener_t
+    sys::dxfg_v4_endpoint_state_change_listener_t,
+    sys::dxfg_v4_observable_subscription_t,
+    sys::dxfg_v4_observable_subscription_change_listener_t
 );
 
 // SAFETY: a promise keeps its Java object handle in `handler`; the promises of an event and of a list start with a

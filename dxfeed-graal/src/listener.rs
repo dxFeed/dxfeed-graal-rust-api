@@ -1,9 +1,9 @@
-//! Listeners of events and of endpoint states: their C trampolines and the release thread.
+//! Listeners of events, of endpoint states and of subscription changes: their C trampolines and the release thread.
 
 use std::cell::Cell;
 use std::ffi::c_void;
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
 use std::sync::{Arc, Mutex, OnceLock};
 
@@ -14,6 +14,8 @@ use crate::error::Result;
 use crate::event::Events;
 use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, CallbackScope};
+use crate::observable::ObservableSubscriptionChangeListener;
+use crate::symbol::Symbol;
 
 /// The closure of an event listener.
 pub(crate) type EventClosure = dyn FnMut(Events<'_>) + Send;
@@ -21,17 +23,25 @@ pub(crate) type EventClosure = dyn FnMut(Events<'_>) + Send;
 /// The closure of an endpoint state listener: it receives the old and the new state.
 pub(crate) type StateClosure = dyn FnMut(State, State) + Send;
 
+/// The closure of a change listener of a subscription.
+pub(crate) type ChangeClosure = dyn ObservableSubscriptionChangeListener;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
 /// A state listener of an endpoint.
 pub(crate) type StateListener = Listener<sys::dxfg_v4_endpoint_state_change_listener_t, StateClosure>;
 
+/// A change listener of a subscription.
+pub(crate) type ChangeListener = Listener<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
+
 /// What a trampoline needs; shared by the owner of the listener, the SDK (`user_data`) and running calls.
 struct ListenerState<C: ?Sized> {
     closure: Mutex<Box<C>>,
     /// The id of the thread running the closure, `0` when none.
     running: AtomicU64,
+    /// Whether a close was deferred during the running call (see [`Nested::Defer`]).
+    close_deferred: AtomicBool,
 }
 
 /// A listener added to a subscription or an endpoint: its SDK handle and the SDK's strong reference to its state.
@@ -66,12 +76,32 @@ impl StateListener {
     }
 }
 
+impl ChangeListener {
+    pub(crate) fn new(closure: Box<ChangeClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with the three change trampolines, which the SDK calls without a check
+            // for NULL.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_ObservableSubscriptionChangeListener_new(
+                    t,
+                    Some(symbols_added_trampoline),
+                    Some(symbols_removed_trampoline),
+                    Some(subscription_closed_trampoline),
+                    user_data,
+                    out,
+                )
+            })
+        })
+    }
+}
+
 impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listener<H, C> {
     /// Creates the listener with `new`, which gets the `user_data` of the trampoline.
     fn create(closure: Box<C>, new: impl FnOnce(*mut c_void) -> Result<Handle<H>>) -> Result<Self> {
         let state = Arc::into_raw(Arc::new(ListenerState {
             closure: Mutex::new(closure),
             running: AtomicU64::new(0),
+            close_deferred: AtomicBool::new(false),
         }));
         match new(state as *mut c_void) {
             Ok(handle) => Ok(Listener { handle, state }),
@@ -171,7 +201,7 @@ unsafe extern "C" fn event_trampoline(
 ) {
     // SAFETY: `user_data` is the state of an event listener, and the SDK keeps the list alive until this call returns.
     unsafe {
-        dispatch::<EventClosure>(thread, user_data, "an event listener", |closure| {
+        dispatch::<EventClosure>(thread, user_data, "an event listener", Nested::Warn, |closure| {
             closure(Events::new(events))
         })
     };
@@ -189,14 +219,81 @@ unsafe extern "C" fn state_trampoline(
     };
     // SAFETY: `user_data` is the state of a state listener.
     unsafe {
-        dispatch::<StateClosure>(thread, user_data, "an endpoint state listener", |closure| {
-            closure(old_state, new_state)
-        })
+        dispatch::<StateClosure>(
+            thread,
+            user_data,
+            "an endpoint state listener",
+            Nested::Warn,
+            |closure| closure(old_state, new_state),
+        )
     };
 }
 
+unsafe extern "C" fn symbols_added_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    symbols: *mut sys::dxfg_symbol_list,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of a change listener, and the SDK keeps the list alive until this call returns.
+    unsafe {
+        dispatch::<ChangeClosure>(
+            thread,
+            user_data,
+            "a subscription change listener",
+            Nested::WarnThenClose(close_change_listener),
+            |listener| listener.symbols_added(&Symbol::list_from_sys(symbols)),
+        )
+    };
+}
+
+unsafe extern "C" fn symbols_removed_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    symbols: *mut sys::dxfg_symbol_list,
+    user_data: *mut c_void,
+) {
+    // SAFETY: as for the added symbols.
+    unsafe {
+        dispatch::<ChangeClosure>(
+            thread,
+            user_data,
+            "a subscription change listener",
+            Nested::WarnThenClose(close_change_listener),
+            |listener| listener.symbols_removed(&Symbol::list_from_sys(symbols)),
+        )
+    };
+}
+
+unsafe extern "C" fn subscription_closed_trampoline(thread: *mut sys::graal_isolatethread_t, user_data: *mut c_void) {
+    // SAFETY: `user_data` is the state of a change listener.
+    unsafe {
+        dispatch::<ChangeClosure>(
+            thread,
+            user_data,
+            "a subscription change listener",
+            Nested::Defer,
+            close_change_listener,
+        )
+    };
+}
+
+fn close_change_listener(listener: &mut ChangeClosure) {
+    listener.subscription_closed();
+}
+
+/// What [`dispatch`] does with a call nested in a running call of the same listener on its thread.
+enum Nested<C: ?Sized> {
+    /// Skips it with a warning: the SDK serializes the calls of a listener, so this is a guard against a deadlock on
+    /// the closure lock, not an expected path.
+    Warn,
+    /// Skips it with a warning, and after the running call, runs the close deferred during it.
+    WarnThenClose(fn(&mut C)),
+    /// Defers it until the running call returns: the close of a change listener that removes itself or closes its
+    /// subscription or endpoint in its own call.
+    Defer,
+}
+
 /// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `what` names the
-/// listener in messages.
+/// listener in messages, and `nested` tells what to do with a nested call.
 ///
 /// # Safety
 ///
@@ -205,6 +302,7 @@ unsafe fn dispatch<C: ?Sized>(
     thread: *mut sys::graal_isolatethread_t,
     user_data: *mut c_void,
     what: &str,
+    nested: Nested<C>,
     call: impl FnOnce(&mut C),
 ) {
     if isolate::exiting() {
@@ -221,22 +319,34 @@ unsafe fn dispatch<C: ?Sized>(
         let _scope = CallbackScope::enter(thread);
         let me = thread_id();
         if state.running.load(Ordering::Acquire) == me {
-            // A nested call on the thread that runs this listener. The SDK serializes the calls of a subscription, so
-            // this is a guard against a deadlock on the closure lock, not an expected path.
-            eprintln!("dxfeed-graal: skipped a nested call of {what} on the thread that runs it");
+            match nested {
+                Nested::Defer => state.close_deferred.store(true, Ordering::Release),
+                Nested::Warn | Nested::WarnThenClose(_) => {
+                    eprintln!("dxfeed-graal: skipped a nested call of {what} on the thread that runs it")
+                }
+            }
             return;
         }
         let mut closure = crate::lock(&state.closure);
         state.running.store(me, Ordering::Release);
-        let result = panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure)));
-        state.running.store(0, Ordering::Release);
-        if let Err(payload) = result {
-            let message = payload
-                .downcast_ref::<&str>()
-                .copied()
-                .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-                .unwrap_or("unknown panic");
-            eprintln!("dxfeed-graal: {what} panicked: {message}");
+        report(what, panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure))));
+        if let Nested::WarnThenClose(close) = nested
+            && state.close_deferred.swap(false, Ordering::AcqRel)
+        {
+            report(what, panic::catch_unwind(AssertUnwindSafe(|| close(&mut **closure))));
         }
+        state.running.store(0, Ordering::Release);
     }));
+}
+
+/// Prints the panic of a call of a listener named by `what`, if it panicked.
+fn report(what: &str, result: std::thread::Result<()>) {
+    if let Err(payload) = result {
+        let message = payload
+            .downcast_ref::<&str>()
+            .copied()
+            .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
+            .unwrap_or("unknown panic");
+        eprintln!("dxfeed-graal: {what} panicked: {message}");
+    }
 }

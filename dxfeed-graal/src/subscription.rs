@@ -13,9 +13,10 @@ use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::EventListener;
+use crate::observable::{ChangeListeners, ObservableSubscriptionChangeListener};
 use crate::symbol::{Symbol, SymbolArena};
 
-/// Identifies a listener added by [`DXFeedSubscription::add_event_listener`] or
+/// Identifies a listener added by [`DXFeedSubscription::add_event_listener`], an `add_change_listener` method or
 /// [`DXEndpoint::add_state_listener`](crate::DXEndpoint::add_state_listener).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ListenerId(u64);
@@ -33,12 +34,13 @@ impl ListenerId {
 /// `E` is what its listeners receive: an event type such as [`Quote`](crate::event::Quote) for a subscription created
 /// with [`DXFeed::create_subscription`], [`Event`] for one created with [`DXFeed::create_subscription_with_types`].
 ///
-/// Dropping it removes and releases its listeners, then closes it. A listener's closure is not called after the
+/// Dropping it removes and releases its event and change listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its
 /// listeners, so do not hold a lock their closures take while dropping it. It keeps its feed's endpoint open.
 pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, EventListener)>>,
+    change_listeners: ChangeListeners,
     // Dropped last: it may close the endpoint.
     _feed: DXFeed,
     _item: PhantomData<fn() -> E>,
@@ -49,6 +51,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         DXFeedSubscription {
             handle,
             listeners: Mutex::new(Vec::new()),
+            change_listeners: ChangeListeners::new(),
             _feed: feed,
             _item: PhantomData,
         }
@@ -91,6 +94,28 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         self.remove(listener)
     }
 
+    /// Adds a change listener; before this returns, the listener is called with the symbols the subscription has
+    /// (`addChangeListener`). Adding to a closed subscription does nothing.
+    #[doc(alias = "addChangeListener")]
+    pub fn add_change_listener(&self, listener: impl ObservableSubscriptionChangeListener) -> Result<ListenerId> {
+        let s = self.handle.as_ptr();
+        self.change_listeners.add(listener, |l| {
+            // SAFETY: the subscription and the listener are live.
+            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addChangeListener(t, s, l) })
+        })
+    }
+
+    /// Removes a change listener, which then gets its
+    /// [`subscription_closed`](ObservableSubscriptionChangeListener::subscription_closed) call
+    /// (`removeChangeListener`). Called outside the listener, it returns once no call of the listener runs; called
+    /// from the listener, it returns at once and the listener is released in the background.
+    ///
+    /// Returns [`Error::InvalidArgument`] if the listener is not in this subscription.
+    #[doc(alias = "removeChangeListener")]
+    pub fn remove_change_listener(&self, id: ListenerId) -> Result<()> {
+        self.change_listeners.remove(id, |l| self.remove_change(l))
+    }
+
     /// Adds symbols: any iterable of strings or [`Symbol`]s, e.g. `["AAPL", "IBM"]`, a `Vec<String>`,
     /// `std::iter::once("AAPL")` or `[Symbol::Wildcard]`.
     #[doc(alias = "addSymbols")]
@@ -124,6 +149,12 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         crate::lock(&self.listeners)
     }
 
+    fn remove_change(&self, listener: *mut sys::dxfg_v4_observable_subscription_change_listener_t) -> Result<()> {
+        let s = self.handle.as_ptr();
+        // SAFETY: the subscription and the listener are live.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeChangeListener(t, s, listener) })
+    }
+
     fn remove(&self, listener: EventListener) -> Result<()> {
         let (s, l) = (self.handle.as_ptr(), listener.as_ptr());
         // SAFETY: the subscription and the listener are live.
@@ -144,6 +175,7 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
         for (_, listener) in listeners {
             let _ = self.remove(listener);
         }
+        self.change_listeners.remove_all(|l| self.remove_change(l));
         let _ = self.close();
     }
 }

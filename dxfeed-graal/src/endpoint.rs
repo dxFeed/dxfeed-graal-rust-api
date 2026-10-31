@@ -1,5 +1,6 @@
 //! Endpoints: connections to data sources and hubs.
 
+use std::collections::HashMap;
 use std::fmt;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
@@ -7,11 +8,13 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
+use crate::event::EventType;
 use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::StateListener;
+use crate::observable::ChangeListeners;
 use crate::publisher::DXPublisher;
 use crate::subscription::ListenerId;
 
@@ -201,9 +204,27 @@ pub(crate) struct EndpointState {
     role: Role,
     closed: AtomicBool,
     state_listeners: Mutex<Vec<(ListenerId, StateListener)>>,
+    /// The change listeners of the publisher's subscriptions by event type, kept until the endpoint is closed.
+    publisher_listeners: Mutex<HashMap<EventType, Arc<ChangeListeners>>>,
 }
 
 impl EndpointState {
+    /// The change listeners of the publisher's subscription to the events of `event_type`.
+    pub(crate) fn publisher_listeners(&self, event_type: EventType) -> Arc<ChangeListeners> {
+        crate::lock(&self.publisher_listeners)
+            .entry(event_type)
+            .or_insert_with(|| Arc::new(ChangeListeners::new()))
+            .clone()
+    }
+
+    /// Lets go of the change listeners of the publisher's subscriptions, which the closed endpoint no longer calls:
+    /// they are released once no [`ObservableSubscription`](crate::ObservableSubscription) holds them. This breaks
+    /// the cycle of a listener that holds the publisher.
+    fn release_publisher_listeners(&self) {
+        let listeners = std::mem::take(&mut *crate::lock(&self.publisher_listeners));
+        drop(listeners);
+    }
+
     fn state_listeners(&self) -> MutexGuard<'_, Vec<(ListenerId, StateListener)>> {
         crate::lock(&self.state_listeners)
     }
@@ -222,7 +243,9 @@ impl EndpointState {
         }
         let e = self.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) })
+        let closed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) });
+        self.release_publisher_listeners();
+        closed
     }
 }
 
@@ -294,6 +317,7 @@ impl DXEndpoint {
                 role,
                 closed: AtomicBool::new(false),
                 state_listeners: Mutex::new(Vec::new()),
+                publisher_listeners: Mutex::new(HashMap::new()),
             }),
         })
     }
@@ -479,7 +503,9 @@ impl DXEndpoint {
         self.state.closed.store(true, Ordering::Release);
         let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
-        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_closeAndAwaitTermination(t, e) })
+        let closed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_closeAndAwaitTermination(t, e) });
+        self.state.release_publisher_listeners();
+        closed
     }
 
     /// The role of the endpoint.

@@ -32,6 +32,10 @@ name = "print_quote_events"
 path = "examples/api/print_quote_events.rs"
 
 [[example]]
+name = "publish_profiles"
+path = "examples/api/publish_profiles.rs"
+
+[[example]]
 name = "quote_and_trade"
 path = "examples/api/quote_and_trade.rs"
 

@@ -273,7 +273,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] [print_quote_events](dxfeed-graal/examples/api/print_quote_events.rs)
   is a simple demonstration of how to subscribe to the `Quote` event, using the `DXFeed` instance singleton and the
   `dxfeed.system.properties` file
-- [ ] publish_profiles
+- [x] [publish_profiles](dxfeed-graal/examples/api/publish_profiles.rs)
   is a simple demonstration of how to publish market events
 - [x] [request_profile](dxfeed-graal/examples/api/request_profile.rs)
   using an address like `localhost:7700` and a symbol like `A:TEST`, connects to the running `publish_profiles`
@@ -394,6 +394,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
   endpoint and feed (`get_instance`)
 - [x] Typed and untyped subscriptions, listeners, publishing
+- [x] Observable subscriptions of publishers and change listeners of subscriptions
 - [x] Symbols: strings, candle symbols with their attributes, the wildcard, indexed event sources and time series
 - [x] Time series subscriptions, `get_time_series_promise` and `get_indexed_events_promise`
 - [x] `TimeFormat`: parsing and formatting of times like the other APIs

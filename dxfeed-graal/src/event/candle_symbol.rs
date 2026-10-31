@@ -55,6 +55,11 @@ impl CandleSymbol {
         normalize(&text).map(CandleSymbol)
     }
 
+    /// The candle symbol of a text the SDK has normalized.
+    pub(crate) fn from_normalized(text: String) -> CandleSymbol {
+        CandleSymbol(text)
+    }
+
     /// The text of the symbol (`toString`).
     pub fn as_str(&self) -> &str {
         &self.0
