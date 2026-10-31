@@ -30,7 +30,7 @@ use std::time::Duration;
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
-use crate::event::{Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
+use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
 use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
 use crate::handle::{Handle, SdkHandle};
@@ -425,16 +425,16 @@ trait HasKind {
 /// Dropping it closes it and releases its listener, whose closure is not called afterwards; dropping it from another
 /// thread therefore waits for a running call of the listener, so do not hold a lock its closure takes while dropping
 /// it. It keeps the endpoints of the feeds it is attached to open.
-pub struct IndexedTxModel<E: IndexedEvent> {
+pub struct IndexedTxModel<E: IndexedEvent + EventKind> {
     core: Core<Indexed>,
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: IndexedEvent> HasKind for IndexedTxModel<E> {
+impl<E: IndexedEvent + EventKind> HasKind for IndexedTxModel<E> {
     type Kind = Indexed;
 }
 
-impl<E: IndexedEvent> IndexedTxModel<E> {
+impl<E: IndexedEvent + EventKind> IndexedTxModel<E> {
     /// A builder of a model of the events of type `E` (`newBuilder`).
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> IndexedTxModelBuilder<E> {
@@ -484,7 +484,7 @@ impl<E: IndexedEvent> IndexedTxModel<E> {
     model_methods!();
 }
 
-impl<E: IndexedEvent> fmt::Debug for IndexedTxModel<E> {
+impl<E: IndexedEvent + EventKind> fmt::Debug for IndexedTxModel<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IndexedTxModel")
             .field("event_type", &E::TYPE)
@@ -493,13 +493,13 @@ impl<E: IndexedEvent> fmt::Debug for IndexedTxModel<E> {
 }
 
 /// The builder of an [`IndexedTxModel`] (`IndexedTxModel.Builder`).
-pub struct IndexedTxModelBuilder<E: IndexedEvent> {
+pub struct IndexedTxModelBuilder<E: IndexedEvent + EventKind> {
     settings: Settings,
     sources: Option<Vec<IndexedEventSource>>,
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: IndexedEvent> IndexedTxModelBuilder<E> {
+impl<E: IndexedEvent + EventKind> IndexedTxModelBuilder<E> {
     builder_methods!();
 
     /// The sources of the events; none, the default, means all the sources (`withSources`).
@@ -558,16 +558,16 @@ impl SortOrder {
 /// Dropping it closes it and releases its listener, whose closure is not called afterwards; dropping it from another
 /// thread therefore waits for a running call of the listener, so do not hold a lock its closure takes while dropping
 /// it. It keeps the endpoints of the feeds it is attached to open.
-pub struct TimeSeriesTxModel<E: TimeSeriesEvent> {
+pub struct TimeSeriesTxModel<E: TimeSeriesEvent + EventKind> {
     core: Core<TimeSeries>,
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: TimeSeriesEvent> HasKind for TimeSeriesTxModel<E> {
+impl<E: TimeSeriesEvent + EventKind> HasKind for TimeSeriesTxModel<E> {
     type Kind = TimeSeries;
 }
 
-impl<E: TimeSeriesEvent> TimeSeriesTxModel<E> {
+impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModel<E> {
     /// A builder of a model of the events of type `E` (`newBuilder`).
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> TimeSeriesTxModelBuilder<E> {
@@ -605,7 +605,7 @@ impl<E: TimeSeriesEvent> TimeSeriesTxModel<E> {
     model_methods!();
 }
 
-impl<E: TimeSeriesEvent> fmt::Debug for TimeSeriesTxModel<E> {
+impl<E: TimeSeriesEvent + EventKind> fmt::Debug for TimeSeriesTxModel<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TimeSeriesTxModel")
             .field("event_type", &E::TYPE)
@@ -614,7 +614,7 @@ impl<E: TimeSeriesEvent> fmt::Debug for TimeSeriesTxModel<E> {
 }
 
 /// The builder of a [`TimeSeriesTxModel`] (`TimeSeriesTxModel.Builder`).
-pub struct TimeSeriesTxModelBuilder<E: TimeSeriesEvent> {
+pub struct TimeSeriesTxModelBuilder<E: TimeSeriesEvent + EventKind> {
     settings: Settings,
     from_time: Option<i64>,
     sorting: Option<SortOrder>,
@@ -624,7 +624,7 @@ pub struct TimeSeriesTxModelBuilder<E: TimeSeriesEvent> {
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: TimeSeriesEvent> TimeSeriesTxModelBuilder<E> {
+impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
     builder_methods!();
 
     /// The time to subscribe from, in milliseconds since the Unix epoch; by default `i64::MAX`, not subscribed

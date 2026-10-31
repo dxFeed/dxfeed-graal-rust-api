@@ -9,7 +9,7 @@ use dxfeed_graal_sys as sys;
 
 use super::time_period;
 use crate::error::{Error, Result};
-use crate::event::{Events, IndexedEvent, IndexedEventSource};
+use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource};
 use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
@@ -44,7 +44,7 @@ use crate::symbol::{Symbol, SymbolArena};
 /// # Ok(())
 /// # }
 /// ```
-pub struct IndexedEventTxModel<E: IndexedEvent> {
+pub struct IndexedEventTxModel<E: IndexedEvent + EventKind> {
     handle: Handle<sys::dxfg_v4_indexed_event_tx_model_t>,
     /// In a mutex, so that the model is `Sync`; only `Drop` takes it.
     listener: Mutex<Option<EventTxListener>>,
@@ -54,7 +54,7 @@ pub struct IndexedEventTxModel<E: IndexedEvent> {
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: IndexedEvent> IndexedEventTxModel<E> {
+impl<E: IndexedEvent + EventKind> IndexedEventTxModel<E> {
     /// A builder of a model of the events of `E` (`newBuilder`).
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> IndexedEventTxModelBuilder<E> {
@@ -142,7 +142,7 @@ impl<E: IndexedEvent> IndexedEventTxModel<E> {
     }
 }
 
-impl<E: IndexedEvent> Drop for IndexedEventTxModel<E> {
+impl<E: IndexedEvent + EventKind> Drop for IndexedEventTxModel<E> {
     fn drop(&mut self) {
         if isolate::exiting() {
             // No SDK calls while the process exits; the listener leaks, as the SDK may still call its trampoline.
@@ -156,7 +156,7 @@ impl<E: IndexedEvent> Drop for IndexedEventTxModel<E> {
     }
 }
 
-impl<E: IndexedEvent> fmt::Debug for IndexedEventTxModel<E> {
+impl<E: IndexedEvent + EventKind> fmt::Debug for IndexedEventTxModel<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IndexedEventTxModel")
             .field("event_type", &E::TYPE)
@@ -165,7 +165,7 @@ impl<E: IndexedEvent> fmt::Debug for IndexedEventTxModel<E> {
 }
 
 /// The builder of an [`IndexedEventTxModel`] (`IndexedEventTxModel.Builder`).
-pub struct IndexedEventTxModelBuilder<E: IndexedEvent> {
+pub struct IndexedEventTxModelBuilder<E: IndexedEvent + EventKind> {
     feed: Option<DXFeed>,
     symbol: Option<Symbol>,
     source: Option<IndexedEventSource>,
@@ -176,7 +176,7 @@ pub struct IndexedEventTxModelBuilder<E: IndexedEvent> {
     _event: PhantomData<fn() -> E>,
 }
 
-impl<E: IndexedEvent> IndexedEventTxModelBuilder<E> {
+impl<E: IndexedEvent + EventKind> IndexedEventTxModelBuilder<E> {
     /// The feed the model attaches to when it is built (`withFeed`); the model keeps it.
     #[doc(alias = "withFeed")]
     pub fn with_feed(mut self, feed: &DXFeed) -> Self {
@@ -318,7 +318,7 @@ impl<E: IndexedEvent> IndexedEventTxModelBuilder<E> {
     }
 }
 
-impl<E: IndexedEvent> fmt::Debug for IndexedEventTxModelBuilder<E> {
+impl<E: IndexedEvent + EventKind> fmt::Debug for IndexedEventTxModelBuilder<E> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("IndexedEventTxModelBuilder")
             .field("event_type", &E::TYPE)

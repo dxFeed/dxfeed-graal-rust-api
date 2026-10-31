@@ -11,7 +11,7 @@ use std::time::{Duration, Instant};
 
 use super::{IndexedTxModel, IndexedTxModelBuilder};
 use crate::error::Result;
-use crate::event::{EventFlags, Events, IndexedEventSource, OrderEvent, Scope, Side};
+use crate::event::{EventFlags, EventKind, Events, IndexedEventSource, OrderEvent, Scope, Side};
 use crate::feed::DXFeed;
 use crate::isolate;
 use crate::symbol::Symbol;
@@ -54,13 +54,13 @@ type DepthClosure<O> = dyn FnMut(&[O], &[O]) + Send;
 /// # Ok(())
 /// # }
 /// ```
-pub struct MarketDepthModel<O: OrderEvent> {
+pub struct MarketDepthModel<O: OrderEvent + EventKind + Sync> {
     shared: Arc<Shared<O>>,
     /// Taken by `Drop` only.
     tx: Option<IndexedTxModel<O>>,
 }
 
-impl<O: OrderEvent> MarketDepthModel<O> {
+impl<O: OrderEvent + EventKind + Sync> MarketDepthModel<O> {
     /// A builder of a model (`newBuilder`).
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> MarketDepthModelBuilder<O> {
@@ -135,7 +135,7 @@ impl<O: OrderEvent> MarketDepthModel<O> {
     }
 }
 
-impl<O: OrderEvent> Drop for MarketDepthModel<O> {
+impl<O: OrderEvent + EventKind + Sync> Drop for MarketDepthModel<O> {
     fn drop(&mut self) {
         if isolate::exiting() {
             return;
@@ -156,14 +156,14 @@ impl<O: OrderEvent> Drop for MarketDepthModel<O> {
 }
 
 /// Releases the transactional model, which waits for a running call of its listener, and waits for the timer thread.
-fn release<O: OrderEvent>(tx: Option<IndexedTxModel<O>>, timer: Option<JoinHandle<()>>) {
+fn release<O: OrderEvent + EventKind + Sync>(tx: Option<IndexedTxModel<O>>, timer: Option<JoinHandle<()>>) {
     drop(tx);
     if let Some(timer) = timer {
         let _ = timer.join();
     }
 }
 
-impl<O: OrderEvent> fmt::Debug for MarketDepthModel<O> {
+impl<O: OrderEvent + EventKind + Sync> fmt::Debug for MarketDepthModel<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let state = crate::lock(&self.shared.state);
         f.debug_struct("MarketDepthModel")
@@ -176,14 +176,14 @@ impl<O: OrderEvent> fmt::Debug for MarketDepthModel<O> {
 }
 
 /// The builder of a [`MarketDepthModel`] (`MarketDepthModel.Builder`).
-pub struct MarketDepthModelBuilder<O: OrderEvent> {
+pub struct MarketDepthModelBuilder<O: OrderEvent + EventKind + Sync> {
     builder: IndexedTxModelBuilder<O>,
     depth_limit: usize,
     aggregation_period: Duration,
     listener: Option<Box<DepthClosure<O>>>,
 }
 
-impl<O: OrderEvent> MarketDepthModelBuilder<O> {
+impl<O: OrderEvent + EventKind + Sync> MarketDepthModelBuilder<O> {
     /// The feed the model attaches to when it is built (`withFeed`).
     #[doc(alias = "withFeed")]
     pub fn with_feed(mut self, feed: &DXFeed) -> Self {
@@ -263,7 +263,7 @@ impl<O: OrderEvent> MarketDepthModelBuilder<O> {
     }
 }
 
-impl<O: OrderEvent> fmt::Debug for MarketDepthModelBuilder<O> {
+impl<O: OrderEvent + EventKind + Sync> fmt::Debug for MarketDepthModelBuilder<O> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("MarketDepthModelBuilder")
             .field("event_type", &O::TYPE)
@@ -274,7 +274,7 @@ impl<O: OrderEvent> fmt::Debug for MarketDepthModelBuilder<O> {
 }
 
 /// The state that the model, its transactional model listener and its timer thread share.
-struct Shared<O: OrderEvent> {
+struct Shared<O: OrderEvent + EventKind + Sync> {
     state: Mutex<State<O>>,
     /// Wakes the timer thread when the deadline changes or the model closes.
     wake: Condvar,
@@ -287,7 +287,7 @@ struct Shared<O: OrderEvent> {
     again: Mutex<bool>,
 }
 
-impl<O: OrderEvent> Shared<O> {
+impl<O: OrderEvent + EventKind + Sync> Shared<O> {
     /// Applies a transaction or a snapshot from the transactional model, and calls the listener now or later.
     fn received(self: &Arc<Self>, source: IndexedEventSource, orders: Vec<O>, is_snapshot: bool) {
         {
@@ -385,7 +385,7 @@ impl<O: OrderEvent> Shared<O> {
 }
 
 /// The orders of the book.
-struct State<O: OrderEvent> {
+struct State<O: OrderEvent + EventKind + Sync> {
     /// Every order of both sides by its index.
     by_index: HashMap<i64, Arc<O>>,
     buy: BookSide<O, true>,
@@ -398,7 +398,7 @@ struct State<O: OrderEvent> {
     timer: Option<JoinHandle<()>>,
 }
 
-impl<O: OrderEvent> State<O> {
+impl<O: OrderEvent + EventKind + Sync> State<O> {
     /// Applies the orders and tells whether the sides the listener gets changed.
     fn update(&mut self, source: IndexedEventSource, orders: Vec<O>, is_snapshot: bool) -> bool {
         let limit = self.depth_limit;
@@ -447,7 +447,7 @@ impl<O, const BUY: bool> Default for BookSide<O, BUY> {
     }
 }
 
-impl<O: OrderEvent, const BUY: bool> BookSide<O, BUY> {
+impl<O: OrderEvent + EventKind + Sync, const BUY: bool> BookSide<O, BUY> {
     fn insert(&mut self, order: Arc<O>, limit: usize) {
         if self.orders.insert(Ranked(Arc::clone(&order))) {
             self.mark_changed(&order, limit);
@@ -496,28 +496,28 @@ impl<O: OrderEvent, const BUY: bool> BookSide<O, BUY> {
 /// An order in a side of the book, ordered by [`rank`].
 struct Ranked<O, const BUY: bool>(Arc<O>);
 
-impl<O: OrderEvent, const BUY: bool> Ord for Ranked<O, BUY> {
+impl<O: OrderEvent + EventKind + Sync, const BUY: bool> Ord for Ranked<O, BUY> {
     fn cmp(&self, other: &Self) -> Ordering {
         rank::<O, BUY>(&self.0, &other.0)
     }
 }
 
-impl<O: OrderEvent, const BUY: bool> PartialOrd for Ranked<O, BUY> {
+impl<O: OrderEvent + EventKind + Sync, const BUY: bool> PartialOrd for Ranked<O, BUY> {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<O: OrderEvent, const BUY: bool> PartialEq for Ranked<O, BUY> {
+impl<O: OrderEvent + EventKind + Sync, const BUY: bool> PartialEq for Ranked<O, BUY> {
     fn eq(&self, other: &Self) -> bool {
         self.cmp(other) == Ordering::Equal
     }
 }
 
-impl<O: OrderEvent, const BUY: bool> Eq for Ranked<O, BUY> {}
+impl<O: OrderEvent + EventKind + Sync, const BUY: bool> Eq for Ranked<O, BUY> {}
 
 /// The order of a side, as the C++ and Java models sort it: the best price first, then [`by_kind`].
-fn rank<O: OrderEvent, const BUY: bool>(a: &O, b: &O) -> Ordering {
+fn rank<O: OrderEvent + EventKind + Sync, const BUY: bool>(a: &O, b: &O) -> Ordering {
     let by_price = if BUY {
         b.price().total_cmp(&a.price())
     } else {
@@ -528,7 +528,7 @@ fn rank<O: OrderEvent, const BUY: bool>(a: &O, b: &O) -> Ordering {
 
 /// The order at one price: the price levels before the individual orders; the larger levels first, then by time,
 /// scope, exchange and market maker; the individual orders by time; the index last, which tells all the orders apart.
-fn by_kind<O: OrderEvent>(a: &O, b: &O) -> Ordering {
+fn by_kind<O: OrderEvent + EventKind + Sync>(a: &O, b: &O) -> Ordering {
     let individual = |order: &O| order.scope() == Scope::Order;
     match (individual(a), individual(b)) {
         (true, true) => a
@@ -543,7 +543,12 @@ fn by_kind<O: OrderEvent>(a: &O, b: &O) -> Ordering {
             .then(a.time_sequence().cmp(&b.time_sequence()))
             .then(a.scope().get_code().cmp(&b.scope().get_code()))
             .then(a.exchange_code().cmp(&b.exchange_code()))
-            .then_with(|| a.market_maker().unwrap_or("").cmp(b.market_maker().unwrap_or("")))
+            .then_with(|| {
+                a.market_maker()
+                    .as_deref()
+                    .unwrap_or("")
+                    .cmp(b.market_maker().as_deref().unwrap_or(""))
+            })
             .then(a.index().cmp(&b.index())),
     }
 }

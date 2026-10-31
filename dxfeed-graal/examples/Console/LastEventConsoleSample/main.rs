@@ -8,7 +8,7 @@
 use std::fmt::Display;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::event::{LastingEvent, Profile, Quote, Summary, Trade};
+use dxfeed_graal::event::{EventKind, LastingEvent, Profile, Quote, Summary, Trade};
 use dxfeed_graal::{DXEndpoint, Promise};
 
 fn main() -> dxfeed_graal::Result<()> {
@@ -118,12 +118,12 @@ fn main() -> dxfeed_graal::Result<()> {
 }
 
 /// Waits for the promise until the deadline; whether it completed in time.
-fn await_without_exception<E: LastingEvent>(promise: &Promise<E>, deadline: Instant) -> bool {
+fn await_without_exception<E: LastingEvent + EventKind>(promise: &Promise<E>, deadline: Instant) -> bool {
     promise.wait(deadline.saturating_duration_since(Instant::now())).is_ok()
 }
 
 /// The text of the event of the promise, or `<null>` when the event is not available.
-fn result_to_string<E: LastingEvent + Display>(promise: &Promise<E>) -> String {
+fn result_to_string<E: LastingEvent + EventKind + Display>(promise: &Promise<E>) -> String {
     match promise.get_result() {
         Ok(Some(event)) => event.to_string(),
         _ => "<null>".into(),

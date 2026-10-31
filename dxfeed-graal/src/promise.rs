@@ -8,7 +8,7 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, JavaException, Result};
 use crate::event::sdk_event::{take_event, take_events};
-use crate::event::{IndexedEvent, LastingEvent};
+use crate::event::{EventKind, IndexedEvent, LastingEvent};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, Thread, call};
@@ -44,9 +44,9 @@ mod sealed {
     }
 }
 
-impl<E: LastingEvent> PromiseResult for E {}
+impl<E: LastingEvent + EventKind> PromiseResult for E {}
 
-impl<E: LastingEvent> sealed::Sealed for E {
+impl<E: LastingEvent + EventKind> sealed::Sealed for E {
     fn take(promise: *mut sys::dxfg_v4_promise_t) -> Result<Option<Self>> {
         let promise = promise.cast::<sys::dxfg_v4_promise_event_t>();
         // SAFETY: the promise of a single event is live and the out-pointer is valid for writes.
@@ -54,9 +54,9 @@ impl<E: LastingEvent> sealed::Sealed for E {
     }
 }
 
-impl<E: IndexedEvent> PromiseResult for Vec<E> {}
+impl<E: IndexedEvent + EventKind> PromiseResult for Vec<E> {}
 
-impl<E: IndexedEvent> sealed::Sealed for Vec<E> {
+impl<E: IndexedEvent + EventKind> sealed::Sealed for Vec<E> {
     fn take(promise: *mut sys::dxfg_v4_promise_t) -> Result<Option<Self>> {
         let promise = promise.cast::<sys::dxfg_v4_promise_events_t>();
         // SAFETY: the promise of a list is live and the out-pointer is valid for writes.

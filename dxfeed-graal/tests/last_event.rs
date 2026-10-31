@@ -10,7 +10,7 @@ use dxfeed_graal::event::{
     Candle, Configuration, DailyCandle, Greeks, LastingEvent, NuamTrade, Profile, Quote, Summary, TextConfiguration,
     TheoPrice, Trade, TradeETH, Underlying,
 };
-use dxfeed_graal::{Error, Event, live_events};
+use dxfeed_graal::{Error, Event, EventKind, live_events};
 use support::{
     Hub, candle, candle_symbol, configuration, daily_candle, delivered, greeks, nuam_trade, profile, quote,
     quote_with_bid, same_events, summary, text_configuration, theo_price, trade, trade_eth, underlying,
@@ -23,7 +23,7 @@ fn serial() -> MutexGuard<'static, ()> {
 }
 
 /// Looks up the last event of `sample`'s type and symbol before a subscription, before data and after publishing.
-fn check_lookups<E: LastingEvent + Debug>(new: E, sample: E, symbol: &str) {
+fn check_lookups<E: LastingEvent + EventKind + Debug>(new: E, sample: E, symbol: &str) {
     let hub = Hub::new();
     assert!(
         hub.feed.get_last_event_if_subscribed::<E>(symbol).unwrap().is_none(),

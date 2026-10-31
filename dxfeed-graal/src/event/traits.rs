@@ -1,19 +1,36 @@
 //! The behavior several event types share, as the Java interfaces of the same names.
+//!
+//! The traits only read: both the owned types, such as [`Quote`](super::Quote), and the views a listener receives,
+//! such as [`QuoteRef`](super::QuoteRef), implement them, so one generic function serves both. What only an owned
+//! type can do (clone, convert to and from [`Event`](super::Event)) is [`EventKind`](super::EventKind).
 
-use super::{Event, EventFlags, EventKind, Scope, Side};
+use std::borrow::Cow;
 
-/// An event about a market symbol, as Java's `MarketEvent`.
+use super::{EventFlags, EventType, Scope, Side};
+
+/// Any event, as Java's `EventType` interface (in this crate [`EventType`] names the enum of the event types): it
+/// has a symbol and an event time.
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait MarketEvent: EventKind {
-    /// The symbol.
+#[doc(alias = "EventType")]
+pub trait BaseEvent: sealed::Sealed {
+    /// The symbol; replacement characters stand for bytes of a received symbol that are not UTF-8.
     #[doc(alias = "getEventSymbol")]
-    fn symbol(&self) -> &str;
+    fn symbol(&self) -> Cow<'_, str>;
 
     /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
     #[doc(alias = "getEventTime")]
     fn event_time(&self) -> i64;
+
+    /// The type of the event.
+    fn event_type(&self) -> EventType;
 }
+
+/// An event about a market symbol, as Java's `MarketEvent`. Candles, messages and configurations are events but not
+/// market events, as in Java.
+///
+/// The trait is sealed: only this crate implements it.
+pub trait MarketEvent: BaseEvent {}
 
 /// An event whose last value a feed keeps for each symbol, as Java's `LastingEvent`: a new event replaces the previous
 /// one. A feed returns the last value with
@@ -22,12 +39,12 @@ pub trait MarketEvent: EventKind {
 /// [`DXFeed::get_last_event_promise`](crate::DXFeed::get_last_event_promise).
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait LastingEvent: EventKind + Clone + Into<Event> + TryFrom<Event, Error = Event> {}
+pub trait LastingEvent: BaseEvent {}
 
 /// An event that a source and an index tell apart from the other events of its symbol, as Java's `IndexedEvent`.
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait IndexedEvent: EventKind + Clone + Into<Event> + TryFrom<Event, Error = Event> {
+pub trait IndexedEvent: BaseEvent {
     /// The index of the event among the events of its symbol and source.
     #[doc(alias = "getIndex")]
     fn index(&self) -> i64;
@@ -55,7 +72,7 @@ pub trait TimeSeriesEvent: IndexedEvent {
 /// order book models, such as [`MarketDepthModel`](crate::model::MarketDepthModel), take it.
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait OrderEvent: IndexedEvent + Sync {
+pub trait OrderEvent: IndexedEvent {
     /// The price; NaN if unknown.
     #[doc(alias = "getPrice")]
     fn price(&self) -> f64;
@@ -90,90 +107,174 @@ pub trait OrderEvent: IndexedEvent + Sync {
     /// The market maker of an [`Order`](super::Order) and the types Java derives from it; `None` for the others and
     /// when unknown.
     #[doc(alias = "getMarketMaker")]
-    fn market_maker(&self) -> Option<&str>;
+    fn market_maker(&self) -> Option<Cow<'_, str>>;
 }
 
-/// Implements [`OrderEvent`] for the order types, each with the expression of its market maker.
+/// The traits of this module as trait objects, for the accessors of [`Event`](super::Event) and
+/// [`EventRef`](super::EventRef): `None` where the type does not implement the trait.
+pub(crate) trait AsDyn {
+    fn as_market_event(&self) -> Option<&dyn MarketEvent>;
+    fn as_lasting_event(&self) -> Option<&dyn LastingEvent>;
+    fn as_indexed_event(&self) -> Option<&dyn IndexedEvent>;
+    fn as_time_series_event(&self) -> Option<&dyn TimeSeriesEvent>;
+    fn as_order_event(&self) -> Option<&dyn OrderEvent>;
+}
+
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+/// Reads a stored value of an owned event type (a field) or of a view (an accessor).
+macro_rules! get {
+    (owned, $e:expr, $f:ident) => {
+        $e.$f
+    };
+    (view, $e:expr, $f:ident) => {
+        $e.$f()
+    };
+}
+
+/// Implements [`OrderEvent`] for the order types and their views; the market maker is `None` for the types without
+/// it.
 macro_rules! order_event {
-    ($($name:ident: |$order:ident| $market_maker:expr;)*) => {$(
-        impl OrderEvent for super::$name {
+    ($($name:ident $view:ident $mm:ident;)*) => {$(
+        order_event!(@impl owned $name $mm);
+        order_event!(@impl view $view $mm);
+    )*};
+    (@mm owned $order:ident yes) => { $order.market_maker.as_deref().map(Cow::Borrowed) };
+    (@mm view $order:ident yes) => { $order.market_maker() };
+    (@mm $kind:ident $order:ident no) => { None };
+    (@impl $kind:ident $ty:ident $mm:ident) => {
+        impl OrderEvent for super::$ty {
             fn price(&self) -> f64 {
-                self.price
+                get!($kind, self, price)
             }
 
             fn size(&self) -> f64 {
-                self.size
+                get!($kind, self, size)
             }
 
             fn time_sequence(&self) -> i64 {
-                self.time_sequence
+                get!($kind, self, time_sequence)
             }
 
             fn exchange_code(&self) -> char {
-                super::$name::exchange_code(self)
+                super::$ty::exchange_code(self)
             }
 
             fn order_side(&self) -> Side {
-                super::$name::order_side(self)
+                super::$ty::order_side(self)
             }
 
             fn scope(&self) -> Scope {
-                super::$name::scope(self)
+                super::$ty::scope(self)
             }
 
-            fn market_maker(&self) -> Option<&str> {
-                let $order = self;
-                $market_maker
+            fn market_maker(&self) -> Option<Cow<'_, str>> {
+                order_event!(@mm $kind self $mm)
             }
         }
-    )*};
+    };
 }
 
 order_event! {
-    OrderBase: |_order| None;
-    Order: |order| order.market_maker.as_deref();
-    AnalyticOrder: |order| order.market_maker.as_deref();
-    OtcMarketsOrder: |order| order.market_maker.as_deref();
-    NuamOrder: |order| order.market_maker.as_deref();
-    SpreadOrder: |_order| None;
+    OrderBase OrderBaseRef no;
+    Order OrderRef yes;
+    AnalyticOrder AnalyticOrderRef yes;
+    OtcMarketsOrder OtcMarketsOrderRef yes;
+    NuamOrder NuamOrderRef yes;
+    SpreadOrder SpreadOrderRef no;
 }
 
-/// Implements a trait of this module for an event type, from the fields its table generates.
+/// Implements a trait of this module for an owned event type or a view, from the accessors its table generates;
+/// `OrderEvent` is implemented by [`order_event!`] and generates nothing here.
 macro_rules! impl_event_trait {
-    (MarketEvent, $name:ident) => {
-        impl MarketEvent for $name {
-            fn symbol(&self) -> &str {
-                &self.symbol
-            }
-
-            fn event_time(&self) -> i64 {
-                self.event_time
-            }
-        }
+    (MarketEvent, $kind:ident, $ty:ty) => {
+        impl MarketEvent for $ty {}
     };
-    (LastingEvent, $name:ident) => {
-        impl LastingEvent for $name {}
+    (LastingEvent, $kind:ident, $ty:ty) => {
+        impl LastingEvent for $ty {}
     };
-    (IndexedEvent, $name:ident) => {
-        impl IndexedEvent for $name {
+    (IndexedEvent, $kind:ident, $ty:ty) => {
+        impl IndexedEvent for $ty {
             fn index(&self) -> i64 {
-                self.index
+                get!($kind, self, index)
             }
 
             fn event_flags(&self) -> EventFlags {
-                self.event_flags
+                get!($kind, self, event_flags)
             }
 
             fn source(&self) -> i32 {
-                $name::source(self)
+                <$ty>::source(self)
             }
         }
     };
-    (TimeSeriesEvent, $name:ident) => {
-        impl TimeSeriesEvent for $name {
+    (TimeSeriesEvent, $kind:ident, $ty:ty) => {
+        impl TimeSeriesEvent for $ty {
             fn time(&self) -> i64 {
-                $name::time(self)
+                <$ty>::time(self)
             }
         }
     };
+    (OrderEvent, $kind:ident, $ty:ty) => {};
+}
+
+/// `$yes` if the list of traits holds `$want`, else `$no`.
+macro_rules! if_trait {
+    ($want:ident [] $yes:block $no:block) => { $no };
+    (MarketEvent [MarketEvent $($rest:ident)*] $yes:block $no:block) => { $yes };
+    (LastingEvent [LastingEvent $($rest:ident)*] $yes:block $no:block) => { $yes };
+    (IndexedEvent [IndexedEvent $($rest:ident)*] $yes:block $no:block) => { $yes };
+    (TimeSeriesEvent [TimeSeriesEvent $($rest:ident)*] $yes:block $no:block) => { $yes };
+    (OrderEvent [OrderEvent $($rest:ident)*] $yes:block $no:block) => { $yes };
+    ($want:ident [$head:ident $($rest:ident)*] $yes:block $no:block) => { if_trait!($want [$($rest)*] $yes $no) };
+}
+
+/// Implements [`BaseEvent`], the traits of the list and [`AsDyn`] for an owned event type or a view; invoked in the
+/// parent module.
+macro_rules! event_traits {
+    ($kind:ident $ty:ty, $name:ident, [$($trait_:ident)*]) => {
+        impl traits::sealed::Sealed for $ty {}
+
+        impl BaseEvent for $ty {
+            fn symbol(&self) -> Cow<'_, str> {
+                event_traits!(@symbol $kind self)
+            }
+
+            fn event_time(&self) -> i64 {
+                get!($kind, self, event_time)
+            }
+
+            fn event_type(&self) -> EventType {
+                EventType::$name
+            }
+        }
+
+        $( impl_event_trait!($trait_, $kind, $ty); )*
+
+        impl traits::AsDyn for $ty {
+            fn as_market_event(&self) -> Option<&dyn MarketEvent> {
+                if_trait!(MarketEvent [$($trait_)*] { Some(self) } { None })
+            }
+
+            fn as_lasting_event(&self) -> Option<&dyn LastingEvent> {
+                if_trait!(LastingEvent [$($trait_)*] { Some(self) } { None })
+            }
+
+            fn as_indexed_event(&self) -> Option<&dyn IndexedEvent> {
+                if_trait!(IndexedEvent [$($trait_)*] { Some(self) } { None })
+            }
+
+            fn as_time_series_event(&self) -> Option<&dyn TimeSeriesEvent> {
+                if_trait!(TimeSeriesEvent [$($trait_)*] { Some(self) } { None })
+            }
+
+            fn as_order_event(&self) -> Option<&dyn OrderEvent> {
+                if_trait!(OrderEvent [$($trait_)*] { Some(self) } { None })
+            }
+        }
+    };
+    (@symbol owned $e:ident) => { Cow::Borrowed($e.symbol.as_str()) };
+    (@symbol view $e:ident) => { $e.symbol() };
 }

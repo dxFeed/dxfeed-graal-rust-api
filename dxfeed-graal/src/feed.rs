@@ -128,7 +128,9 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "createTimeSeriesSubscription")]
-    pub fn create_time_series_subscription<E: TimeSeriesEvent>(&self) -> Result<DXFeedTimeSeriesSubscription<E>> {
+    pub fn create_time_series_subscription<E: TimeSeriesEvent + EventKind>(
+        &self,
+    ) -> Result<DXFeedTimeSeriesSubscription<E>> {
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed is live and the out-pointer is valid for writes; a time-series subscription starts with
         // the fields of a subscription.
@@ -166,7 +168,7 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getTimeSeriesPromise")]
-    pub fn get_time_series_promise<E: TimeSeriesEvent>(
+    pub fn get_time_series_promise<E: TimeSeriesEvent + EventKind>(
         &self,
         symbol: impl Into<Symbol>,
         from_time: i64,
@@ -189,7 +191,7 @@ impl DXFeed {
     /// The request needs no subscription. The promise completes with the snapshot of the events that the uplink sends;
     /// it keeps the endpoint open while it lives.
     #[doc(alias = "getIndexedEventsPromise")]
-    pub fn get_indexed_events_promise<E: IndexedEvent>(
+    pub fn get_indexed_events_promise<E: IndexedEvent + EventKind>(
         &self,
         symbol: impl Into<Symbol>,
         source: IndexedEventSource,
@@ -236,7 +238,7 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getLastEventIfSubscribed")]
-    pub fn get_last_event_if_subscribed<E: LastingEvent>(&self, symbol: &str) -> Result<Option<E>> {
+    pub fn get_last_event_if_subscribed<E: LastingEvent + EventKind>(&self, symbol: &str) -> Result<Option<E>> {
         let mut sdk_symbol = SdkSymbol::new::<E>(symbol)?;
         let symbol = sdk_symbol.as_mut_ptr();
         let feed = self.state.feed.as_ptr();
@@ -282,7 +284,7 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getLastEventPromise")]
-    pub fn get_last_event_promise<E: LastingEvent>(&self, symbol: &str) -> Result<Promise<E>> {
+    pub fn get_last_event_promise<E: LastingEvent + EventKind>(&self, symbol: &str) -> Result<Promise<E>> {
         let mut sdk_symbol = SdkSymbol::new::<E>(symbol)?;
         let symbol = sdk_symbol.as_mut_ptr();
         let feed = self.state.feed.as_ptr();
@@ -325,7 +327,7 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getLastEvent")]
-    pub fn get_last_event<E: LastingEvent>(&self, event: &E) -> Result<E> {
+    pub fn get_last_event<E: LastingEvent + EventKind>(&self, event: &E) -> Result<E> {
         let sys_events = SysEvents::new(&[event.clone().into()])?;
         let event = sys_events.pointers()[0];
         let feed = self.state.feed.as_ptr();

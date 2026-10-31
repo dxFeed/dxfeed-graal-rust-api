@@ -84,7 +84,8 @@ pub use theo_price::{TheoPrice, TheoPriceRef};
 pub use time_and_sale::{TimeAndSale, TimeAndSaleRef};
 pub use trade::{Trade, TradeRef};
 pub use trade_eth::{TradeETH, TradeETHRef};
-pub use traits::{IndexedEvent, LastingEvent, MarketEvent, OrderEvent, TimeSeriesEvent};
+use traits::AsDyn;
+pub use traits::{BaseEvent, IndexedEvent, LastingEvent, MarketEvent, OrderEvent, TimeSeriesEvent};
 pub use underlying::{Underlying, UnderlyingRef};
 
 use crate::error::{Error, Result, c_string};
@@ -161,13 +162,111 @@ macro_rules! event_types {
             Other(i32),
         }
 
-        impl EventRef<'_> {
+        /// The accessors of every event, as Java's `EventType`, `IndexedEvent` and `TimeSeriesEvent` have them. Each
+        /// returns `None` for [`EventRef::Other`], whose layout this crate does not know; the indexed and time-series
+        /// values are also `None` for the types without them.
+        impl<'a> EventRef<'a> {
             /// Copies the event, or returns `None` for [`EventRef::Other`].
             pub fn to_owned(&self) -> Option<Event> {
                 match *self {
                     $( EventRef::$name(e) => Some(Event::$name(e.to_owned())), )*
                     EventRef::Other(_) => None,
                 }
+            }
+
+            /// The symbol; replacement characters stand for bytes that are not UTF-8.
+            #[doc(alias = "getEventSymbol")]
+            pub fn symbol(&self) -> Option<Cow<'a, str>> {
+                match *self {
+                    $( EventRef::$name(e) => Some(e.symbol()), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
+            #[doc(alias = "getEventTime")]
+            pub fn event_time(&self) -> Option<i64> {
+                match *self {
+                    $( EventRef::$name(e) => Some(e.event_time()), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The type of the event.
+            pub fn event_type(&self) -> Option<EventType> {
+                match *self {
+                    $( EventRef::$name(_) => Some(EventType::$name), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The index of an [`IndexedEvent`].
+            #[doc(alias = "getIndex")]
+            pub fn index(&self) -> Option<i64> {
+                self.as_indexed_event().map(IndexedEvent::index)
+            }
+
+            /// The flags of an [`IndexedEvent`].
+            #[doc(alias = "getEventFlags")]
+            pub fn event_flags(&self) -> Option<EventFlags> {
+                self.as_indexed_event().map(IndexedEvent::event_flags)
+            }
+
+            /// The source id of an [`IndexedEvent`].
+            #[doc(alias = "getSource")]
+            pub fn source(&self) -> Option<i32> {
+                self.as_indexed_event().map(IndexedEvent::source)
+            }
+
+            /// The time of a [`TimeSeriesEvent`], in milliseconds since the Unix epoch.
+            #[doc(alias = "getTime")]
+            pub fn time(&self) -> Option<i64> {
+                self.as_time_series_event().map(TimeSeriesEvent::time)
+            }
+
+            /// The event as a [`MarketEvent`].
+            pub fn as_market_event(&self) -> Option<&'a dyn MarketEvent> {
+                match *self {
+                    $( EventRef::$name(e) => e.as_market_event(), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The event as a [`LastingEvent`].
+            pub fn as_lasting_event(&self) -> Option<&'a dyn LastingEvent> {
+                match *self {
+                    $( EventRef::$name(e) => e.as_lasting_event(), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The event as an [`IndexedEvent`].
+            pub fn as_indexed_event(&self) -> Option<&'a dyn IndexedEvent> {
+                match *self {
+                    $( EventRef::$name(e) => e.as_indexed_event(), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The event as a [`TimeSeriesEvent`].
+            pub fn as_time_series_event(&self) -> Option<&'a dyn TimeSeriesEvent> {
+                match *self {
+                    $( EventRef::$name(e) => e.as_time_series_event(), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The event as an [`OrderEvent`]: an order of any type.
+            pub fn as_order_event(&self) -> Option<&'a dyn OrderEvent> {
+                match *self {
+                    $( EventRef::$name(e) => e.as_order_event(), )*
+                    EventRef::Other(_) => None,
+                }
+            }
+
+            /// The view of the event if it is of type `E`: `event.downcast::<Quote>()` gives a `&QuoteRef`.
+            pub fn downcast<E: EventKind>(&self) -> Option<E::Item<'a>> {
+                E::from_ref(*self)
             }
         }
 
@@ -186,6 +285,130 @@ macro_rules! event_types {
         #[non_exhaustive]
         pub enum Event {
             $( $(#[$doc])* $name($name), )*
+        }
+
+        /// The accessors of every event, as Java's `EventType`, `IndexedEvent` and `TimeSeriesEvent` have them; the
+        /// indexed and time-series values are `None` for the types without them.
+        impl Event {
+            /// The symbol.
+            #[doc(alias = "getEventSymbol")]
+            pub fn symbol(&self) -> &str {
+                match self {
+                    $( Event::$name(e) => &e.symbol, )*
+                }
+            }
+
+            /// Changes the symbol.
+            #[doc(alias = "setEventSymbol")]
+            pub fn set_symbol(&mut self, symbol: impl Into<String>) {
+                let symbol = symbol.into();
+                match self {
+                    $( Event::$name(e) => e.symbol = symbol, )*
+                }
+            }
+
+            /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
+            #[doc(alias = "getEventTime")]
+            pub fn event_time(&self) -> i64 {
+                match self {
+                    $( Event::$name(e) => e.event_time, )*
+                }
+            }
+
+            /// Changes the time the event was created, in milliseconds since the Unix epoch.
+            #[doc(alias = "setEventTime")]
+            pub fn set_event_time(&mut self, event_time: i64) {
+                match self {
+                    $( Event::$name(e) => e.event_time = event_time, )*
+                }
+            }
+
+            /// The type of the event.
+            pub fn event_type(&self) -> EventType {
+                match self {
+                    $( Event::$name(_) => EventType::$name, )*
+                }
+            }
+
+            /// The index of an [`IndexedEvent`].
+            #[doc(alias = "getIndex")]
+            pub fn index(&self) -> Option<i64> {
+                self.as_indexed_event().map(IndexedEvent::index)
+            }
+
+            /// The flags of an [`IndexedEvent`].
+            #[doc(alias = "getEventFlags")]
+            pub fn event_flags(&self) -> Option<EventFlags> {
+                self.as_indexed_event().map(IndexedEvent::event_flags)
+            }
+
+            /// The source id of an [`IndexedEvent`].
+            #[doc(alias = "getSource")]
+            pub fn source(&self) -> Option<i32> {
+                self.as_indexed_event().map(IndexedEvent::source)
+            }
+
+            /// The time of a [`TimeSeriesEvent`], in milliseconds since the Unix epoch.
+            #[doc(alias = "getTime")]
+            pub fn time(&self) -> Option<i64> {
+                self.as_time_series_event().map(TimeSeriesEvent::time)
+            }
+
+            /// The event as a [`MarketEvent`].
+            pub fn as_market_event(&self) -> Option<&dyn MarketEvent> {
+                match self {
+                    $( Event::$name(e) => e.as_market_event(), )*
+                }
+            }
+
+            /// The event as a [`LastingEvent`].
+            pub fn as_lasting_event(&self) -> Option<&dyn LastingEvent> {
+                match self {
+                    $( Event::$name(e) => e.as_lasting_event(), )*
+                }
+            }
+
+            /// The event as an [`IndexedEvent`].
+            pub fn as_indexed_event(&self) -> Option<&dyn IndexedEvent> {
+                match self {
+                    $( Event::$name(e) => e.as_indexed_event(), )*
+                }
+            }
+
+            /// The event as a [`TimeSeriesEvent`].
+            pub fn as_time_series_event(&self) -> Option<&dyn TimeSeriesEvent> {
+                match self {
+                    $( Event::$name(e) => e.as_time_series_event(), )*
+                }
+            }
+
+            /// The event as an [`OrderEvent`]: an order of any type.
+            pub fn as_order_event(&self) -> Option<&dyn OrderEvent> {
+                match self {
+                    $( Event::$name(e) => e.as_order_event(), )*
+                }
+            }
+
+            /// The event if it is of type `E`: `event.downcast_ref::<Quote>()` gives a `&Quote`.
+            pub fn downcast_ref<E: EventKind>(&self) -> Option<&E> {
+                E::from_event(self)
+            }
+        }
+
+        impl traits::sealed::Sealed for Event {}
+
+        impl BaseEvent for Event {
+            fn symbol(&self) -> Cow<'_, str> {
+                Cow::Borrowed(Event::symbol(self))
+            }
+
+            fn event_time(&self) -> i64 {
+                Event::event_time(self)
+            }
+
+            fn event_type(&self) -> EventType {
+                Event::event_type(self)
+            }
         }
 
         /// The text of Java's `toString` of the event.
@@ -224,6 +447,20 @@ macro_rules! event_types {
                     // its SDK struct, which the view wraps.
                     unsafe { ((*event).clazz == <$name as Table>::CLASS).then(|| &*event.cast::<$view>()) }
                 }
+
+                fn from_ref(event: EventRef<'_>) -> Option<&$view> {
+                    match event {
+                        EventRef::$name(e) => Some(e),
+                        _ => None,
+                    }
+                }
+
+                fn from_event(event: &Event) -> Option<&Self> {
+                    match event {
+                        Event::$name(e) => Some(e),
+                        _ => None,
+                    }
+                }
             }
 
             impl SubscriptionItem for $name {
@@ -234,7 +471,8 @@ macro_rules! event_types {
                 const TYPE: EventType = EventType::$name;
             }
 
-            $( impl_event_trait!($trait_, $name); )*
+            event_traits!(owned $name, $name, [$($trait_)*]);
+            event_traits!(view $view, $name, [$($trait_)*]);
         )*
 
         impl sealed::Sealed for Event {
@@ -249,6 +487,14 @@ macro_rules! event_types {
                         other => EventRef::Other(other),
                     }
                 })
+            }
+
+            fn from_ref(event: EventRef<'_>) -> Option<EventRef<'_>> {
+                Some(event)
+            }
+
+            fn from_event(event: &Event) -> Option<&Self> {
+                Some(event)
             }
         }
 
@@ -305,15 +551,15 @@ event_types! {
     /// [`TimeAndSale`]: a trade or another market event with a price.
     TimeAndSale(TimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`OrderBase`]: the fields that all the orders share.
-    OrderBase(OrderBaseRef) [MarketEvent IndexedEvent],
+    OrderBase(OrderBaseRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`Order`]: an order or a price level of an order book.
-    Order(OrderRef) [MarketEvent IndexedEvent],
+    Order(OrderRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`AnalyticOrder`]: an order with the analytics of its iceberg part.
-    AnalyticOrder(AnalyticOrderRef) [MarketEvent IndexedEvent],
+    AnalyticOrder(AnalyticOrderRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`OtcMarketsOrder`]: an order of OTC Markets.
-    OtcMarketsOrder(OtcMarketsOrderRef) [MarketEvent IndexedEvent],
+    OtcMarketsOrder(OtcMarketsOrderRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`SpreadOrder`]: an order or a price level of an order book for a spread.
-    SpreadOrder(SpreadOrderRef) [MarketEvent IndexedEvent],
+    SpreadOrder(SpreadOrderRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`Series`]: the properties of an option series.
     Series(SeriesRef) [MarketEvent IndexedEvent],
     /// [`OptionSale`]: a trade or another market event with a price for an option.
@@ -325,7 +571,7 @@ event_types! {
     /// [`TextConfiguration`]: a configuration as text with a time and a version.
     TextConfiguration(TextConfigurationRef) [LastingEvent],
     /// [`NuamOrder`]: an order of the Nuam exchange.
-    NuamOrder(NuamOrderRef) [MarketEvent IndexedEvent],
+    NuamOrder(NuamOrderRef) [MarketEvent IndexedEvent OrderEvent],
     /// [`NuamTimeAndSale`]: a time and sale of the Nuam exchange.
     NuamTimeAndSale(NuamTimeAndSaleRef) [MarketEvent IndexedEvent TimeSeriesEvent],
     /// [`NuamTrade`]: the last trade of the Nuam exchange.
@@ -343,17 +589,18 @@ pub trait SubscriptionItem: sealed::Sealed + Send + 'static {
     type Item<'a>;
 }
 
-/// The event types a subscription can be created for by type: the owned event types such as [`Quote`]; see
+/// An owned event type such as [`Quote`]: what only owned events can do (clone, convert to and from [`Event`]) on top
+/// of the [`BaseEvent`] accessors that views share. A subscription is created for it by type, see
 /// [`DXFeed::create_subscription`](crate::DXFeed::create_subscription).
 ///
 /// The trait is sealed: only this crate implements it.
-pub trait EventKind: SubscriptionItem {
+pub trait EventKind: SubscriptionItem + BaseEvent + Clone + Into<Event> + TryFrom<Event, Error = Event> {
     /// The event type.
     const TYPE: EventType;
 }
 
 mod sealed {
-    use super::{SubscriptionItem, sys};
+    use super::{Event, EventRef, SubscriptionItem, sys};
 
     pub trait Sealed {
         /// Whether every SDK event converts to an item, so that [`Events`](super::Events) knows its exact length.
@@ -367,6 +614,14 @@ mod sealed {
         unsafe fn item<'a>(event: *mut sys::dxfg_event_type_t) -> Option<Self::Item<'a>>
         where
             Self: SubscriptionItem;
+
+        /// The item of an event a listener received, or `None` for an event of another type.
+        fn from_ref(event: EventRef<'_>) -> Option<Self::Item<'_>>
+        where
+            Self: SubscriptionItem;
+
+        /// The owned event, or `None` for an event of another type.
+        fn from_event(event: &Event) -> Option<&Self>;
     }
 }
 

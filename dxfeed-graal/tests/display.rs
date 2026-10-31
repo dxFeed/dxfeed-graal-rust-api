@@ -5,8 +5,8 @@ mod support;
 use std::sync::mpsc;
 
 use dxfeed_graal::event::{
-    AnalyticOrder, AuctionType, Candle, Configuration, DailyCandle, Direction, EventFlags, Greeks, IcebergType,
-    ImbalanceSide, IndexedEvent, MarketEvent, MarketMaker, Message, NuamOrder, NuamOrderType, NuamTimeAndSale,
+    AnalyticOrder, AuctionType, BaseEvent, Candle, Configuration, DailyCandle, Direction, EventFlags, Greeks,
+    IcebergType, ImbalanceSide, IndexedEvent, MarketMaker, Message, NuamOrder, NuamOrderType, NuamTimeAndSale,
     NuamTimeInForceType, NuamTrade, OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OtcMarketsOrder,
     OtcMarketsPriceType, PriceType, Profile, Quote, Scope, Series, ShortSaleRestriction, Side, SpreadOrder, Summary,
     TextConfiguration, TextMessage, TheoPrice, TimeAndSale, TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH,
@@ -569,7 +569,7 @@ fn packed_market_values_have_typed_accessors() {
     let mut greeks = Greeks::new("AAPL");
     greeks.set_time(1_700_000_000_000);
     assert_eq!(TimeSeriesEvent::time(&greeks), 1_700_000_000_000);
-    assert_eq!(MarketEvent::symbol(&greeks), "AAPL");
+    assert_eq!(BaseEvent::symbol(&greeks), "AAPL");
 }
 
 /// The strings Java 3.356 prints for `new TimeAndSale("AAPL")` and the other sale and candle events.
@@ -793,7 +793,7 @@ fn sale_values_have_typed_accessors() {
         (IndexedEvent::index(&option_sale), option_sale.time()),
         (17, 1_700_000_000_000)
     );
-    assert_eq!(MarketEvent::symbol(&option_sale), "AAPL");
+    assert_eq!(BaseEvent::symbol(&option_sale), "AAPL");
 
     let mut candle = Candle::new("AAPL{=d}");
     candle.set_time(1_700_000_000_000);
@@ -1059,7 +1059,7 @@ fn order_values_have_typed_accessors() {
         (IndexedEvent::source(&order), IndexedEvent::index(&order)),
         (NTV, order.index)
     );
-    assert_eq!(MarketEvent::symbol(&order), "AAPL");
+    assert_eq!(BaseEvent::symbol(&order), "AAPL");
 
     // A special source moves to bits 48 to 63 and back; the low bits stay.
     order.set_source(3).unwrap();

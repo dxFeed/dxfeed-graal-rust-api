@@ -23,7 +23,7 @@ struct SdkEvent(NonNull<sys::dxfg_event_type_t>);
 
 impl SdkEvent {
     /// Copies the event as `E`; an event of another type is an error.
-    fn to_owned<E: LastingEvent>(&self) -> Result<E> {
+    fn to_owned<E: LastingEvent + EventKind>(&self) -> Result<E> {
         // SAFETY: the event is live while `self` lives, and the view is copied before `self` is dropped.
         let event = unsafe { <Event as Sealed>::item(self.0.as_ptr()) }.and_then(|e| e.to_owned());
         event.and_then(|e| E::try_from(e).ok()).ok_or_else(|| {
@@ -53,7 +53,7 @@ impl Drop for SdkEvent {
 }
 
 /// Calls an SDK function that writes a new event or NULL to its out-pointer, and copies the event as `E`.
-pub(crate) fn take_event<E: LastingEvent>(
+pub(crate) fn take_event<E: LastingEvent + EventKind>(
     f: impl FnOnce(Thread, *mut *mut sys::dxfg_event_type_t) -> i32,
 ) -> Result<Option<E>> {
     let mut raw = ptr::null_mut();
@@ -128,7 +128,7 @@ pub(crate) enum SdkSymbol {
 }
 
 impl SdkSymbol {
-    pub(crate) fn new<E: LastingEvent>(symbol: &str) -> Result<Self> {
+    pub(crate) fn new<E: LastingEvent + EventKind>(symbol: &str) -> Result<Self> {
         let text = c_string(symbol, "the symbol")?;
         if !needs_candle_symbol(E::TYPE) {
             let string = sys::dxfg_string_symbol_t {

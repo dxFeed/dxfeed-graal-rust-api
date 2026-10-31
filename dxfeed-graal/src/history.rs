@@ -30,8 +30,8 @@ use std::sync::Mutex;
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
-use crate::event::TimeSeriesEvent;
 use crate::event::sdk_event::{needs_candle_symbol, take_events};
+use crate::event::{EventKind, TimeSeriesEvent};
 use crate::handle::Handle;
 use crate::isolate::call;
 use crate::symbol::{Symbol, SymbolArena};
@@ -105,7 +105,7 @@ impl HistoryEndpoint {
     ///
     /// A string symbol of [`Candle`](crate::event::Candle)s is sent as a candle symbol, such as `IBM{=h}`.
     #[doc(alias = "getTimeSeries")]
-    pub fn get_time_series<E: TimeSeriesEvent>(
+    pub fn get_time_series<E: TimeSeriesEvent + EventKind>(
         &self,
         symbol: impl Into<Symbol>,
         from_time: i64,

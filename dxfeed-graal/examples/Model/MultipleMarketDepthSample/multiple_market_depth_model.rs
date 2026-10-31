@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
-use dxfeed_graal::event::{IndexedEventSource, OrderEvent};
+use dxfeed_graal::event::{EventKind, IndexedEventSource, OrderEvent};
 use dxfeed_graal::model::MarketDepthModel;
 use dxfeed_graal::{DXFeed, Error, Symbol};
 
@@ -43,12 +43,12 @@ struct Settings {
 }
 
 /// A builder class for creating instances of `MultipleMarketDepthModel`.
-pub struct MultipleMarketDepthModelBuilder<O: OrderEvent> {
+pub struct MultipleMarketDepthModelBuilder<O: OrderEvent + EventKind + Sync> {
     settings: Settings,
     listener: Option<Box<Listener<O>>>,
 }
 
-impl<O: OrderEvent> MultipleMarketDepthModelBuilder<O> {
+impl<O: OrderEvent + EventKind + Sync> MultipleMarketDepthModelBuilder<O> {
     fn new() -> Self {
         MultipleMarketDepthModelBuilder {
             settings: Settings::default(),
@@ -99,12 +99,12 @@ impl<O: OrderEvent> MultipleMarketDepthModelBuilder<O> {
 }
 
 /// The models and the latest books, shared with the listeners of the models.
-struct Shared<O: OrderEvent> {
+struct Shared<O: OrderEvent + EventKind + Sync> {
     state: Mutex<State<O>>,
     listener: Box<Listener<O>>,
 }
 
-struct State<O: OrderEvent> {
+struct State<O: OrderEvent + EventKind + Sync> {
     models: HashMap<Key, MarketDepthModel<O>>,
     books: HashMap<Key, Arc<OrderBook<O>>>,
 }
@@ -113,12 +113,12 @@ struct State<O: OrderEvent> {
 /// It provides methods to add and remove symbols and to retrieve the current order book for a symbol.
 ///
 /// `O` is the type of order.
-pub struct MultipleMarketDepthModel<O: OrderEvent> {
+pub struct MultipleMarketDepthModel<O: OrderEvent + EventKind + Sync> {
     settings: Settings,
     shared: Arc<Shared<O>>,
 }
 
-impl<O: OrderEvent> MultipleMarketDepthModel<O> {
+impl<O: OrderEvent + EventKind + Sync> MultipleMarketDepthModel<O> {
     fn new(builder: MultipleMarketDepthModelBuilder<O>) -> Self {
         MultipleMarketDepthModel {
             settings: builder.settings,
@@ -212,7 +212,7 @@ impl<O: OrderEvent> MultipleMarketDepthModel<O> {
     }
 }
 
-impl<O: OrderEvent> Drop for MultipleMarketDepthModel<O> {
+impl<O: OrderEvent + EventKind + Sync> Drop for MultipleMarketDepthModel<O> {
     fn drop(&mut self) {
         // The models are closed without the lock, as they wait for their listeners, which take the lock.
         let models = std::mem::take(&mut self.shared.state.lock().unwrap().models);
@@ -222,7 +222,7 @@ impl<O: OrderEvent> Drop for MultipleMarketDepthModel<O> {
 }
 
 /// Keeps the new book of the symbol and passes it to the listener, unless the symbol was removed.
-fn on_book<O: OrderEvent>(shared: &Weak<Shared<O>>, symbol: &Symbol, buy: &[O], sell: &[O]) {
+fn on_book<O: OrderEvent + EventKind + Sync>(shared: &Weak<Shared<O>>, symbol: &Symbol, buy: &[O], sell: &[O]) {
     let Some(shared) = shared.upgrade() else {
         return;
     };

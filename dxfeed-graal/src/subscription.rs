@@ -8,7 +8,7 @@ use std::sync::{Mutex, MutexGuard};
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
-use crate::event::{Event, Events, SubscriptionItem, TimeSeriesEvent};
+use crate::event::{Event, EventKind, Events, SubscriptionItem, TimeSeriesEvent};
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
@@ -187,11 +187,11 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
 ///
 /// It is a [`DXFeedSubscription`], whose methods it has through `Deref`, that wraps each symbol it adds in a
 /// [`Symbol::TimeSeriesSubscription`] from the time of [`set_from_time`](Self::set_from_time).
-pub struct DXFeedTimeSeriesSubscription<E: TimeSeriesEvent> {
+pub struct DXFeedTimeSeriesSubscription<E: TimeSeriesEvent + EventKind> {
     subscription: DXFeedSubscription<E>,
 }
 
-impl<E: TimeSeriesEvent> DXFeedTimeSeriesSubscription<E> {
+impl<E: TimeSeriesEvent + EventKind> DXFeedTimeSeriesSubscription<E> {
     pub(crate) fn new(subscription: DXFeedSubscription<E>) -> Self {
         DXFeedTimeSeriesSubscription { subscription }
     }
@@ -210,7 +210,7 @@ impl<E: TimeSeriesEvent> DXFeedTimeSeriesSubscription<E> {
     }
 }
 
-impl<E: TimeSeriesEvent> Deref for DXFeedTimeSeriesSubscription<E> {
+impl<E: TimeSeriesEvent + EventKind> Deref for DXFeedTimeSeriesSubscription<E> {
     type Target = DXFeedSubscription<E>;
 
     fn deref(&self) -> &DXFeedSubscription<E> {
