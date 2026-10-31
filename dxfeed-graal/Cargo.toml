@@ -106,3 +106,7 @@ path = "examples/model/multiple_market_depth.rs"
 [[example]]
 name = "price_level_book"
 path = "examples/model/price_level_book.rs"
+
+[[example]]
+name = "on_demand"
+path = "examples/ondemand/on_demand.rs"

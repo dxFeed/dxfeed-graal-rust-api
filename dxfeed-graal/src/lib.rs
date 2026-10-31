@@ -117,6 +117,7 @@ mod isolate;
 mod listener;
 pub mod model;
 mod observable;
+pub mod ondemand;
 mod promise;
 mod publisher;
 pub mod schedule;

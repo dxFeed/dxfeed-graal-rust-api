@@ -34,6 +34,7 @@ macro_rules! sdk_handle {
 
 sdk_handle!(
     sys::dxfg_v4_endpoint_t,
+    sys::dxfg_v4_on_demand_service_t,
     sys::dxfg_v4_endpoint_builder_t,
     sys::dxfg_v4_feed_t,
     sys::dxfg_v4_publisher_t,

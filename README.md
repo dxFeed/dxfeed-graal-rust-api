@@ -338,7 +338,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 ### OnDemand
 
-- [ ] on_demand
+- [x] [on_demand](dxfeed-graal/examples/ondemand/on_demand.rs)
   demonstrates how to use the dxFeed on-demand history data replay service API
 
 ### ORCS
@@ -408,7 +408,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Trading schedules: days, sessions, holidays, venues and the schedule defaults
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`, `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
-- [ ] Price level models, the history endpoint, on-demand
+- [x] On-demand historical data replay: `OnDemandService`
+- [ ] The price level service, the history endpoint
 
 ## Development
 

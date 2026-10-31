@@ -286,6 +286,11 @@ impl std::fmt::Debug for DXEndpoint {
 }
 
 impl DXEndpoint {
+    /// The SDK endpoint, live while `self` is.
+    pub(crate) fn as_ptr(&self) -> *mut sys::dxfg_v4_endpoint_t {
+        self.state.endpoint.as_ptr()
+    }
+
     /// Takes ownership of an endpoint and gets its role, feed and publisher, which every endpoint has.
     ///
     /// If that fails, the endpoint is closed when `close_on_failure`: an endpoint created for this call has no other
