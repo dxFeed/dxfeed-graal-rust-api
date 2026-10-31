@@ -421,7 +421,7 @@ macro_rules! trade_base_fields {
             /// Changes the direction of the price movement from the previous trade.
             #[doc(alias = "setTickDirection")]
             pub fn set_tick_direction(&mut self, direction: $crate::event::Direction) {
-                self.flags = $crate::event::flags::TRADE_DIRECTION.set32(self.flags, direction.code());
+                self.flags = $crate::event::flags::TRADE_DIRECTION.set32(self.flags, direction.get_code());
             }
 
             /// Changes whether the trade happened in extended trading hours.
@@ -600,7 +600,7 @@ macro_rules! sale_fields {
             /// Changes the side of the aggressor of the trade.
             #[doc(alias = "setAggressorSide")]
             pub fn set_aggressor_side(&mut self, side: $crate::event::Side) {
-                self.flags = $crate::event::flags::SALE_SIDE.set32(self.flags, side.code());
+                self.flags = $crate::event::flags::SALE_SIDE.set32(self.flags, side.get_code());
             }
 
             /// Changes whether the event is a leg of a spread trade.
@@ -624,7 +624,7 @@ macro_rules! sale_fields {
             /// Changes the type of the event: new, correction or cancellation.
             #[doc(alias = "setType")]
             pub fn set_time_and_sale_type(&mut self, sale_type: $crate::event::TimeAndSaleType) {
-                self.flags = $crate::event::flags::SALE_TYPE.set32(self.flags, sale_type.code());
+                self.flags = $crate::event::flags::SALE_TYPE.set32(self.flags, sale_type.get_code());
             }
         }
 
@@ -701,20 +701,20 @@ macro_rules! sale_fields {
                     /// Whether the event is new: neither a correction nor a cancellation.
                     #[doc(alias = "isNew")]
                     fn is_new(flags) -> bool {
-                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::New.code()
+                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::New.get_code()
                     }
 
                     /// Whether the event corrects an earlier event.
                     #[doc(alias = "isCorrection")]
                     fn is_correction(flags) -> bool {
                         $crate::event::flags::SALE_TYPE.get32(flags)
-                            == $crate::event::TimeAndSaleType::Correction.code()
+                            == $crate::event::TimeAndSaleType::Correction.get_code()
                     }
 
                     /// Whether the event cancels an earlier event.
                     #[doc(alias = "isCancel")]
                     fn is_cancel(flags) -> bool {
-                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::Cancel.code()
+                        $crate::event::flags::SALE_TYPE.get32(flags) == $crate::event::TimeAndSaleType::Cancel.get_code()
                     }
 
                     $($derived)*
@@ -931,7 +931,7 @@ macro_rules! order_base_fields {
             /// Changes the action of the order.
             #[doc(alias = "setAction")]
             pub fn set_action(&mut self, action: $crate::event::OrderAction) {
-                self.flags = $crate::event::flags::ORDER_ACTION.set32(self.flags, action.code());
+                self.flags = $crate::event::flags::ORDER_ACTION.set32(self.flags, action.get_code());
             }
 
             /// Changes the exchange code of the order.
@@ -954,13 +954,13 @@ macro_rules! order_base_fields {
             /// Changes the side of the order.
             #[doc(alias = "setOrderSide")]
             pub fn set_order_side(&mut self, side: $crate::event::Side) {
-                self.flags = $crate::event::flags::ORDER_SIDE.set32(self.flags, side.code());
+                self.flags = $crate::event::flags::ORDER_SIDE.set32(self.flags, side.get_code());
             }
 
             /// Changes the scope of the order.
             #[doc(alias = "setScope")]
             pub fn set_scope(&mut self, scope: $crate::event::Scope) {
-                self.flags = $crate::event::flags::ORDER_SCOPE.set32(self.flags, scope.code());
+                self.flags = $crate::event::flags::ORDER_SCOPE.set32(self.flags, scope.get_code());
             }
         }
 

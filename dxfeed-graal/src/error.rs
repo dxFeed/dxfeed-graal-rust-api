@@ -82,22 +82,22 @@ impl JavaException {
     }
 
     /// The fully qualified Java class name, e.g. `java.lang.IllegalArgumentException`; empty if unknown.
-    pub fn class_name(&self) -> &str {
+    pub fn get_class_name(&self) -> &str {
         &self.class_name
     }
 
     /// The exception message; empty if it has none.
-    pub fn message(&self) -> &str {
+    pub fn get_message(&self) -> &str {
         &self.message
     }
 
     /// The Java stack trace as `printStackTrace` prints it, causes included; empty if unknown.
-    pub fn stack_trace(&self) -> &str {
+    pub fn get_stack_trace(&self) -> &str {
         &self.stack_trace
     }
 
     /// The cause of the exception, if any.
-    pub fn cause(&self) -> Option<&JavaException> {
+    pub fn get_cause(&self) -> Option<&JavaException> {
         self.cause.as_deref()
     }
 }

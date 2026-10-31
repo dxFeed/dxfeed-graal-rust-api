@@ -50,14 +50,14 @@ impl DXPublisher {
     /// use dxfeed_graal::{DXEndpoint, Role, Symbol};
     ///
     /// let endpoint = DXEndpoint::create_with_role(Role::Publisher)?;
-    /// let subscription = endpoint.publisher().subscription::<Profile>()?;
+    /// let subscription = endpoint.get_publisher().get_subscription::<Profile>()?;
     /// subscription.add_change_listener(|symbols: &[Symbol]| println!("subscribed to {symbols:?}"))?;
     /// endpoint.connect(":7700")?;
     /// # Ok(())
     /// # }
     /// ```
     #[doc(alias = "getSubscription")]
-    pub fn subscription<E: EventKind>(&self) -> Result<ObservableSubscription> {
+    pub fn get_subscription<E: EventKind>(&self) -> Result<ObservableSubscription> {
         let p = self.state.publisher.as_ptr();
         // SAFETY: the publisher is live and the out-pointer is valid for writes.
         let handle =

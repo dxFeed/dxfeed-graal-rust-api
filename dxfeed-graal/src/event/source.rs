@@ -272,12 +272,12 @@ impl IndexedEventSource {
     }
 
     /// The id.
-    pub fn id(self) -> i32 {
+    pub fn get_id(self) -> i32 {
         self.id
     }
 
     /// The name, such as `DEFAULT`, `COMPOSITE_BID` or `NTV`.
-    pub fn name(self) -> String {
+    pub fn get_name(self) -> String {
         // Every constructor checks that the id has a name.
         source_name(self.id).unwrap_or_else(|| self.id.to_string())
     }
@@ -302,13 +302,13 @@ impl Default for IndexedEventSource {
 
 impl Display for IndexedEventSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.name())
+        f.write_str(&self.get_name())
     }
 }
 
 impl Debug for IndexedEventSource {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        write!(f, "IndexedEventSource({})", self.name())
+        write!(f, "IndexedEventSource({})", self.get_name())
     }
 }
 
@@ -327,15 +327,15 @@ mod tests {
 
     #[test]
     fn names_and_ids() {
-        assert_eq!(IndexedEventSource::NTV.id(), 0x4e5456);
+        assert_eq!(IndexedEventSource::NTV.get_id(), 0x4e5456);
         assert_eq!(IndexedEventSource::value_of("ntv").unwrap(), IndexedEventSource::ntv);
-        assert_eq!(IndexedEventSource::value_of("AGGREGATE").unwrap().id(), 9);
+        assert_eq!(IndexedEventSource::value_of("AGGREGATE").unwrap().get_id(), 9);
         assert_eq!(
             IndexedEventSource::value_of("DEFAULT").unwrap(),
             IndexedEventSource::DEFAULT
         );
-        assert_eq!(IndexedEventSource::from_id(0x4e5456).unwrap().name(), "NTV");
-        assert_eq!(IndexedEventSource::BI20.name(), "BI20");
+        assert_eq!(IndexedEventSource::from_id(0x4e5456).unwrap().get_name(), "NTV");
+        assert_eq!(IndexedEventSource::BI20.get_name(), "BI20");
         assert_eq!(
             format!("{:?}", IndexedEventSource::COMPOSITE_BID),
             "IndexedEventSource(COMPOSITE_BID)"

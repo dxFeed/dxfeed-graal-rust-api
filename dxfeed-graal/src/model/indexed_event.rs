@@ -21,7 +21,7 @@ use crate::symbol::{Symbol, SymbolArena};
 /// snapshots (`IndexedEventTxModel`). Build it with [`IndexedEventTxModel::new_builder`]; it needs a symbol.
 ///
 /// Unlike [`IndexedTxModel`](super::IndexedTxModel), it takes one source, and its feed and event delivery are changed
-/// through its [`subscription_controller`](Self::subscription_controller).
+/// through its [`get_subscription_controller`](Self::get_subscription_controller).
 ///
 /// Dropping it closes it and releases its listener, whose closure is not called afterwards; dropping it from another
 /// thread therefore waits for a running call of the listener, so do not hold a lock its closure takes while dropping
@@ -72,7 +72,7 @@ impl<E: IndexedEvent> IndexedEventTxModel<E> {
 
     /// The symbol of the events (`getSymbol`).
     #[doc(alias = "getSymbol")]
-    pub fn symbol(&self) -> Result<String> {
+    pub fn get_symbol(&self) -> Result<String> {
         let mut symbol: *const std::os::raw::c_char = std::ptr::null();
         let m = self.handle.as_ptr();
         // SAFETY: the model is live and the out-pointer is valid for writes.
@@ -83,7 +83,7 @@ impl<E: IndexedEvent> IndexedEventTxModel<E> {
 
     /// The source of the events (`getSource`).
     #[doc(alias = "getSource")]
-    pub fn source(&self) -> Result<IndexedEventSource> {
+    pub fn get_source(&self) -> Result<IndexedEventSource> {
         let mut source: *mut sys::dxfg_v4_indexed_event_source_t = std::ptr::null_mut();
         let m = self.handle.as_ptr();
         // SAFETY: the model is live and the out-pointer is valid for writes.
@@ -102,7 +102,7 @@ impl<E: IndexedEvent> IndexedEventTxModel<E> {
     /// The controller of the subscription of the model: it attaches the model to feeds and detaches it, and changes
     /// how the events are delivered (`getSubscriptionController`).
     #[doc(alias = "getSubscriptionController")]
-    pub fn subscription_controller(&self) -> Result<SubscriptionController<'_>> {
+    pub fn get_subscription_controller(&self) -> Result<SubscriptionController<'_>> {
         let m = self.handle.as_ptr();
         // SAFETY: the model is live and the out-pointer is valid for writes.
         let handle =
@@ -358,7 +358,7 @@ impl SubscriptionController<'_> {
 
     /// The most events of one call of the listener (`getEventsBatchLimit`).
     #[doc(alias = "getEventsBatchLimit")]
-    pub fn events_batch_limit(&self) -> Result<i32> {
+    pub fn get_events_batch_limit(&self) -> Result<i32> {
         let mut limit = 0;
         let c = self.handle.as_ptr();
         // SAFETY: the controller is live and the out-pointer is valid for writes.
@@ -377,7 +377,7 @@ impl SubscriptionController<'_> {
     /// How long the model gathers the events before it calls the listener; zero if it calls it at once
     /// (`getAggregationPeriod`).
     #[doc(alias = "getAggregationPeriod")]
-    pub fn aggregation_period(&self) -> Result<Duration> {
+    pub fn get_aggregation_period(&self) -> Result<Duration> {
         let c = self.handle.as_ptr();
         // SAFETY: the controller is live and the out-pointer is valid for writes; Java has no period by default.
         let period = Handle::create_optional(|t, out| unsafe {

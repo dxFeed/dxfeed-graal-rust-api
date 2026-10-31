@@ -43,8 +43,10 @@ fn run(input: &str, output: &str) -> dxfeed_graal::Result<()> {
 
     // The listener of all the event types copies the events to the output; here they could be changed, removed or
     // added, for example the event times moved by an hour.
-    let subscription = input_endpoint.feed().create_subscription_with_types(EventType::ALL)?;
-    let publisher = output_endpoint.publisher();
+    let subscription = input_endpoint
+        .get_feed()
+        .create_subscription_with_types(EventType::ALL)?;
+    let publisher = output_endpoint.get_publisher();
     subscription.add_event_listener(move |events| {
         let events: Vec<Event> = events.filter_map(|event| event.to_owned()).collect();
         if let Err(error) = publisher.publish_events(&events) {

@@ -60,7 +60,7 @@ impl InstrumentProfileCollector {
 
     /// The time of the last update, in milliseconds since the Unix epoch (`getLastUpdateTime`).
     #[doc(alias = "getLastUpdateTime")]
-    pub fn last_update_time(&self) -> Result<i64> {
+    pub fn get_last_update_time(&self) -> Result<i64> {
         let mut time = 0;
         let c = self.as_ptr();
         // SAFETY: the collector is live and the out-pointer is valid for writes.

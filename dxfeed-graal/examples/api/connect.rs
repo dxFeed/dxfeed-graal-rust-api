@@ -49,7 +49,7 @@ fn run(address: &str, types: &str, symbols: &str, time: Option<&str>) -> dxfeed_
     let endpoint = DXEndpoint::new_builder()
         .with_property("dxfeed.wildcard.enable", "true")
         .build()?;
-    let subscription = endpoint.feed().create_subscription_with_types(&types)?;
+    let subscription = endpoint.get_feed().create_subscription_with_types(&types)?;
     // Listeners go before symbols, so the first events are not missed.
     subscription.add_event_listener(|events| {
         for event in events {

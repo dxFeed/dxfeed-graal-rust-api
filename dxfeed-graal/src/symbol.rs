@@ -28,7 +28,7 @@ use crate::isolate;
 /// use dxfeed_graal::event::{Candle, CandlePeriod, CandleSymbol};
 /// use dxfeed_graal::{DXEndpoint, Symbol, TimeFormat};
 ///
-/// let subscription = DXEndpoint::create()?.feed().create_subscription::<Candle>()?;
+/// let subscription = DXEndpoint::create()?.get_feed().create_subscription::<Candle>()?;
 /// let symbol = CandleSymbol::value_of_with("AAPL", [CandlePeriod::DAY])?;
 /// subscription.add_symbols([Symbol::time_series(symbol, TimeFormat::DEFAULT.parse("20260101")?)])?;
 /// # Ok(())
@@ -303,14 +303,14 @@ impl SymbolArena {
 
     /// The SDK struct of `source`.
     pub(crate) fn source(&mut self, source: IndexedEventSource) -> *mut sys::dxfg_indexed_event_source_t {
-        let name = source.name();
+        let name = source.get_name();
         let source = sys::dxfg_indexed_event_source_t {
             type_: if source == IndexedEventSource::DEFAULT {
                 sys::INDEXED_EVENT_SOURCE
             } else {
                 sys::ORDER_SOURCE
             },
-            id: source.id(),
+            id: source.get_id(),
             // A source name has no NUL bytes.
             name: self.string(&name, "the source name").unwrap_or(c"".as_ptr()),
         };

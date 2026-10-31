@@ -38,7 +38,7 @@ fn run(address: Option<String>) -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::new_builder()
         .with_property("dxfeed.qd.subscribe.ticker", &format!("{records} {symbols}"))
         .build()?;
-    let feed = endpoint.feed();
+    let feed = endpoint.get_feed();
 
     println!("Type symbols to get their quote, trade, summary, and profile event snapshots");
     // The end of input stops the program too.
@@ -86,7 +86,7 @@ fn wait<E: LastingEvent>(promise: &Promise<E>, deadline: Instant) -> bool {
 
 /// The event of the promise, or `null` as Java prints a missing one.
 fn result<E: LastingEvent + Display>(promise: &Promise<E>) -> String {
-    match promise.result() {
+    match promise.get_result() {
         Ok(Some(event)) => event.to_string(),
         _ => "null".into(),
     }

@@ -47,7 +47,7 @@ impl DXFeed {
     pub fn get_instance() -> Result<&'static DXFeed> {
         static INSTANCE: OnceLock<DXFeed> = OnceLock::new();
         static INIT: Mutex<()> = Mutex::new(());
-        crate::get_or_try_init(&INSTANCE, &INIT, || Ok(DXEndpoint::get_instance()?.feed()))
+        crate::get_or_try_init(&INSTANCE, &INIT, || Ok(DXEndpoint::get_instance()?.get_feed()))
     }
 
     /// Creates a subscription to events of type `E`, such as [`Quote`](crate::event::Quote), attached to this feed;
@@ -58,7 +58,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Quote;
     ///
-    /// let subscription = DXEndpoint::create()?.feed().create_subscription::<Quote>()?;
+    /// let subscription = DXEndpoint::create()?.get_feed().create_subscription::<Quote>()?;
     /// subscription.add_event_listener(|quotes| quotes.for_each(|quote| println!("{}", quote.symbol())))?;
     /// # Ok(())
     /// # }
@@ -72,7 +72,7 @@ impl DXFeed {
     /// # fn main() -> dxfeed_graal::Result<()> {
     /// use dxfeed_graal::{DXEndpoint, Event};
     ///
-    /// let subscription = DXEndpoint::create()?.feed().create_subscription::<Event>()?;
+    /// let subscription = DXEndpoint::create()?.get_feed().create_subscription::<Event>()?;
     /// # Ok(())
     /// # }
     /// ```
@@ -121,7 +121,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Candle;
     ///
-    /// let subscription = DXEndpoint::create()?.feed().create_time_series_subscription::<Candle>()?;
+    /// let subscription = DXEndpoint::create()?.get_feed().create_time_series_subscription::<Candle>()?;
     /// subscription.set_from_time(0)?;
     /// subscription.add_symbols(["AAPL{=d}"])?;
     /// # Ok(())
@@ -159,7 +159,7 @@ impl DXFeed {
     /// endpoint.connect("demo.dxfeed.com:7300")?;
     /// let to = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
     /// let candles = endpoint
-    ///     .feed()
+    ///     .get_feed()
     ///     .get_time_series_promise::<Candle>("AAPL{=d}", to - 20 * 86_400_000, to)?
     ///     .wait(Duration::from_secs(5))?;
     /// # Ok(())
@@ -221,7 +221,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Quote;
     ///
-    /// let quote = DXEndpoint::create()?.feed().get_last_event_if_subscribed::<Quote>("AAPL")?;
+    /// let quote = DXEndpoint::create()?.get_feed().get_last_event_if_subscribed::<Quote>("AAPL")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -231,7 +231,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::TimeAndSale;
     ///
-    /// let sale = DXEndpoint::create()?.feed().get_last_event_if_subscribed::<TimeAndSale>("AAPL")?;
+    /// let sale = DXEndpoint::create()?.get_feed().get_last_event_if_subscribed::<TimeAndSale>("AAPL")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -264,7 +264,7 @@ impl DXFeed {
     ///
     /// let endpoint = DXEndpoint::create()?;
     /// endpoint.connect("demo.dxfeed.com:7300")?;
-    /// let quote = endpoint.feed().get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(5))?;
+    /// let quote = endpoint.get_feed().get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(5))?;
     /// println!("{quote}");
     /// # Ok(())
     /// # }
@@ -277,7 +277,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Order;
     ///
-    /// let promise = DXEndpoint::create()?.feed().get_last_event_promise::<Order>("AAPL")?;
+    /// let promise = DXEndpoint::create()?.get_feed().get_last_event_promise::<Order>("AAPL")?;
     /// # Ok(())
     /// # }
     /// ```
@@ -308,7 +308,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Quote;
     ///
-    /// let quote = DXEndpoint::create()?.feed().get_last_event(&Quote::new("AAPL"))?;
+    /// let quote = DXEndpoint::create()?.get_feed().get_last_event(&Quote::new("AAPL"))?;
     /// # Ok(())
     /// # }
     /// ```
@@ -320,7 +320,7 @@ impl DXFeed {
     /// use dxfeed_graal::DXEndpoint;
     /// use dxfeed_graal::event::Order;
     ///
-    /// let order = DXEndpoint::create()?.feed().get_last_event(&Order::new("AAPL"))?;
+    /// let order = DXEndpoint::create()?.get_feed().get_last_event(&Order::new("AAPL"))?;
     /// # Ok(())
     /// # }
     /// ```

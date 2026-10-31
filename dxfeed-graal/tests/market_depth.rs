@@ -28,7 +28,7 @@ fn order_of(source: IndexedEventSource, index: i64, side: Side, price: f64, size
         event_flags: flags,
         ..Order::new("DEPTH")
     };
-    order.set_source(source.id()).unwrap();
+    order.set_source(source.get_id()).unwrap();
     order.set_order_side(side);
     order.set_scope(Scope::Aggregate);
     order
@@ -110,7 +110,7 @@ fn sides_are_sorted_from_the_best_price() {
 fn the_depth_limit_cuts_the_sides() {
     let hub = Hub::new();
     let (model, calls) = model(&hub, 2, Duration::ZERO);
-    assert_eq!(model.depth_limit(), 2);
+    assert_eq!(model.get_depth_limit(), 2);
     publish(&hub, book());
     let snapshot: Vec<Sides> = calls.try_iter().collect();
     assert_eq!(snapshot, [(vec![101.0, 100.0], vec![102.0, 103.0])]);
@@ -120,7 +120,7 @@ fn the_depth_limit_cuts_the_sides() {
     assert!(calls.try_recv().is_err(), "an order beyond the limit changed");
 
     model.set_depth_limit(3);
-    assert_eq!(model.depth_limit(), 3);
+    assert_eq!(model.get_depth_limit(), 3);
     let wider: Vec<Sides> = calls.try_iter().collect();
     assert_eq!(wider, [(vec![101.0, 100.0, 99.0], vec![102.0, 103.0, 104.0])]);
     model.set_depth_limit(3);
@@ -142,7 +142,7 @@ fn updates_wait_for_the_aggregation_period() {
 
     // A waiting call moves to a new period; zero makes it at once.
     model.set_aggregation_period(Duration::from_secs(3600));
-    assert_eq!(model.aggregation_period(), Duration::from_secs(3600));
+    assert_eq!(model.get_aggregation_period(), Duration::from_secs(3600));
     publish(&hub, vec![order(8, Side::Sell, 101.75, 1.0, EventFlags::empty())]);
     assert!(calls.recv_timeout(Duration::from_millis(200)).is_err());
     model.set_aggregation_period(Duration::ZERO);
@@ -212,7 +212,7 @@ fn the_listener_can_change_the_model() {
             let _ = sender.send(buy.len());
             if let Some(model) = inner.upgrade().as_ref().and_then(|shared| shared.get()) {
                 // The model calls the listener again after this call; closing it here does not wait for this call.
-                if model.depth_limit() == 0 {
+                if model.get_depth_limit() == 0 {
                     model.set_depth_limit(1);
                 } else {
                     model.close().unwrap();

@@ -254,7 +254,7 @@ macro_rules! flag_enum {
         impl $name {
             /// The code of the value, as Java's `getCode` gives it.
             #[doc(alias = "getCode")]
-            pub const fn code(self) -> i32 {
+            pub const fn get_code(self) -> i32 {
                 match self {
                     $name::$first => 0,
                     $( $name::$variant => $code, )*
@@ -610,7 +610,7 @@ mod tests {
             ]
         );
         for code in 0..6 {
-            assert_eq!(Direction::from_code(code).code(), code);
+            assert_eq!(Direction::from_code(code).get_code(), code);
         }
         assert_eq!(Direction::from_code(-1), Direction::Undefined);
         assert_eq!(Direction::default(), Direction::Undefined);
@@ -632,8 +632,8 @@ mod tests {
             "REGULAR INDICATIVE PRELIMINARY FINAL REGULAR"
         );
         for code in 0..3 {
-            assert_eq!(TradingStatus::from_code(code).code(), code);
-            assert_eq!(ShortSaleRestriction::from_code(code).code(), code);
+            assert_eq!(TradingStatus::from_code(code).get_code(), code);
+            assert_eq!(ShortSaleRestriction::from_code(code).get_code(), code);
         }
         assert_eq!(
             names(4, |c| Side::from_code(c).to_string()),
@@ -644,11 +644,11 @@ mod tests {
             "NEW CORRECTION CANCEL NEW"
         );
         for code in 0..3 {
-            assert_eq!(Side::from_code(code).code(), code);
-            assert_eq!(TimeAndSaleType::from_code(code).code(), code);
+            assert_eq!(Side::from_code(code).get_code(), code);
+            assert_eq!(TimeAndSaleType::from_code(code).get_code(), code);
         }
         for code in 0..4 {
-            assert_eq!(PriceType::from_code(code).code(), code);
+            assert_eq!(PriceType::from_code(code).get_code(), code);
         }
         assert_eq!(
             names(10, |c| OrderAction::from_code(c).to_string()),
@@ -683,15 +683,15 @@ mod tests {
             "UNDEFINED OPENING CLOSING REOPENING OTHER UNDEFINED"
         );
         for code in 0..9 {
-            assert_eq!(OrderAction::from_code(code).code(), code);
+            assert_eq!(OrderAction::from_code(code).get_code(), code);
         }
         for code in 0..6 {
-            assert_eq!(NuamTimeInForceType::from_code(code).code(), code);
-            assert_eq!(ImbalanceSide::from_code(code).code(), code);
+            assert_eq!(NuamTimeInForceType::from_code(code).get_code(), code);
+            assert_eq!(ImbalanceSide::from_code(code).get_code(), code);
         }
-        assert_eq!(Scope::from_code(3).code(), 3);
-        assert_eq!(AuctionType::from_code(4).code(), 4);
-        assert_eq!(NuamOrderType::from_code(5).code(), 5);
+        assert_eq!(Scope::from_code(3).get_code(), 3);
+        assert_eq!(AuctionType::from_code(4).get_code(), 4);
+        assert_eq!(NuamOrderType::from_code(5).get_code(), 5);
         assert_eq!(Scope::default(), Scope::Composite);
         assert_eq!(PriceType::default(), PriceType::Regular);
     }

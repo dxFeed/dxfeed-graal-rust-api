@@ -66,14 +66,14 @@ fn split_price_levels(events: Vec<Event>) -> (Vec<Event>, Vec<Order>) {
 #[test]
 fn local_hub_builds() {
     let hub = Hub::new();
-    assert_eq!(hub.endpoint.role(), Role::LocalHub);
+    assert_eq!(hub.endpoint.get_role(), Role::LocalHub);
     hub.executor.process_all_pending().unwrap();
 }
 
 #[test]
 fn create_with_role() {
     assert_eq!(
-        DXEndpoint::create_with_role(Role::Publisher).unwrap().role(),
+        DXEndpoint::create_with_role(Role::Publisher).unwrap().get_role(),
         Role::Publisher
     );
 }
@@ -89,7 +89,7 @@ fn close_then_drop() {
 fn endpoint_moves_to_another_thread() {
     let endpoint = Hub::new().endpoint;
     std::thread::spawn(move || {
-        assert_eq!(endpoint.role(), Role::LocalHub);
+        assert_eq!(endpoint.get_role(), Role::LocalHub);
         drop(endpoint);
     })
     .join()
@@ -99,7 +99,7 @@ fn endpoint_moves_to_another_thread() {
 #[test]
 fn create_makes_a_feed_endpoint() {
     let endpoint = DXEndpoint::create().unwrap();
-    assert_eq!(endpoint.role(), Role::Feed);
+    assert_eq!(endpoint.get_role(), Role::Feed);
 }
 
 #[test]
@@ -118,8 +118,8 @@ fn feed_and_publisher_keep_the_endpoint_open() {
         .with_executor(&executor)
         .build()
         .unwrap();
-    let publisher = endpoint.publisher();
-    let feed = endpoint.feed();
+    let publisher = endpoint.get_publisher();
+    let feed = endpoint.get_feed();
     drop(endpoint);
     let subscription = feed.create_subscription::<Quote>().unwrap();
     drop(feed);
@@ -136,7 +136,7 @@ fn java_style_chain_compiles_and_works() {
         .with_role(Role::LocalHub)
         .build()
         .unwrap()
-        .feed()
+        .get_feed()
         .create_subscription::<Quote>()
         .unwrap();
     subscription.add_event_listener(|_| {}).unwrap();

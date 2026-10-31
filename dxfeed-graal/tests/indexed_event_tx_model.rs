@@ -23,7 +23,7 @@ fn order(index: i64, flags: EventFlags) -> Order {
         event_flags: flags,
         ..Order::new("EVENT")
     };
-    order.set_source(OrderSource::NTV.id()).unwrap();
+    order.set_source(OrderSource::NTV.get_id()).unwrap();
     order.set_order_side(Side::Buy);
     order
 }
@@ -59,8 +59,8 @@ fn snapshots_and_transactions_come_whole() {
     let hub = Hub::new();
     let (model, calls) = model(Some(&hub));
     hub.executor.process_all_pending().unwrap();
-    assert_eq!(model.symbol().unwrap(), "EVENT");
-    assert_eq!(model.source().unwrap(), OrderSource::NTV);
+    assert_eq!(model.get_symbol().unwrap(), "EVENT");
+    assert_eq!(model.get_source().unwrap(), OrderSource::NTV);
     assert!(!model.is_closed().unwrap());
 
     publish(&hub, snapshot());
@@ -103,7 +103,7 @@ fn a_dropped_model_gets_nothing() {
 fn the_subscription_controller_attaches_and_detaches_the_model() {
     let hub = Hub::new();
     let (model, calls) = model(None);
-    let controller = model.subscription_controller().unwrap();
+    let controller = model.get_subscription_controller().unwrap();
     publish(&hub, snapshot());
     assert!(calls.try_recv().is_err(), "a model without a feed gets nothing");
 
@@ -125,11 +125,11 @@ fn the_subscription_controller_attaches_and_detaches_the_model() {
 #[test]
 fn the_subscription_controller_changes_the_delivery() {
     let (model, _calls) = model(None);
-    let controller = model.subscription_controller().unwrap();
+    let controller = model.get_subscription_controller().unwrap();
     controller.set_events_batch_limit(7).unwrap();
-    assert_eq!(controller.events_batch_limit().unwrap(), 7);
+    assert_eq!(controller.get_events_batch_limit().unwrap(), 7);
     controller.set_aggregation_period(Duration::from_millis(250)).unwrap();
-    assert_eq!(controller.aggregation_period().unwrap(), Duration::from_millis(250));
+    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::from_millis(250));
 }
 
 #[test]
@@ -141,16 +141,16 @@ fn the_builder_sets_the_delivery() {
         .with_listener(|_, _| {})
         .build()
         .unwrap();
-    assert_eq!(model.source().unwrap(), OrderSource::DEFAULT);
-    let controller = model.subscription_controller().unwrap();
-    assert_eq!(controller.events_batch_limit().unwrap(), 3);
-    assert_eq!(controller.aggregation_period().unwrap(), Duration::from_millis(100));
+    assert_eq!(model.get_source().unwrap(), OrderSource::DEFAULT);
+    let controller = model.get_subscription_controller().unwrap();
+    assert_eq!(controller.get_events_batch_limit().unwrap(), 3);
+    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::from_millis(100));
 }
 
 #[test]
 fn an_indexed_symbol_sets_the_source() {
     let build = |builder: dxfeed_graal::model::IndexedEventTxModelBuilder<Order>| {
-        builder.with_listener(|_, _| {}).build().unwrap().source().unwrap()
+        builder.with_listener(|_, _| {}).build().unwrap().get_source().unwrap()
     };
     let indexed = Symbol::indexed("EVENT", OrderSource::NTV);
     assert_eq!(
@@ -174,8 +174,8 @@ fn an_indexed_symbol_sets_the_source() {
 #[test]
 fn the_aggregation_period_is_zero_by_default() {
     let (model, _calls) = model(None);
-    let controller = model.subscription_controller().unwrap();
-    assert_eq!(controller.aggregation_period().unwrap(), Duration::ZERO);
+    let controller = model.get_subscription_controller().unwrap();
+    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::ZERO);
 }
 
 #[test]

@@ -80,7 +80,7 @@ impl OtcMarketsOrder {
     /// Changes the price type of the quote.
     #[doc(alias = "setOtcMarketsPriceType")]
     pub fn set_otc_markets_price_type(&mut self, price_type: OtcMarketsPriceType) {
-        self.otc_markets_flags = OTC_PRICE_TYPE.set32(self.otc_markets_flags, price_type.code());
+        self.otc_markets_flags = OTC_PRICE_TYPE.set32(self.otc_markets_flags, price_type.get_code());
     }
 
     /// Changes whether the quote is saturated.

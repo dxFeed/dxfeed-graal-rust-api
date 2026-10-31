@@ -188,13 +188,13 @@ impl CandlePeriod {
 
     /// The number of units.
     #[doc(alias = "getValue")]
-    pub fn value(self) -> f64 {
+    pub fn get_value(self) -> f64 {
         self.value
     }
 
     /// The unit.
     #[doc(alias = "getType")]
-    pub fn candle_type(self) -> CandleType {
+    pub fn get_type(self) -> CandleType {
         self.candle_type
     }
 }

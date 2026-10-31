@@ -65,7 +65,7 @@ fn an_unreachable_service_reports_errors() {
     let start = Instant::now();
     assert_rmi_error(service.get_orders(&symbol, OrderSource::NTV, 0, 1, "test"));
     assert_rmi_error(service.get_quotes(&symbol, 0, 1, "test"));
-    assert_rmi_error(service.auth_order_source());
+    assert_rmi_error(service.get_auth_order_source());
     assert!(start.elapsed() < Duration::from_secs(30), "{:?}", start.elapsed());
 
     assert!(!service.is_closed());
@@ -78,7 +78,7 @@ fn an_unreachable_service_reports_errors() {
 /// Asserts that a request failed in the RMI layer, not on its arguments.
 fn assert_rmi_error<T: std::fmt::Debug>(result: Result<T>) {
     match result {
-        Err(Error::Java(e)) => assert_eq!(e.class_name(), "com.devexperts.rmi.RuntimeRMIException"),
+        Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "com.devexperts.rmi.RuntimeRMIException"),
         other => panic!("expected RuntimeRMIException, got {other:?}"),
     }
 }

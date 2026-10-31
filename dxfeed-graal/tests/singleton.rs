@@ -11,7 +11,7 @@ fn default_endpoint_and_feed_are_shared() {
     let endpoint = DXEndpoint::get_instance().unwrap();
     assert!(std::ptr::eq(feed, DXFeed::get_instance().unwrap()));
     assert!(std::ptr::eq(endpoint, DXEndpoint::get_instance().unwrap()));
-    assert_eq!(endpoint.role(), Role::Feed);
+    assert_eq!(endpoint.get_role(), Role::Feed);
 
     let subscription = feed.create_subscription::<Quote>().unwrap();
     subscription.add_event_listener(|_| {}).unwrap();

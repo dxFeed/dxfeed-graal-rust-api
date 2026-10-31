@@ -52,13 +52,13 @@ impl Summary {
     /// Changes the type of the day close price.
     #[doc(alias = "setDayClosePriceType")]
     pub fn set_day_close_price_type(&mut self, price_type: PriceType) {
-        self.flags = SUMMARY_DAY_CLOSE_TYPE.set32(self.flags, price_type.code());
+        self.flags = SUMMARY_DAY_CLOSE_TYPE.set32(self.flags, price_type.get_code());
     }
 
     /// Changes the type of the previous day close price.
     #[doc(alias = "setPrevDayClosePriceType")]
     pub fn set_prev_day_close_price_type(&mut self, price_type: PriceType) {
-        self.flags = SUMMARY_PREV_DAY_CLOSE_TYPE.set32(self.flags, price_type.code());
+        self.flags = SUMMARY_PREV_DAY_CLOSE_TYPE.set32(self.flags, price_type.get_code());
     }
 }
 

@@ -38,7 +38,7 @@ fn cached_event_completes_the_promise() {
     assert!(promise.is_done().unwrap());
     let expected = delivered(quote("AAPL").into());
     assert!(same_events(&promise.wait(LONG).unwrap().into(), &expected));
-    assert!(same_events(&promise.result().unwrap().unwrap().into(), &expected));
+    assert!(same_events(&promise.get_result().unwrap().unwrap().into(), &expected));
     // The timeout is clamped, so the longest one waits as well.
     assert!(same_events(&promise.wait(Duration::MAX).unwrap().into(), &expected));
     assert!(!promise.is_cancelled().unwrap());
@@ -55,7 +55,7 @@ fn published_event_completes_a_pending_promise() {
     let quotes = hub.feed.get_last_event_promise::<Quote>("AAPL").unwrap();
     let candles = hub.feed.get_last_event_promise::<Candle>(c).unwrap();
     assert!(!quotes.is_done().unwrap());
-    assert!(quotes.result().unwrap().is_none());
+    assert!(quotes.get_result().unwrap().is_none());
 
     hub.publish_and_process(&[quote("AAPL").into(), candle(c).into()]);
     assert!(same_events(
@@ -81,7 +81,7 @@ fn timeouts() {
     assert!(matches!(promise.wait(Duration::from_millis(200)), Err(Error::Timeout)));
     assert!(start.elapsed() >= Duration::from_millis(200));
     assert!(promise.is_cancelled().unwrap());
-    assert!(matches!(promise.result(), Err(Error::Java(_))));
+    assert!(matches!(promise.get_result(), Err(Error::Java(_))));
     assert!(matches!(promise.wait(LONG), Err(Error::Java(_))));
 
     // A timeout under a millisecond is rounded up, so it waits and cancels rather than only checking.
@@ -125,7 +125,7 @@ fn closing_the_endpoint_leaves_a_promise_pending() {
 fn stream_feed_promise_completes_exceptionally() {
     let _serial = serial();
     let endpoint = DXEndpoint::new_builder().with_role(Role::StreamFeed).build().unwrap();
-    let promise = endpoint.feed().get_last_event_promise::<Quote>("AAPL").unwrap();
+    let promise = endpoint.get_feed().get_last_event_promise::<Quote>("AAPL").unwrap();
     let result = promise.wait(LONG);
     assert!(matches!(result, Err(Error::Java(_))), "{result:?}");
     assert!(!promise.is_cancelled().unwrap());

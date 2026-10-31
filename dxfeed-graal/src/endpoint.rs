@@ -60,7 +60,7 @@ impl Role {
     }
 }
 
-/// The state of an endpoint (`DXEndpoint.State`); see [`DXEndpoint::state`].
+/// The state of an endpoint (`DXEndpoint.State`); see [`DXEndpoint::get_state`].
 ///
 /// It prints as the Java constant: `NOT_CONNECTED`, `CONNECTING`, `CONNECTED` or `CLOSED`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -270,7 +270,7 @@ impl Drop for EndpointState {
 /// cheap, and the endpoint stays open while one of them lives. Dropping the last one removes the state listeners,
 /// waiting for their running calls as [`remove_state_listener`](Self::remove_state_listener) does, and closes the
 /// endpoint without waiting for the notifications already scheduled. A chain such as
-/// `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();` therefore keeps the endpoint open.
+/// `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.get_feed();` therefore keeps the endpoint open.
 #[derive(Clone)]
 pub struct DXEndpoint {
     state: Arc<EndpointState>,
@@ -438,7 +438,7 @@ impl DXEndpoint {
 
     /// The state of the endpoint.
     #[doc(alias = "getState")]
-    pub fn state(&self) -> Result<State> {
+    pub fn get_state(&self) -> Result<State> {
         let e = self.state.endpoint.as_ptr();
         let mut state = sys::DXFG_ENDPOINT_STATE_NOT_CONNECTED;
         // SAFETY: the endpoint is live and the out-pointer is valid for writes.
@@ -514,19 +514,19 @@ impl DXEndpoint {
 
     /// The role of the endpoint.
     #[doc(alias = "getRole")]
-    pub fn role(&self) -> Role {
+    pub fn get_role(&self) -> Role {
         self.state.role
     }
 
     /// The feed of the endpoint; it keeps the endpoint open.
     #[doc(alias = "getFeed")]
-    pub fn feed(&self) -> DXFeed {
+    pub fn get_feed(&self) -> DXFeed {
         DXFeed::new(self.state.clone())
     }
 
     /// The publisher of the endpoint; it keeps the endpoint open.
     #[doc(alias = "getPublisher")]
-    pub fn publisher(&self) -> DXPublisher {
+    pub fn get_publisher(&self) -> DXPublisher {
         DXPublisher::new(self.state.clone())
     }
 }

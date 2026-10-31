@@ -82,7 +82,7 @@ fn run(address: &str, base_symbol: &str, args: &[String]) -> dxfeed_graal::Resul
 
     let endpoint = DXEndpoint::create()?;
     endpoint.connect(address)?;
-    let subscription = endpoint.feed().create_subscription::<Candle>()?;
+    let subscription = endpoint.get_feed().create_subscription::<Candle>()?;
     // Listeners go before symbols, so the first candles are not missed.
     subscription.add_event_listener(|candles| {
         for candle in candles {

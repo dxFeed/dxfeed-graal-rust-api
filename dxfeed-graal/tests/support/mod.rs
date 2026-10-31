@@ -47,8 +47,8 @@ impl Hub {
             builder = builder.with_executor(executor);
         }
         let endpoint = builder.build().unwrap();
-        let feed = endpoint.feed();
-        let publisher = endpoint.publisher();
+        let feed = endpoint.get_feed();
+        let publisher = endpoint.get_publisher();
         // An unused executor for default-executor hubs keeps the fields uniform.
         let executor = executor.unwrap_or_else(|| ManualExecutor::new().unwrap());
         Hub {

@@ -81,7 +81,7 @@ fn run(args: Args) -> dxfeed_graal::Result<()> {
     let chain = chains
         .get(&args.symbol)
         .ok_or_else(|| Error::InvalidArgument(format!("no option chain of {}", args.symbol)))?;
-    let series = &chain.series()[..args.n_months.min(chain.series().len())];
+    let series = &chain.get_series()[..args.n_months.min(chain.get_series().len())];
 
     println!("Requesting option quotes ...");
     let mut quotes: HashMap<String, Promise<Quote>> = HashMap::new();
@@ -103,7 +103,7 @@ fn run(args: Args) -> dxfeed_graal::Result<()> {
     let quote = |option: Option<&&InstrumentProfile>| {
         option
             .and_then(|option| quotes.get(&option.symbol))
-            .and_then(|promise| promise.result().ok().flatten())
+            .and_then(|promise| promise.get_result().ok().flatten())
             .unwrap_or_else(|| Quote::new(""))
     };
     for s in series {
@@ -112,7 +112,7 @@ fn run(args: Args) -> dxfeed_graal::Result<()> {
             "    {:>10} {:>10} {:>10} {:>10} {:>10}",
             "C.BID", "C.ASK", "STRIKE", "P.BID", "P.ASK"
         );
-        for &strike in s.n_strikes_around(args.n_strikes, price) {
+        for &strike in s.get_n_strikes_around(args.n_strikes, price) {
             let call = quote(s.call(strike));
             let put = quote(s.put(strike));
             println!(
@@ -131,7 +131,7 @@ fn options_around<'a>(
     price: f64,
 ) -> impl Iterator<Item = &'a InstrumentProfile> {
     series
-        .n_strikes_around(n, price)
+        .get_n_strikes_around(n, price)
         .iter()
         .flat_map(|&strike| [series.call(strike), series.put(strike)])
         .flatten()

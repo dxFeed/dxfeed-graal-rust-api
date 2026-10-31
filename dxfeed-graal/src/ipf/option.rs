@@ -37,10 +37,10 @@ impl Ord for Strike {
 /// The options of one series of a chain: the same expiration and other attributes, by strike (`OptionSeries`).
 ///
 /// Series are equal, hashed and ordered by their attributes alone, not by their options, as in Java: by
-/// [`expiration`](Self::expiration), [`last_trade`](Self::last_trade), [`multiplier`](Self::multiplier),
-/// [`spc`](Self::spc), [`additional_underlyings`](Self::additional_underlyings), [`mmy`](Self::mmy),
-/// [`option_type`](Self::option_type), [`expiration_style`](Self::expiration_style),
-/// [`settlement_style`](Self::settlement_style) and [`cfi`](Self::cfi).
+/// [`get_expiration`](Self::get_expiration), [`get_last_trade`](Self::get_last_trade), [`get_multiplier`](Self::get_multiplier),
+/// [`get_spc`](Self::get_spc), [`get_additional_underlyings`](Self::get_additional_underlyings), [`get_mmy`](Self::get_mmy),
+/// [`get_option_type`](Self::get_option_type), [`get_expiration_style`](Self::get_expiration_style),
+/// [`get_settlement_style`](Self::get_settlement_style) and [`get_cfi`](Self::get_cfi).
 #[derive(Debug, Clone)]
 pub struct OptionSeries<T> {
     expiration: i32,
@@ -82,73 +82,73 @@ impl<T> OptionSeries<T> {
 impl<T> OptionSeries<T> {
     /// The day id of the expiration, the days since 1970-01-01 (`getExpiration`).
     #[doc(alias = "getExpiration")]
-    pub fn expiration(&self) -> i32 {
+    pub fn get_expiration(&self) -> i32 {
         self.expiration
     }
 
     /// The day id of the last trading day, the days since 1970-01-01 (`getLastTrade`).
     #[doc(alias = "getLastTrade")]
-    pub fn last_trade(&self) -> i32 {
+    pub fn get_last_trade(&self) -> i32 {
         self.last_trade
     }
 
     /// The market value multiplier (`getMultiplier`).
     #[doc(alias = "getMultiplier")]
-    pub fn multiplier(&self) -> f64 {
+    pub fn get_multiplier(&self) -> f64 {
         self.multiplier
     }
 
     /// The shares per contract of each option (`getSPC`).
     #[doc(alias = "getSPC")]
-    pub fn spc(&self) -> f64 {
+    pub fn get_spc(&self) -> f64 {
         self.spc
     }
 
     /// The additional underlyings of the options, such as `SE=50; FIS=53` (`getAdditionalUnderlyings`).
     #[doc(alias = "getAdditionalUnderlyings")]
-    pub fn additional_underlyings(&self) -> &str {
+    pub fn get_additional_underlyings(&self) -> &str {
         &self.additional_underlyings
     }
 
     /// The maturity month-year of the options as in FIX, such as `201202` or `20110817` (`getMMY`).
     #[doc(alias = "getMMY")]
-    pub fn mmy(&self) -> &str {
+    pub fn get_mmy(&self) -> &str {
         &self.mmy
     }
 
     /// The type of the options, such as `STAN` or `LEAP` (`getOptionType`).
     #[doc(alias = "getOptionType")]
-    pub fn option_type(&self) -> &str {
+    pub fn get_option_type(&self) -> &str {
         &self.option_type
     }
 
     /// The expiration style of the options, such as `Weeklys` or `Quarterlys` (`getExpirationStyle`).
     #[doc(alias = "getExpirationStyle")]
-    pub fn expiration_style(&self) -> &str {
+    pub fn get_expiration_style(&self) -> &str {
         &self.expiration_style
     }
 
     /// The settlement price determination style, such as `Open` or `Close` (`getSettlementStyle`).
     #[doc(alias = "getSettlementStyle")]
-    pub fn settlement_style(&self) -> &str {
+    pub fn get_settlement_style(&self) -> &str {
         &self.settlement_style
     }
 
     /// The CFI code of the options with `X` for the call or put attribute, such as `OXXXXX` (`getCFI`).
     #[doc(alias = "getCFI")]
-    pub fn cfi(&self) -> &str {
+    pub fn get_cfi(&self) -> &str {
         &self.cfi
     }
 
     /// The calls by strike, in ascending order of strikes (`getCalls`).
     #[doc(alias = "getCalls")]
-    pub fn calls(&self) -> impl ExactSizeIterator<Item = (f64, &T)> + DoubleEndedIterator {
+    pub fn get_calls(&self) -> impl ExactSizeIterator<Item = (f64, &T)> + DoubleEndedIterator {
         self.calls.iter().map(|(strike, option)| (strike.0, option))
     }
 
     /// The puts by strike, in ascending order of strikes (`getPuts`).
     #[doc(alias = "getPuts")]
-    pub fn puts(&self) -> impl ExactSizeIterator<Item = (f64, &T)> + DoubleEndedIterator {
+    pub fn get_puts(&self) -> impl ExactSizeIterator<Item = (f64, &T)> + DoubleEndedIterator {
         self.puts.iter().map(|(strike, option)| (strike.0, option))
     }
 
@@ -164,7 +164,7 @@ impl<T> OptionSeries<T> {
 
     /// The strikes of the calls and the puts, in ascending order (`getStrikes`).
     #[doc(alias = "getStrikes")]
-    pub fn strikes(&self) -> &[f64] {
+    pub fn get_strikes(&self) -> &[f64] {
         &self.strikes
     }
 
@@ -172,7 +172,7 @@ impl<T> OptionSeries<T> {
     ///
     /// Fewer strikes are returned near the ends: when all strikes are below `strike`, only the last `n / 2` of them.
     #[doc(alias = "getNStrikesAround")]
-    pub fn n_strikes_around(&self, n: usize, strike: f64) -> &[f64] {
+    pub fn get_n_strikes_around(&self, n: usize, strike: f64) -> &[f64] {
         let index = self.strikes.partition_point(|s| s.total_cmp(&strike).is_lt());
         let from = index.saturating_sub(n / 2);
         let to = self.strikes.len().min(from + n);
@@ -301,13 +301,13 @@ impl<T> OptionChain<T> {
 
     /// The product or underlying symbol of the chain (`getSymbol`).
     #[doc(alias = "getSymbol")]
-    pub fn symbol(&self) -> &str {
+    pub fn get_symbol(&self) -> &str {
         &self.symbol
     }
 
     /// The series of the chain, in ascending order of their attributes, the nearest expiration first (`getSeries`).
     #[doc(alias = "getSeries")]
-    pub fn series(&self) -> &[OptionSeries<T>] {
+    pub fn get_series(&self) -> &[OptionSeries<T>] {
         &self.series
     }
 
@@ -335,8 +335,8 @@ impl<T> OptionChain<T> {
 ///
 /// let profiles = InstrumentProfileReader::new()?.read_from_file("profiles.ipf.zip")?;
 /// let chains = OptionChainsBuilder::build(&profiles).into_chains();
-/// for series in chains["AAPL"].series() {
-///     println!("{series}: {} strikes", series.strikes().len());
+/// for series in chains["AAPL"].get_series() {
+///     println!("{series}: {} strikes", series.get_strikes().len());
 /// }
 /// # Ok::<(), dxfeed_graal::Error>(())
 /// ```
@@ -366,7 +366,7 @@ impl<T> Default for OptionChainsBuilder<T> {
 impl<'a> OptionChainsBuilder<&'a InstrumentProfile> {
     /// Builds the chains of the options among `instruments`, the profiles of the type `OPTION` (`build`).
     ///
-    /// Like in Java, it returns a builder that holds the chains: [`chains`](Self::chains) or
+    /// Like in Java, it returns a builder that holds the chains: [`get_chains`](Self::get_chains) or
     /// [`into_chains`](Self::into_chains) give them. The chains refer to the profiles, which are not copied.
     pub fn build(instruments: impl IntoIterator<Item = &'a InstrumentProfile>) -> Self {
         let mut builder = OptionChainsBuilder::new();
@@ -485,7 +485,7 @@ impl<T> OptionChainsBuilder<T> {
 
     /// The chains built so far by product or underlying symbol (`getChains`).
     #[doc(alias = "getChains")]
-    pub fn chains(&self) -> &HashMap<String, OptionChain<T>> {
+    pub fn get_chains(&self) -> &HashMap<String, OptionChain<T>> {
         &self.chains
     }
 

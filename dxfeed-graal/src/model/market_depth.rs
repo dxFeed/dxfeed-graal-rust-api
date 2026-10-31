@@ -21,11 +21,11 @@ use crate::symbol::Symbol;
 type DepthClosure<O> = dyn FnMut(&[O], &[O]) + Send;
 
 /// A model of the order book of a symbol: the buy orders sorted from the best (highest) price down and the sell orders
-/// from the best (lowest) price up, at most [`depth_limit`](Self::depth_limit) of each (`MarketDepthModel`). Build it
+/// from the best (lowest) price up, at most [`get_depth_limit`](Self::get_depth_limit) of each (`MarketDepthModel`). Build it
 /// with [`MarketDepthModel::new_builder`]; it needs a symbol and a feed.
 ///
 /// The listener gets both sides whenever an update changes the orders within the depth limit: at once for a
-/// snapshot, and for the other updates once per [`aggregation_period`](Self::aggregation_period), if it is not zero.
+/// snapshot, and for the other updates once per [`get_aggregation_period`](Self::get_aggregation_period), if it is not zero.
 /// At one price, the price levels (the aggregate orders) go before the individual orders; the larger price levels go
 /// first, the individual orders in the order of their time.
 ///
@@ -75,7 +75,7 @@ impl<O: OrderEvent> MarketDepthModel<O> {
 
     /// The most orders of each side the listener gets; `0` means all of them (`getDepthLimit`).
     #[doc(alias = "getDepthLimit")]
-    pub fn depth_limit(&self) -> usize {
+    pub fn get_depth_limit(&self) -> usize {
         crate::lock(&self.shared.state).depth_limit
     }
 
@@ -98,7 +98,7 @@ impl<O: OrderEvent> MarketDepthModel<O> {
     /// How long the model gathers the updates other than snapshots before it calls the listener; zero means at once
     /// (`getAggregationPeriod`).
     #[doc(alias = "getAggregationPeriod")]
-    pub fn aggregation_period(&self) -> Duration {
+    pub fn get_aggregation_period(&self) -> Duration {
         crate::lock(&self.shared.state).aggregation_period
     }
 
@@ -402,7 +402,7 @@ impl<O: OrderEvent> State<O> {
     fn update(&mut self, source: IndexedEventSource, orders: Vec<O>, is_snapshot: bool) -> bool {
         let limit = self.depth_limit;
         if is_snapshot {
-            let source = source.id();
+            let source = source.get_id();
             self.by_index.retain(|_, order| order.source() != source);
             self.buy.clear_source(source);
             self.sell.clear_source(source);
@@ -540,7 +540,7 @@ fn by_kind<O: OrderEvent>(a: &O, b: &O) -> Ordering {
             .size()
             .total_cmp(&a.size())
             .then(a.time_sequence().cmp(&b.time_sequence()))
-            .then(a.scope().code().cmp(&b.scope().code()))
+            .then(a.scope().get_code().cmp(&b.scope().get_code()))
             .then(a.exchange_code().cmp(&b.exchange_code()))
             .then_with(|| a.market_maker().unwrap_or("").cmp(b.market_maker().unwrap_or("")))
             .then(a.index().cmp(&b.index())),

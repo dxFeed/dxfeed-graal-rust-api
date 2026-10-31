@@ -62,7 +62,11 @@ fn run(args: &[String]) -> dxfeed_graal::Result<()> {
     let verbose = args[5..].iter().any(|arg| arg == "--verbose");
 
     let service = PriceLevelService::new(address)?;
-    let mut symbols_by_source: Vec<_> = service.auth_order_source()?.by_order_sources()?.into_iter().collect();
+    let mut symbols_by_source: Vec<_> = service
+        .get_auth_order_source()?
+        .get_by_order_sources()?
+        .into_iter()
+        .collect();
     symbols_by_source.sort_by_key(|(source, _)| source.to_string());
     let sources: Vec<_> = symbols_by_source.iter().map(|(source, _)| source.to_string()).collect();
     println!("Authorized sources: [{}]", sources.join(", "));

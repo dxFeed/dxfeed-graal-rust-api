@@ -447,7 +447,7 @@ impl<E: IndexedEvent> IndexedTxModel<E> {
 
     /// The sources of the events; empty for all the sources (`getSources`).
     #[doc(alias = "getSources")]
-    pub fn sources(&self) -> Result<Vec<IndexedEventSource>> {
+    pub fn get_sources(&self) -> Result<Vec<IndexedEventSource>> {
         let mut list: *mut sys::dxfg_v4_indexed_event_source_list = std::ptr::null_mut();
         let m = self.core.handle.as_ptr();
         // SAFETY: the model is live and the out-pointer is valid for writes.
@@ -582,7 +582,7 @@ impl<E: TimeSeriesEvent> TimeSeriesTxModel<E> {
     /// The time the model is subscribed from, in milliseconds since the Unix epoch; `i64::MAX` when it is not
     /// subscribed (`getFromTime`).
     #[doc(alias = "getFromTime")]
-    pub fn from_time(&self) -> Result<i64> {
+    pub fn get_from_time(&self) -> Result<i64> {
         let mut time = 0;
         let m = self.core.handle.as_ptr();
         // SAFETY: the model is live and the out-pointer is valid for writes.

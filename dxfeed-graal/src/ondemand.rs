@@ -14,7 +14,7 @@
 //! system::set_property("dxfeed.user", "demo")?;
 //! system::set_property("dxfeed.password", "demo")?;
 //! let on_demand = OnDemandService::get_instance()?;
-//! let subscription = on_demand.endpoint().feed().create_subscription::<Quote>()?;
+//! let subscription = on_demand.get_endpoint().get_feed().create_subscription::<Quote>()?;
 //! subscription.add_event_listener(|quotes| {
 //!     for quote in quotes {
 //!         println!("{quote}");
@@ -84,7 +84,7 @@ impl OnDemandService {
 
     /// The endpoint of the service (`getEndpoint`).
     #[doc(alias = "getEndpoint")]
-    pub fn endpoint(&self) -> &DXEndpoint {
+    pub fn get_endpoint(&self) -> &DXEndpoint {
         &self.endpoint
     }
 
@@ -111,7 +111,7 @@ impl OnDemandService {
 
     /// The time being replayed, or the last one replayed; 0 if the replay never started (`getTime`).
     #[doc(alias = "getTime")]
-    pub fn time(&self) -> Result<i64> {
+    pub fn get_time(&self) -> Result<i64> {
         let mut time = 0;
         let s = self.handle.as_ptr();
         // SAFETY: the service is live and the out-pointer is valid for writes.
@@ -121,7 +121,7 @@ impl OnDemandService {
 
     /// The replay speed; 0 while the service does not replay (`getSpeed`).
     #[doc(alias = "getSpeed")]
-    pub fn speed(&self) -> Result<f64> {
+    pub fn get_speed(&self) -> Result<f64> {
         let mut speed = 0.0;
         let s = self.handle.as_ptr();
         // SAFETY: the service is live and the out-pointer is valid for writes.

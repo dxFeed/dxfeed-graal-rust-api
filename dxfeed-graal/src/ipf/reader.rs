@@ -53,7 +53,7 @@ impl InstrumentProfileReader {
     /// The last modification time of the last file read, in milliseconds since the Unix epoch, or `0` if it is not
     /// known (`getLastModified`).
     #[doc(alias = "getLastModified")]
-    pub fn last_modified(&self) -> Result<i64> {
+    pub fn get_last_modified(&self) -> Result<i64> {
         let mut time = 0;
         let r = self.handle.as_ptr();
         // SAFETY: the reader is live and the out-pointer is valid for writes.

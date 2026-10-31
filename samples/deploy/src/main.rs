@@ -20,8 +20,8 @@ fn main() -> ExitCode {
 
 fn run() -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::create()?;
-    let subscription = endpoint.feed().create_subscription::<Quote>()?;
+    let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
     subscription.add_symbols(["AAPL"])?;
-    println!("Created a {:?} endpoint with a quote subscription", endpoint.role());
+    println!("Created a {:?} endpoint with a quote subscription", endpoint.get_role());
     endpoint.close_and_await_termination()
 }

@@ -75,13 +75,13 @@ impl NuamOrder {
     /// Changes the time in force of the order.
     #[doc(alias = "setTimeInForce")]
     pub fn set_time_in_force(&mut self, time_in_force: NuamTimeInForceType) {
-        self.nuam_flags = NUAM_TIME_IN_FORCE.set32(self.nuam_flags, time_in_force.code());
+        self.nuam_flags = NUAM_TIME_IN_FORCE.set32(self.nuam_flags, time_in_force.get_code());
     }
 
     /// Changes the type of the order.
     #[doc(alias = "setOrderType")]
     pub fn set_order_type(&mut self, order_type: NuamOrderType) {
-        self.nuam_flags = NUAM_ORDER_TYPE.set32(self.nuam_flags, order_type.code());
+        self.nuam_flags = NUAM_ORDER_TYPE.set32(self.nuam_flags, order_type.get_code());
     }
 }
 

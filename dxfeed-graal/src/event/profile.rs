@@ -76,13 +76,13 @@ impl Profile {
     /// Changes the short sale restriction of the security.
     #[doc(alias = "setShortSaleRestriction")]
     pub fn set_short_sale_restriction(&mut self, restriction: ShortSaleRestriction) {
-        self.flags = PROFILE_SSR.set32(self.flags, restriction.code());
+        self.flags = PROFILE_SSR.set32(self.flags, restriction.get_code());
     }
 
     /// Changes the trading status of the security.
     #[doc(alias = "setTradingStatus")]
     pub fn set_trading_status(&mut self, status: TradingStatus) {
-        self.flags = PROFILE_STATUS.set32(self.flags, status.code());
+        self.flags = PROFILE_STATUS.set32(self.flags, status.get_code());
     }
 }
 

@@ -438,8 +438,8 @@ mod tests {
         let Err(Error::Java(e)) = failed else {
             panic!("expected a Java exception, got {failed:?}");
         };
-        assert!(!e.class_name().is_empty());
-        assert!(!e.stack_trace().is_empty());
+        assert!(!e.get_class_name().is_empty());
+        assert!(!e.get_stack_trace().is_empty());
         set_property("isolate.test.after-failure", "1").unwrap();
     }
 

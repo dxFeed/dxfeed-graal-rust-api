@@ -68,7 +68,7 @@ fn run(url: &str) -> dxfeed_graal::Result<()> {
             Err(error) => eprintln!("error: {error}"),
         }
         match view
-            .last_update_time()
+            .get_last_update_time()
             .and_then(|time| TimeFormat::DEFAULT.with_millis().with_time_zone().format(time))
         {
             Ok(time) => println!("Last modified: {time}"),

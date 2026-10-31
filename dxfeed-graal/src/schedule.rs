@@ -11,7 +11,7 @@
 //! )?;
 //! let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64;
 //! let session = schedule.get_nearest_session_by_time(now, SessionFilter::Trading)?;
-//! println!("{session} in {}", session.day()?);
+//! println!("{session} in {}", session.get_day()?);
 //! # Ok::<(), dxfeed_graal::Error>(())
 //! ```
 
@@ -469,7 +469,7 @@ impl Day {
 
     /// The schedule of the day (`getSchedule`).
     #[doc(alias = "getSchedule")]
-    pub fn schedule(&self) -> Result<Schedule> {
+    pub fn get_schedule(&self) -> Result<Schedule> {
         let d = self.handle.as_ptr();
         // SAFETY: the day is live; the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_Day_getSchedule(t, d, out) })?;
@@ -560,7 +560,7 @@ impl Day {
 
     /// The sessions of the day, in the order of time (`getSessions`).
     #[doc(alias = "getSessions")]
-    pub fn sessions(&self) -> Result<Vec<Session>> {
+    pub fn get_sessions(&self) -> Result<Vec<Session>> {
         let mut list = ptr::null_mut();
         let d = self.handle.as_ptr();
         // SAFETY: the day is live and the out-pointer is valid for writes.
@@ -738,7 +738,7 @@ impl Session {
 
     /// The day of the session (`getDay`).
     #[doc(alias = "getDay")]
-    pub fn day(&self) -> Result<Day> {
+    pub fn get_day(&self) -> Result<Day> {
         let s = self.handle.as_ptr();
         // SAFETY: the session is live; the out-pointer is valid for writes.
         Day::create(|t, out| unsafe { sys::dxfg_v4_Session_getDay(t, s, out) })
@@ -746,7 +746,7 @@ impl Session {
 
     /// The type of the session (`getType`).
     #[doc(alias = "getType")]
-    pub fn session_type(&self) -> Result<SessionType> {
+    pub fn get_type(&self) -> Result<SessionType> {
         let mut session_type = sys::DXFG_SESSION_TYPE_NO_TRADING;
         let s = self.handle.as_ptr();
         // SAFETY: the session is live and the out-pointer is valid for writes.

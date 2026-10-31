@@ -46,7 +46,7 @@ fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
     system::set_property("dxendpoint.eventTime", "true")?;
 
     let on_demand = OnDemandService::get_instance()?;
-    let subscription = on_demand.endpoint().feed().create_subscription::<Quote>()?;
+    let subscription = on_demand.get_endpoint().get_feed().create_subscription::<Quote>()?;
     let time_format = TimeFormat::DEFAULT.with_millis().with_time_zone();
     subscription.add_event_listener(move |quotes| {
         for quote in quotes {
@@ -64,9 +64,9 @@ fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
     let from = time_format.parse("2010-05-06 14:47:48.000 EST")?;
     let to = time_format.parse("2010-05-06 14:48:02.000 EST")?;
     on_demand.replay(from)?;
-    let (mut last, mut stalled) = (on_demand.time()?, 0);
+    let (mut last, mut stalled) = (on_demand.get_time()?, 0);
     loop {
-        let time = on_demand.time()?;
+        let time = on_demand.get_time()?;
         if time >= to {
             break;
         }
@@ -74,17 +74,17 @@ fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
         last = time;
         if stalled == STALL_LIMIT {
             eprintln!("The replay did not move for {STALL_LIMIT} seconds.");
-            on_demand.endpoint().close_and_await_termination()?;
+            on_demand.get_endpoint().close_and_await_termination()?;
             return Err(dxfeed_graal::Error::Timeout);
         }
         println!(
             "Current state is {}, on-demand time is {}",
-            on_demand.endpoint().state()?,
+            on_demand.get_endpoint().get_state()?,
             time_format.format(time)?
         );
         thread::sleep(Duration::from_secs(1));
     }
-    on_demand.endpoint().close_and_await_termination()
+    on_demand.get_endpoint().close_and_await_termination()
 }
 
 /// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the

@@ -39,7 +39,7 @@ fn flagged_candle(symbol: &str, time: i64, flags: EventFlags) -> Event {
 fn flagged_order(source: OrderSource, index: i64, flags: EventFlags) -> Event {
     let mut order = order("AAPL");
     order.index = index;
-    order.set_source(source.id()).unwrap();
+    order.set_source(source.get_id()).unwrap();
     order.event_flags = flags;
     order.into()
 }
@@ -76,7 +76,7 @@ fn wildcard_receives_every_symbol() {
         .with_property("dxfeed.wildcard.enable", "true")
         .build()
         .unwrap();
-    let subscription = endpoint.feed().create_subscription::<Quote>().unwrap();
+    let subscription = endpoint.get_feed().create_subscription::<Quote>().unwrap();
     let (sender, receiver) = std::sync::mpsc::channel();
     subscription
         .add_event_listener(move |quotes| {
@@ -87,7 +87,7 @@ fn wildcard_receives_every_symbol() {
         .unwrap();
     subscription.add_symbols([Symbol::Wildcard]).unwrap();
     endpoint
-        .publisher()
+        .get_publisher()
         .publish_events(&[quote("IBM").into(), quote("MSFT").into()])
         .unwrap();
     let mut symbols: Vec<String> = (0..2)
@@ -146,7 +146,7 @@ fn indexed_symbol_selects_its_source() {
             other => panic!("not an order: {other:?}"),
         })
         .collect();
-    assert_eq!(sources, [OrderSource::NTV.id()]);
+    assert_eq!(sources, [OrderSource::NTV.get_id()]);
 }
 
 #[test]
@@ -182,7 +182,7 @@ fn list_promises_complete_with_a_snapshot() {
         .iter()
         .map(|order| (order.source(), order.index() & 0xffff_ffff))
         .collect();
-    assert_eq!(orders, [(OrderSource::NTV.id(), 1), (OrderSource::NTV.id(), 2)]);
+    assert_eq!(orders, [(OrderSource::NTV.get_id(), 1), (OrderSource::NTV.get_id(), 2)]);
     assert_eq!(live_events(), 0);
 }
 
@@ -197,7 +197,7 @@ fn cancelled_list_promises_fail() {
     candles.cancel().unwrap();
     // A list promise without a result fails rather than gives an empty list.
     assert!(matches!(candles.wait(Duration::from_secs(10)), Err(Error::Java(_))));
-    assert!(matches!(candles.result(), Err(Error::Java(_))));
+    assert!(matches!(candles.get_result(), Err(Error::Java(_))));
     assert_eq!(live_events(), 0);
 }
 

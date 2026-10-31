@@ -40,7 +40,7 @@ dxFeed Graal Rust API lets Rust applications receive and publish dxFeed market d
 owned handles released on drop, `Result` errors that carry Java exceptions, and closures as event listeners.
 The names follow the [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html): `DXEndpoint`,
 `DXFeed`, `DXFeedSubscription` and `DXPublisher`, with methods in snake case (`add_event_listener`,
-`close_and_await_termination`) and getters without `get` (`feed()`, `publisher()`). Events print as Java prints them.
+`close_and_await_termination`) including the getters (`get_feed`, `get_publisher`). Events print as Java prints them.
 
 | Crate | Purpose |
 |---|---|
@@ -159,7 +159,7 @@ use dxfeed_graal::event::Quote;
 
 fn main() -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::create()?;
-    let subscription = endpoint.feed().create_subscription::<Quote>()?;
+    let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
     subscription.add_event_listener(|quotes| {
         for quote in quotes {
             println!("{quote}");
@@ -178,7 +178,7 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   subscription to several, `create_subscription_with_types(&[EventType::Quote, EventType::Trade])`, gives `EventRef`
   values to match.
 - Calls chain as in Java: a feed or a subscription taken from a chain keeps its endpoint open, e.g.
-  `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.feed();`.
+  `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.get_feed();`.
 - The last event of a lasting type (Quote, Profile, Summary, Greeks, Candle, Trade and others) comes from the local
   cache of the feed with `get_last_event_if_subscribed::<Quote>("AAPL")` (`None` without a subscription) and
   `get_last_event(&quote)`, or from the uplink with `get_last_event_promise::<Quote>("AAPL")?.wait(timeout)`. A wait

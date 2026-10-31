@@ -42,7 +42,7 @@ fn an_unreachable_address_is_a_java_error() {
 /// Asserts that a request failed to connect, not on its arguments.
 fn assert_refused<T: std::fmt::Debug>(result: dxfeed_graal::Result<T>) {
     match result {
-        Err(Error::Java(e)) => assert_eq!(e.class_name(), "java.net.ConnectException"),
+        Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "java.net.ConnectException"),
         other => panic!("expected ConnectException, got {other:?}"),
     }
 }

@@ -39,7 +39,7 @@ use crate::symbol::Symbol;
 /// }
 ///
 /// let endpoint = DXEndpoint::create_with_role(Role::Publisher)?;
-/// let subscription = endpoint.publisher().subscription::<Profile>()?;
+/// let subscription = endpoint.get_publisher().get_subscription::<Profile>()?;
 /// subscription.add_change_listener(Printer)?;
 /// subscription.add_change_listener(|symbols: &[Symbol]| println!("added {symbols:?}"))?;
 /// # Ok(())
@@ -70,11 +70,11 @@ impl<F: FnMut(&[Symbol]) + Send + 'static> ObservableSubscriptionChangeListener 
 }
 
 /// The subscription of a [`DXPublisher`] to the events of one type, whose change listeners learn the symbols that the
-/// subscribers of the publisher ask for (`ObservableSubscription`); created with [`DXPublisher::subscription`].
+/// subscribers of the publisher ask for (`ObservableSubscription`); created with [`DXPublisher::get_subscription`].
 ///
 /// The subscription lives as long as the publisher's endpoint and closes with it. As in Java, its change listeners stay
 /// until they are removed or the endpoint is closed, also when this object is dropped, so that
-/// `publisher.subscription::<Profile>()?.add_change_listener(listener)?` keeps the listener; a listener that holds the
+/// `publisher.get_subscription::<Profile>()?.add_change_listener(listener)?` keeps the listener; a listener that holds the
 /// publisher keeps the endpoint open until it is closed. This object keeps the endpoint open too.
 pub struct ObservableSubscription {
     handle: Handle<sys::dxfg_v4_observable_subscription_t>,
@@ -109,7 +109,7 @@ impl ObservableSubscription {
 
     /// The event types of the subscription: the one it was created for (`getEventTypes`).
     #[doc(alias = "getEventTypes")]
-    pub fn event_types(&self) -> Result<Vec<EventType>> {
+    pub fn get_event_types(&self) -> Result<Vec<EventType>> {
         let s = self.handle.as_ptr();
         let mut list = ptr::null_mut();
         // SAFETY: the subscription is live and the out-pointer is valid for writes.

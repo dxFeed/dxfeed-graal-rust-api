@@ -36,12 +36,12 @@ fn connect_to_invalid_address_is_java_exception() {
     let Error::Java(e) = &error else {
         panic!("expected a Java exception, got {error:?}");
     };
-    assert!(!e.class_name().is_empty());
-    assert!(!e.stack_trace().is_empty());
+    assert!(!e.get_class_name().is_empty());
+    assert!(!e.get_stack_trace().is_empty());
     let shown = error.to_string();
-    assert!(shown.starts_with(e.class_name()), "{shown}");
-    assert!(shown.contains(e.message()), "{shown}");
-    if let Some(cause) = e.cause() {
+    assert!(shown.starts_with(e.get_class_name()), "{shown}");
+    assert!(shown.contains(e.get_message()), "{shown}");
+    if let Some(cause) = e.get_cause() {
         assert_eq!(error.source().unwrap().to_string(), cause.to_string());
     }
 }

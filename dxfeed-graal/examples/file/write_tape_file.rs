@@ -42,7 +42,7 @@ fn run() -> dxfeed_graal::Result<()> {
         }
         .into(),
     ];
-    endpoint.publisher().publish_events(&quotes)?;
+    endpoint.get_publisher().publish_events(&quotes)?;
 
     // The events are written once they are processed, so wait before closing.
     endpoint.await_processed()?;

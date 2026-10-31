@@ -22,7 +22,7 @@ fn order(index: i64, flags: EventFlags) -> Order {
         event_flags: flags,
         ..Order::new("TX")
     };
-    order.set_source(OrderSource::NTV.id()).unwrap();
+    order.set_source(OrderSource::NTV.get_id()).unwrap();
     order.set_order_side(Side::Buy);
     order
 }
@@ -67,7 +67,7 @@ fn snapshots_and_transactions_come_whole() {
     hub.executor.process_all_pending().unwrap();
     assert!(model.is_batch_processing().unwrap());
     assert!(!model.is_snapshot_processing().unwrap());
-    assert_eq!(model.sources().unwrap(), [OrderSource::NTV]);
+    assert_eq!(model.get_sources().unwrap(), [OrderSource::NTV]);
 
     publish(
         &hub,
@@ -130,8 +130,8 @@ fn sources_and_feeds_can_change() {
     let hub = Hub::new();
     let (model, calls) = indexed_model(&hub, false);
     model.set_sources([OrderSource::NTV, OrderSource::ntv]).unwrap();
-    let mut sources = model.sources().unwrap();
-    sources.sort_by_key(|source| source.id());
+    let mut sources = model.get_sources().unwrap();
+    sources.sort_by_key(|source| source.get_id());
     assert_eq!(sources, [OrderSource::NTV, OrderSource::ntv]);
     model.set_aggregation_period(Duration::from_millis(0)).unwrap();
 
@@ -215,7 +215,7 @@ fn time_series_come_from_a_time_on() {
         .build()
         .unwrap();
     hub.executor.process_all_pending().unwrap();
-    assert_eq!(model.from_time().unwrap(), 1_000);
+    assert_eq!(model.get_from_time().unwrap(), 1_000);
 
     let sale = |time: i64, flags: EventFlags| {
         let mut sale = TimeAndSale {
@@ -242,5 +242,5 @@ fn time_series_come_from_a_time_on() {
     assert!(calls[0].2);
 
     model.set_from_time(i64::MAX).unwrap();
-    assert_eq!(model.from_time().unwrap(), i64::MAX);
+    assert_eq!(model.get_from_time().unwrap(), i64::MAX);
 }

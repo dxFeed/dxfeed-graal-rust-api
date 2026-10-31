@@ -222,7 +222,7 @@ impl InstrumentProfile {
     ///
     /// Numbers and dates are formatted as in the format: `100`, `0.5`, `2026-12-18`, and zero as an empty string.
     #[doc(alias = "getField")]
-    pub fn field(&self, name: &str) -> Result<String> {
+    pub fn get_field(&self, name: &str) -> Result<String> {
         self.standard_field(name)
             .unwrap_or_else(|| Ok(self.custom_fields.get(name).cloned().unwrap_or_default()))
     }

@@ -19,7 +19,7 @@ const AWAIT_TIMED_OUT: i32 = 1;
 /// The result of a feed request that becomes known later (`Promise`): an event of [`DXFeed::get_last_event_promise`],
 /// or a `Vec` of events of [`DXFeed::get_time_series_promise`] and [`DXFeed::get_indexed_events_promise`].
 ///
-/// [`wait`](Self::wait) blocks for it; [`result`](Self::result), [`is_done`](Self::is_done),
+/// [`wait`](Self::wait) blocks for it; [`get_result`](Self::get_result), [`is_done`](Self::is_done),
 /// [`is_cancelled`](Self::is_cancelled) and [`cancel`](Self::cancel) do not block. Dropping a promise does not cancel
 /// the request, as in Java. The promise keeps the endpoint of its feed open while it lives.
 pub struct Promise<T: PromiseResult> {
@@ -89,7 +89,7 @@ impl<T: PromiseResult> Promise<T> {
     #[doc(alias = "awaitWithoutException")]
     pub fn wait(&self, timeout: Duration) -> Result<T> {
         if timeout.is_zero() {
-            return self.result()?.ok_or(Error::Timeout);
+            return self.get_result()?.ok_or(Error::Timeout);
         }
         if isolate::in_callback() {
             return Err(Error::InCallback);
@@ -113,7 +113,7 @@ impl<T: PromiseResult> Promise<T> {
     ///
     /// Returns [`Error::Java`] when the promise has completed exceptionally or was cancelled.
     #[doc(alias = "getResult")]
-    pub fn result(&self) -> Result<Option<T>> {
+    pub fn get_result(&self) -> Result<Option<T>> {
         if !self.is_done()? {
             return Ok(None);
         }

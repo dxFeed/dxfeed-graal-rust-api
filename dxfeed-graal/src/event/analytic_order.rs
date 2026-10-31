@@ -38,7 +38,7 @@ impl AnalyticOrder {
     /// Changes the type of the iceberg.
     #[doc(alias = "setIcebergType")]
     pub fn set_iceberg_type(&mut self, iceberg_type: super::IcebergType) {
-        self.iceberg_flags = super::flags::ICEBERG_TYPE.set32(self.iceberg_flags, iceberg_type.code());
+        self.iceberg_flags = super::flags::ICEBERG_TYPE.set32(self.iceberg_flags, iceberg_type.get_code());
     }
 }
 

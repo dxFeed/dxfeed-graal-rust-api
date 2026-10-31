@@ -126,7 +126,7 @@ fn print_current_session(profile: &InstrumentProfile, time: i64) -> dxfeed_graal
     println!(
         "Current session for {}: {session} in {}",
         profile.symbol,
-        session.day()?
+        session.get_day()?
     );
     Ok(())
 }
@@ -139,7 +139,7 @@ fn print_next_trading_session(profile: &InstrumentProfile, time: i64) -> dxfeed_
     println!(
         "Next trading session for {}: {session} in {}",
         profile.symbol,
-        session.day()?
+        session.get_day()?
     );
     Ok(())
 }
@@ -149,7 +149,7 @@ fn print_nearest_trading_session(profile: &InstrumentProfile, time: i64) -> dxfe
     println!(
         "Nearest trading session for {}: {session} in {}",
         profile.symbol,
-        session.day()?
+        session.get_day()?
     );
     Ok(())
 }

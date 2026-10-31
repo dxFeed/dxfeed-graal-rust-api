@@ -59,7 +59,7 @@ impl fmt::Display for ConnectionState {
 /// (`InstrumentProfileConnection`).
 ///
 /// A service with live updates sends the changes as they come; a file is read again every
-/// [`update_period`](Self::update_period) if it changed. Dropping the connection removes its state listeners and
+/// [`get_update_period`](Self::get_update_period) if it changed. Dropping the connection removes its state listeners and
 /// closes it.
 ///
 /// ```no_run
@@ -123,7 +123,7 @@ impl InstrumentProfileConnection {
 
     /// The address of the connection (`getAddress`).
     #[doc(alias = "getAddress")]
-    pub fn address(&self) -> Result<String> {
+    pub fn get_address(&self) -> Result<String> {
         let mut address = ptr::null();
         let c = self.handle.as_ptr();
         // SAFETY: the connection is live and the out-pointer is valid for writes.
@@ -134,7 +134,7 @@ impl InstrumentProfileConnection {
 
     /// How often a file is checked for changes and read again (`getUpdatePeriod`).
     #[doc(alias = "getUpdatePeriod")]
-    pub fn update_period(&self) -> Result<Duration> {
+    pub fn get_update_period(&self) -> Result<Duration> {
         let mut millis = 0;
         let c = self.handle.as_ptr();
         // SAFETY: the connection is live and the out-pointer is valid for writes.
@@ -153,7 +153,7 @@ impl InstrumentProfileConnection {
 
     /// The state of the connection (`getState`).
     #[doc(alias = "getState")]
-    pub fn state(&self) -> Result<ConnectionState> {
+    pub fn get_state(&self) -> Result<ConnectionState> {
         let mut state = sys::DXFG_IPF_CONNECTION_STATE_NOT_CONNECTED;
         let c = self.handle.as_ptr();
         // SAFETY: the connection is live and the out-pointer is valid for writes.
@@ -165,7 +165,7 @@ impl InstrumentProfileConnection {
     /// read yet (`getLastModified`). It is updated just after the state becomes
     /// [`Completed`](ConnectionState::Completed).
     #[doc(alias = "getLastModified")]
-    pub fn last_modified(&self) -> Result<i64> {
+    pub fn get_last_modified(&self) -> Result<i64> {
         let mut time = 0;
         let c = self.handle.as_ptr();
         // SAFETY: the connection is live and the out-pointer is valid for writes.

@@ -23,7 +23,7 @@ fn temp_file(name: &str) -> PathBuf {
 /// Polls the state of `endpoint` until it is `expected`, failing after [`TIMEOUT`].
 fn await_state(endpoint: &DXEndpoint, expected: State) {
     let deadline = Instant::now() + TIMEOUT;
-    while endpoint.state().unwrap() != expected {
+    while endpoint.get_state().unwrap() != expected {
         assert!(Instant::now() < deadline, "no {expected} state");
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -45,13 +45,13 @@ fn wait_for(states: &Receiver<(State, State)>, expected: State) {
 #[test]
 fn a_new_endpoint_is_not_connected_and_a_closed_one_is_closed() {
     let endpoint = DXEndpoint::create().unwrap();
-    assert_eq!(endpoint.state().unwrap(), State::NotConnected);
+    assert_eq!(endpoint.get_state().unwrap(), State::NotConnected);
     // Neither call needs a connection.
     endpoint.reconnect().unwrap();
     endpoint.disconnect_and_clear().unwrap();
-    assert_eq!(endpoint.state().unwrap(), State::NotConnected);
+    assert_eq!(endpoint.get_state().unwrap(), State::NotConnected);
     endpoint.close().unwrap();
-    assert_eq!(endpoint.state().unwrap(), State::Closed);
+    assert_eq!(endpoint.get_state().unwrap(), State::Closed);
 }
 
 #[test]
@@ -80,7 +80,7 @@ fn the_listener_sees_the_connection_to_a_peer_and_the_close() {
         .unwrap();
     endpoint.connect(&format!("127.0.0.1:{port}")).unwrap();
     wait_for(&states, State::Connected);
-    assert_eq!(endpoint.state().unwrap(), State::Connected);
+    assert_eq!(endpoint.get_state().unwrap(), State::Connected);
 
     endpoint.close().unwrap();
     wait_for(&states, State::Closed);
@@ -150,12 +150,12 @@ fn a_tape_file_written_by_a_publisher_is_read_back() {
         .connect(&format!("tape:{}[format=text]", file.display()))
         .unwrap();
     let events: Vec<Event> = sent.iter().cloned().map(Event::from).collect();
-    writer.publisher().publish_events(&events).unwrap();
+    writer.get_publisher().publish_events(&events).unwrap();
     writer.await_processed().unwrap();
     writer.close_and_await_termination().unwrap();
 
     let reader = DXEndpoint::create_with_role(Role::StreamFeed).unwrap();
-    let subscription = reader.feed().create_subscription::<Quote>().unwrap();
+    let subscription = reader.get_feed().create_subscription::<Quote>().unwrap();
     let (sender, received) = mpsc::channel();
     subscription
         .add_event_listener(move |quotes| {
@@ -182,7 +182,7 @@ fn a_tape_file_written_by_a_publisher_is_read_back() {
 #[test]
 fn the_waits_refuse_to_run_inside_a_listener() {
     let hub = DXEndpoint::create_with_role(Role::LocalHub).unwrap();
-    let subscription = hub.feed().create_subscription::<Quote>().unwrap();
+    let subscription = hub.get_feed().create_subscription::<Quote>().unwrap();
     let (sender, results) = mpsc::channel();
     let inner = hub.clone();
     subscription
@@ -191,7 +191,7 @@ fn the_waits_refuse_to_run_inside_a_listener() {
         })
         .unwrap();
     subscription.add_symbols(["IBM"]).unwrap();
-    hub.publisher().publish_events(&[Quote::new("IBM").into()]).unwrap();
+    hub.get_publisher().publish_events(&[Quote::new("IBM").into()]).unwrap();
     let (processed, not_connected) = results.recv_timeout(TIMEOUT).unwrap();
     assert!(matches!(processed, Err(Error::InCallback)));
     assert!(matches!(not_connected, Err(Error::InCallback)));

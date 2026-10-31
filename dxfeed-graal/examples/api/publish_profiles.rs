@@ -28,10 +28,10 @@ fn main() -> ExitCode {
 fn run(address: &str) -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::create_with_role(Role::Publisher)?;
     endpoint.connect(address)?;
-    let publisher = endpoint.publisher();
+    let publisher = endpoint.get_publisher();
 
     // The subscription of the publisher tells which symbols the clients ask the profiles of.
-    let subscription = publisher.subscription::<Profile>()?;
+    let subscription = publisher.get_subscription::<Profile>()?;
     subscription.add_change_listener(move |symbols: &[Symbol]| {
         let profiles: Vec<Event> = symbols
             .iter()

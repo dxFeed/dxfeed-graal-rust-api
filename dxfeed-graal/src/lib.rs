@@ -3,8 +3,8 @@
 //! The project is in alpha: the API may change in any release, and only a part of the SDK is covered.
 //!
 //! The names follow the dxFeed Java API: [`DXEndpoint`], [`DXFeed`], [`DXFeedSubscription`], [`DXPublisher`], with
-//! methods in snake case (`addEventListener` is [`add_event_listener`](DXFeedSubscription::add_event_listener)) and
-//! getters without `get` ([`DXEndpoint::feed`]); the Java names are search aliases in the documentation.
+//! methods in snake case: `addEventListener` is [`add_event_listener`](DXFeedSubscription::add_event_listener) and
+//! `getFeed` is [`get_feed`](DXEndpoint::get_feed). The Java names are search aliases in the documentation.
 //!
 //! # Example
 //!
@@ -16,7 +16,7 @@
 //!
 //! fn main() -> dxfeed_graal::Result<()> {
 //!     let endpoint = DXEndpoint::create()?;
-//!     let subscription = endpoint.feed().create_subscription::<Quote>()?;
+//!     let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
 //!     subscription.add_event_listener(|quotes| {
 //!         for quote in quotes {
 //!             println!("{quote}");
@@ -46,7 +46,7 @@
 //! fn main() -> dxfeed_graal::Result<()> {
 //!     let endpoint = DXEndpoint::create()?;
 //!     endpoint.connect("demo.dxfeed.com:7300")?;
-//!     let quote = endpoint.feed().get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(10))?;
+//!     let quote = endpoint.get_feed().get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(10))?;
 //!     println!("{quote}");
 //!     endpoint.close_and_await_termination()
 //! }

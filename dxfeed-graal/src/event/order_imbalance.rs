@@ -57,13 +57,13 @@ impl OrderImbalance {
     /// Changes the side of the imbalance.
     #[doc(alias = "setImbalanceSide")]
     pub fn set_imbalance_side(&mut self, side: ImbalanceSide) {
-        self.flags = IMBALANCE_SIDE.set32(self.flags, side.code());
+        self.flags = IMBALANCE_SIDE.set32(self.flags, side.get_code());
     }
 
     /// Changes the type of the auction.
     #[doc(alias = "setAuctionType")]
     pub fn set_auction_type(&mut self, auction_type: AuctionType) {
-        self.flags = IMBALANCE_AUCTION_TYPE.set32(self.flags, auction_type.code());
+        self.flags = IMBALANCE_AUCTION_TYPE.set32(self.flags, auction_type.get_code());
     }
 }
 

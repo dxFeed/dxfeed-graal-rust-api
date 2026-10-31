@@ -73,7 +73,7 @@ fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription<Quote>) {
     endpoint
         .connect(&format!("127.0.0.1:{}", peer.local_addr().unwrap().port()))
         .unwrap();
-    let subscription = endpoint.feed().create_subscription::<Quote>().unwrap();
+    let subscription = endpoint.get_feed().create_subscription::<Quote>().unwrap();
     subscription.add_event_listener(|_| {}).unwrap();
     subscription.add_symbols(&["AAPL"]).unwrap();
     // Let the endpoint connect, so its connection threads run.

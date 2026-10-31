@@ -28,7 +28,7 @@ fn run(address: &str, symbol: &str) -> dxfeed_graal::Result<()> {
     let endpoint = DXEndpoint::create()?;
     endpoint.connect(address)?;
     let profile = endpoint
-        .feed()
+        .get_feed()
         .get_last_event_promise::<Profile>(symbol)?
         .wait(Duration::from_secs(5))?;
     println!("{profile}");

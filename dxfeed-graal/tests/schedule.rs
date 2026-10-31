@@ -55,12 +55,12 @@ fn a_trading_day_and_its_sessions() {
     assert!(day.to_string().starts_with("Day(20261028, true, "), "{day}");
 
     let sessions: Vec<_> = day
-        .sessions()
+        .get_sessions()
         .unwrap()
         .iter()
         .map(|s| {
             (
-                s.session_type().unwrap(),
+                s.get_type().unwrap(),
                 s.start_time().unwrap() - midnight,
                 s.end_time().unwrap() - midnight,
             )
@@ -78,7 +78,7 @@ fn a_trading_day_and_its_sessions() {
     );
 
     let regular = day.get_session_by_time(midnight + 12 * HOUR).unwrap();
-    assert_eq!(regular.session_type().unwrap(), SessionType::Regular);
+    assert_eq!(regular.get_type().unwrap(), SessionType::Regular);
     assert!(regular.is_trading().unwrap());
     assert!(!regular.is_empty().unwrap());
     assert!(regular.contains_time(midnight + minutes(9, 30)).unwrap());
@@ -86,10 +86,10 @@ fn a_trading_day_and_its_sessions() {
         regular.to_string().starts_with("Session(20261028, REGULAR, true, "),
         "{regular}"
     );
-    assert_eq!(regular.day().unwrap(), day);
+    assert_eq!(regular.get_day().unwrap(), day);
     assert_eq!(day.get_first_session(SessionFilter::Regular).unwrap(), regular);
     let last = day.get_last_session(SessionFilter::Trading).unwrap();
-    assert_eq!(last.session_type().unwrap(), SessionType::AfterMarket);
+    assert_eq!(last.get_type().unwrap(), SessionType::AfterMarket);
 }
 
 #[test]
@@ -97,10 +97,10 @@ fn days_and_sessions_are_found_across_the_weekend() {
     let schedule = schedule();
     let saturday = schedule.get_day_by_year_month_day(20261031).unwrap();
     assert!(!saturday.is_trading().unwrap());
-    assert_eq!(saturday.sessions().unwrap().len(), 1);
+    assert_eq!(saturday.get_sessions().unwrap().len(), 1);
     assert!(saturday.find_first_session(SessionFilter::Trading).unwrap().is_none());
     match saturday.get_first_session(SessionFilter::Trading) {
-        Err(Error::Java(e)) => assert_eq!(e.class_name(), "java.util.NoSuchElementException"),
+        Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "java.util.NoSuchElementException"),
         other => panic!("expected NoSuchElementException, got {other:?}"),
     }
 
@@ -122,19 +122,16 @@ fn days_and_sessions_are_found_across_the_weekend() {
     // Friday's after-market session is followed by Monday's pre-market one, at 04:00 New York time, UTC-5 by then.
     let friday_evening = OCTOBER_28_2026 + 2 * 24 * HOUR + 22 * HOUR;
     let after_market = schedule.get_session_by_time(friday_evening).unwrap();
-    assert_eq!(after_market.session_type().unwrap(), SessionType::AfterMarket);
+    assert_eq!(after_market.get_type().unwrap(), SessionType::AfterMarket);
     let next = after_market.get_next_session(SessionFilter::Trading).unwrap();
-    assert_eq!(next.session_type().unwrap(), SessionType::PreMarket);
+    assert_eq!(next.get_type().unwrap(), SessionType::PreMarket);
     assert_eq!(next.start_time().unwrap(), OCTOBER_28_2026 + 5 * 24 * HOUR + 9 * HOUR);
     assert_eq!(
         next.find_prev_session(SessionFilter::AfterMarket).unwrap().unwrap(),
         after_market
     );
     assert_eq!(
-        next.get_prev_session(SessionFilter::Any)
-            .unwrap()
-            .session_type()
-            .unwrap(),
+        next.get_prev_session(SessionFilter::Any).unwrap().get_type().unwrap(),
         SessionType::NoTrading
     );
 
@@ -193,7 +190,7 @@ fn each_filter_finds_its_days_and_sessions() {
     ];
     for (filter, session_type) in sessions {
         let session = day.get_first_session(filter).unwrap();
-        assert_eq!(session.session_type().unwrap(), session_type, "{filter:?}");
+        assert_eq!(session.get_type().unwrap(), session_type, "{filter:?}");
     }
 }
 
@@ -210,7 +207,7 @@ fn equal_days_are_equal_and_hash_alike() {
 #[test]
 fn a_broken_definition_is_an_error() {
     match Schedule::get_instance_by_definition("Test(") {
-        Err(Error::Java(e)) => assert_eq!(e.class_name(), "java.lang.IllegalArgumentException"),
+        Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "java.lang.IllegalArgumentException"),
         other => panic!("expected IllegalArgumentException, got {other:?}"),
     }
 }

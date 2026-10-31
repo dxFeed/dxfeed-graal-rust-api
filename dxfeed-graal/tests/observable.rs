@@ -57,9 +57,9 @@ fn none(changes: &Receiver<Change>) {
 #[test]
 fn publisher_subscription_observes_the_symbols_of_feeds() {
     let hub = Hub::with_default_executor();
-    let observed = hub.publisher.subscription::<Profile>().unwrap();
+    let observed = hub.publisher.get_subscription::<Profile>().unwrap();
     assert!(!observed.is_closed().unwrap());
-    assert_eq!(observed.event_types().unwrap(), [EventType::Profile]);
+    assert_eq!(observed.get_event_types().unwrap(), [EventType::Profile]);
     assert!(observed.contains_event_type(EventType::Profile).unwrap());
     assert!(!observed.contains_event_type(EventType::Quote).unwrap());
     let (listener, changes) = recorder();
@@ -100,14 +100,14 @@ fn listeners_see_every_kind_of_symbol() {
         .build()
         .unwrap();
     let (candle_listener, candle_changes) = recorder();
-    let candles = endpoint.publisher().subscription::<Candle>().unwrap();
+    let candles = endpoint.get_publisher().get_subscription::<Candle>().unwrap();
     candles.add_change_listener(candle_listener).unwrap();
     let (order_listener, order_changes) = recorder();
-    let orders = endpoint.publisher().subscription::<Order>().unwrap();
+    let orders = endpoint.get_publisher().get_subscription::<Order>().unwrap();
     orders.add_change_listener(order_listener).unwrap();
 
     let candle = CandleSymbol::value_of("AAPL{=d}").unwrap();
-    let candle_subscription = endpoint.feed().create_subscription::<Candle>().unwrap();
+    let candle_subscription = endpoint.get_feed().create_subscription::<Candle>().unwrap();
     candle_subscription
         .add_symbols([Symbol::time_series(&candle, 1_000)])
         .unwrap();
@@ -116,7 +116,7 @@ fn listeners_see_every_kind_of_symbol() {
         Change::Added(vec![Symbol::time_series(candle, 1_000)])
     );
 
-    let order_subscription = endpoint.feed().create_subscription::<Order>().unwrap();
+    let order_subscription = endpoint.get_feed().create_subscription::<Order>().unwrap();
     order_subscription
         .add_symbols([Symbol::indexed("AAPL", OrderSource::NTV)])
         .unwrap();
@@ -131,7 +131,7 @@ fn listeners_see_every_kind_of_symbol() {
 #[test]
 fn a_listener_publishes_what_feeds_ask_for() {
     let hub = Hub::with_default_executor();
-    let observed = hub.publisher.subscription::<Profile>().unwrap();
+    let observed = hub.publisher.get_subscription::<Profile>().unwrap();
     let publisher = hub.publisher.clone();
     observed
         .add_change_listener(move |symbols: &[Symbol]| {
@@ -173,7 +173,7 @@ fn closing_tells_the_listeners() {
     subscription.close().unwrap();
     assert_eq!(next(&changes), Change::Closed);
 
-    let observed = hub.publisher.subscription::<Profile>().unwrap();
+    let observed = hub.publisher.get_subscription::<Profile>().unwrap();
     let (listener, changes) = recorder();
     observed.add_change_listener(listener).unwrap();
     hub.endpoint.close().unwrap();
@@ -205,7 +205,7 @@ impl ObservableSubscriptionChangeListener for SelfRemover {
 #[test]
 fn a_listener_removes_itself() {
     let hub = Hub::with_default_executor();
-    let observed = Arc::new(hub.publisher.subscription::<Profile>().unwrap());
+    let observed = Arc::new(hub.publisher.get_subscription::<Profile>().unwrap());
     let (ids, id) = mpsc::channel();
     let (sender, changes) = mpsc::channel();
     let listener = SelfRemover {
@@ -241,7 +241,7 @@ fn listeners_stay_until_the_endpoint_closes() {
     // As in Java, the subscription object is a temporary, and the listener holds the publisher.
     let publisher = hub.publisher.clone();
     hub.publisher
-        .subscription::<Profile>()
+        .get_subscription::<Profile>()
         .unwrap()
         .add_change_listener(move |symbols: &[Symbol]| {
             let _held = (&signal, &publisher);

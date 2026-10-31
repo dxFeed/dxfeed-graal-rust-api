@@ -176,7 +176,7 @@ impl Shared {
     fn received(&self, source: IndexedEventSource, orders: impl Iterator<Item = Order>, is_snapshot: bool) {
         let mut state = self.state.lock().unwrap();
         if is_snapshot {
-            state.orders.retain(|_, order| order.source() != source.id());
+            state.orders.retain(|_, order| order.source() != source.get_id());
         }
         for order in orders {
             state.orders.remove(&order.index);

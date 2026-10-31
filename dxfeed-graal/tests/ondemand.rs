@@ -8,19 +8,19 @@ use dxfeed_graal::{DXEndpoint, Role};
 fn the_default_service_has_its_own_endpoint() {
     let service = OnDemandService::get_instance().unwrap();
     assert!(std::ptr::eq(service, OnDemandService::get_instance().unwrap()));
-    assert_eq!(service.endpoint().role(), Role::OnDemandFeed);
+    assert_eq!(service.get_endpoint().get_role(), Role::OnDemandFeed);
 }
 
 #[test]
 fn a_service_without_a_provider_does_not_replay() {
     let endpoint = DXEndpoint::create().unwrap();
     let service = OnDemandService::get_instance_for(&endpoint).unwrap();
-    assert_eq!(service.endpoint().role(), Role::Feed);
+    assert_eq!(service.get_endpoint().get_role(), Role::Feed);
     assert!(!service.is_replay_supported().unwrap());
     assert!(!service.is_replay().unwrap());
     assert!(!service.is_clear().unwrap());
-    assert_eq!(service.time().unwrap(), 0);
-    assert_eq!(service.speed().unwrap(), 0.0);
+    assert_eq!(service.get_time().unwrap(), 0);
+    assert_eq!(service.get_speed().unwrap(), 0.0);
 
     assert!(service.replay(1_273_175_268_000).is_err());
     assert!(service.replay_with_speed(1_273_175_268_000, 2.0).is_err());
@@ -49,9 +49,9 @@ fn an_on_demand_address_supports_the_replay() {
     assert!(service.is_replay_supported().unwrap());
     service.replay_with_speed(1_273_175_268_000, 2.0).unwrap();
     assert!(service.is_replay().unwrap());
-    assert_eq!(service.speed().unwrap(), 2.0);
+    assert_eq!(service.get_speed().unwrap(), 2.0);
     service.pause().unwrap();
-    assert_eq!(service.speed().unwrap(), 0.0);
+    assert_eq!(service.get_speed().unwrap(), 0.0);
     service.stop_and_resume().unwrap();
     assert!(!service.is_replay().unwrap());
     endpoint.close().unwrap();

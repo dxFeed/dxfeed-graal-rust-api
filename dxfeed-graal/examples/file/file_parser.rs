@@ -34,7 +34,7 @@ fn run(file: &str, types: &str, symbols: &str) -> dxfeed_graal::Result<()> {
 
     // A stream feed delivers every event of the file, not only the last one of each symbol.
     let endpoint = DXEndpoint::create_with_role(Role::StreamFeed)?;
-    let subscription = endpoint.feed().create_subscription_with_types(&types)?;
+    let subscription = endpoint.get_feed().create_subscription_with_types(&types)?;
     let mut counter = 0u64;
     subscription.add_event_listener(move |events| {
         for event in events {

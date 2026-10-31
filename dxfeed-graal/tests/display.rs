@@ -131,7 +131,7 @@ fn setters_keep_the_other_packed_values() {
         (Direction::Down, true)
     );
     trade.set_extended_trading_hours(false);
-    assert_eq!(trade.flags, Direction::Down.code() << 1);
+    assert_eq!(trade.flags, Direction::Down.get_code() << 1);
 }
 
 #[test]

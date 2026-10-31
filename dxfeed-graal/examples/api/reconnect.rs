@@ -30,7 +30,7 @@ fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
     endpoint.add_state_listener(|old, new| println!("Connection state changed: {old}->{new}"))?;
     endpoint.connect(address)?;
 
-    let subscription = endpoint.feed().create_subscription::<Quote>()?;
+    let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
     subscription.add_event_listener(|quotes| {
         for quote in quotes {
             println!("{quote}");

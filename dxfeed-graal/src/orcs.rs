@@ -120,7 +120,7 @@ impl PriceLevelService {
 
     /// The order sources and their symbols that the client may request, as of now (`getAuthOrderSource`).
     #[doc(alias = "getAuthOrderSource")]
-    pub fn auth_order_source(&self) -> Result<AuthOrderSource> {
+    pub fn get_auth_order_source(&self) -> Result<AuthOrderSource> {
         let s = self.handle.as_ptr();
         // SAFETY: the service is live and the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_PriceLevelService_getAuthOrderSource(t, s, out) })?;
@@ -170,7 +170,7 @@ pub struct AuthOrderSource {
 impl AuthOrderSource {
     /// The symbols of each available order source, by the id of the source (`getByIds`).
     #[doc(alias = "getByIds")]
-    pub fn by_ids(&self) -> Result<HashMap<i32, Vec<String>>> {
+    pub fn get_by_ids(&self) -> Result<HashMap<i32, Vec<String>>> {
         let mut list = ptr::null_mut();
         let a = self.handle.as_ptr();
         // SAFETY: the object is live and the out-pointer is valid for writes.
@@ -190,7 +190,7 @@ impl AuthOrderSource {
 
     /// The symbols of each available order source (`getByOrderSources`).
     #[doc(alias = "getByOrderSources")]
-    pub fn by_order_sources(&self) -> Result<HashMap<IndexedEventSource, Vec<String>>> {
+    pub fn get_by_order_sources(&self) -> Result<HashMap<IndexedEventSource, Vec<String>>> {
         let mut list = ptr::null_mut();
         let a = self.handle.as_ptr();
         // SAFETY: the object is live and the out-pointer is valid for writes.
