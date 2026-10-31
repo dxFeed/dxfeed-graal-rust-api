@@ -3,7 +3,8 @@
 //! Usage: `cargo run --example CandleSample -- <address> <symbol> [<fromTime>] [<attribute>=<value> ...]`
 
 use dxfeed_graal::event::{
-    Candle, CandleAlignment, CandleAttribute, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
+    Candle, CandleAlignment, CandleAttribute, CandleExchange, CandlePeriod, CandlePrice, CandlePriceLevel,
+    CandleSession, CandleSymbol, CandleType,
 };
 use dxfeed_graal::{DXEndpoint, Symbol, TimeFormat};
 
@@ -68,7 +69,7 @@ fn main() -> dxfeed_graal::Result<()> {
         };
 
         if name == "exchange" && value.len() == 1 {
-            attributes.push(CandleAttribute::Exchange(value.as_bytes()[0] as char));
+            attributes.push(CandleExchange::value_of(value.as_bytes()[0] as char).into());
         } else if name == "period" {
             period_value = Some(stod(value));
         } else if name == "type" {
@@ -80,7 +81,7 @@ fn main() -> dxfeed_graal::Result<()> {
         } else if name == "alignment" {
             attributes.push(CandleAlignment::parse(value)?.into());
         } else if name == "priceLevel" {
-            attributes.push(CandleAttribute::PriceLevel(stod(value)));
+            attributes.push(CandlePriceLevel::value_of(stod(value))?.into());
         } else {
             eprintln!("Invalid attribute: {arg}");
             print_usage();

@@ -55,7 +55,8 @@ use dxfeed_graal_sys as sys;
 pub use analytic_order::{AnalyticOrder, AnalyticOrderRef};
 pub use candle::{Candle, CandleRef};
 pub use candle_symbol::{
-    CandleAlignment, CandleAttribute, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
+    CandleAlignment, CandleAttribute, CandleDataType, CandleExchange, CandlePeriod, CandlePrice, CandlePriceLevel,
+    CandleSession, CandleSymbol, CandleType,
 };
 pub use configuration::{Configuration, ConfigurationRef};
 pub use daily_candle::{DailyCandle, DailyCandleRef};

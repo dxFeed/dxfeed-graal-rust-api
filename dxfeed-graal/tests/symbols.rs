@@ -7,8 +7,9 @@ use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use dxfeed_graal::event::{
-    Candle, CandleAlignment, CandleAttribute, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
-    EventFlags, IndexedEvent, Order, OrderSource, Quote, TimeSeriesEvent,
+    Candle, CandleAlignment, CandleAttribute, CandleDataType, CandleExchange, CandlePeriod, CandlePrice,
+    CandlePriceLevel, CandleSession, CandleSymbol, CandleType, EventFlags, IndexedEvent, Order, OrderSource, Quote,
+    TimeSeriesEvent,
 };
 use dxfeed_graal::{DXEndpoint, Error, Event, Role, Symbol, TimeFormat, live_events};
 use support::{Hub, candle, collect, order, quote};
@@ -213,16 +214,17 @@ fn candle_symbols_are_normalized() {
     let symbol = CandleSymbol::value_of_with(
         "AAPL{=d}",
         [
-            CandleAttribute::Exchange('Q'),
+            CandleExchange::value_of('Q').into(),
             CandlePeriod::value_of(5.0, CandleType::Minute).into(),
             CandlePrice::Bid.into(),
             CandleSession::Regular.into(),
             CandleAlignment::Session.into(),
-            CandleAttribute::PriceLevel(0.5),
+            CandlePriceLevel::value_of(0.5).unwrap().into(),
+            CandleAttribute::DataType(CandleDataType::THO),
         ],
     )
     .unwrap();
-    assert_eq!(symbol.as_str(), "AAPL&Q{=5m,a=s,pl=0.5,price=bid,tho=true}");
+    assert_eq!(symbol.as_str(), "AAPL&Q{=5m,a=s,dt=tho,pl=0.5,price=bid,tho=true}");
     assert_eq!(
         CandleSymbol::value_of_with("AAPL{=d}", [CandlePrice::Last])
             .unwrap()
