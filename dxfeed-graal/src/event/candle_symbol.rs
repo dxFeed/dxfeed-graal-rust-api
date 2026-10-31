@@ -4,26 +4,23 @@
 use std::borrow::Cow;
 use std::fmt::{self, Display, Formatter};
 use std::hash::{Hash, Hasher};
-use std::ptr::{self, NonNull};
 use std::str::FromStr;
-
-use dxfeed_graal_sys as sys;
 
 use super::format::JavaDouble;
 use super::market_event_symbols::{
-    change_attribute_string_by_key, change_exchange_code, get_attribute_string_by_key, get_exchange_code,
-    remove_attribute_string_by_key,
+    change_attribute_string_by_key, change_exchange_code, get_attribute_string_by_key, get_base_symbol,
+    get_exchange_code, remove_attribute_string_by_key,
 };
-use crate::error::{Error, JavaException, Result, c_string};
-use crate::isolate::{self, call};
+use crate::error::{Error, Result};
 use crate::schedule::SessionFilter;
 
 /// The symbol of candles: a base symbol with the attributes of the candles in braces, such as `AAPL{=d}` for the
 /// daily candles of `AAPL`, or `AAPL&Q{=5m,price=bid}` for the 5-minute candles of its bid prices on the exchange `Q`
 /// (`CandleSymbol`).
 ///
-/// A candle symbol is normalized as Java's `CandleSymbol.valueOf` normalizes it: the attributes with their default
-/// values are removed, and a new attribute goes before the first one whose key is greater, as Java adds it.
+/// A candle symbol is normalized as Java's `CandleSymbol.valueOf` normalizes it: each attribute is written as its type
+/// writes it, such as `=d` for `=1d`, and an attribute given to [`value_of_with`](Self::value_of_with) goes before the
+/// first one whose key is greater, or goes away with its default value. Two symbols are equal when their texts are.
 ///
 /// ```no_run
 /// # fn main() -> dxfeed_graal::Result<()> {
@@ -34,54 +31,214 @@ use crate::schedule::SessionFilter;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CandleSymbol(String);
+#[derive(Debug, Clone)]
+pub struct CandleSymbol {
+    symbol: String,
+    exchange: CandleExchange,
+    price: CandlePrice,
+    session: CandleSession,
+    period: CandlePeriod,
+    alignment: CandleAlignment,
+    price_level: CandlePriceLevel,
+    data_type: CandleDataType,
+}
+
+/// The attributes given to [`CandleSymbol::value_of_with`], which the symbol keeps in place of those it reads.
+#[derive(Default)]
+struct Given {
+    exchange: Option<CandleExchange>,
+    price: Option<CandlePrice>,
+    session: Option<CandleSession>,
+    period: Option<CandlePeriod>,
+    alignment: Option<CandleAlignment>,
+    price_level: Option<CandlePriceLevel>,
+    data_type: Option<CandleDataType>,
+}
+
+impl Given {
+    /// Keeps `attribute`, as Java's `checkInAttributeImpl`.
+    ///
+    /// Returns [`Error::InvalidArgument`] if an attribute of its kind is already kept.
+    fn check_in(&mut self, attribute: CandleAttribute) -> Result<()> {
+        fn put<T>(slot: &mut Option<T>, value: T) -> Result<()> {
+            match slot {
+                Some(_) => Err(Error::InvalidArgument("Already initialized".to_owned())),
+                None => {
+                    *slot = Some(value);
+                    Ok(())
+                }
+            }
+        }
+        match attribute {
+            CandleAttribute::Exchange(exchange) => put(&mut self.exchange, exchange),
+            CandleAttribute::Period(period) => put(&mut self.period, period),
+            CandleAttribute::Price(price) => put(&mut self.price, price),
+            CandleAttribute::Session(session) => put(&mut self.session, session),
+            CandleAttribute::Alignment(alignment) => put(&mut self.alignment, alignment),
+            CandleAttribute::PriceLevel(level) => put(&mut self.price_level, level),
+            CandleAttribute::DataType(data_type) => put(&mut self.data_type, data_type),
+        }
+    }
+}
 
 impl CandleSymbol {
     /// The normalized candle symbol of the text `symbol` (`CandleSymbol.valueOf(String)`).
     ///
-    /// Returns [`Error::Java`] for a malformed attribute, such as `AAPL{=zzz}`.
+    /// Returns [`Error::InvalidArgument`] for a malformed attribute, such as `AAPL{=zzz}`.
     #[doc(alias = "valueOf")]
     pub fn value_of(symbol: &str) -> Result<CandleSymbol> {
-        normalize(symbol).map(CandleSymbol)
+        CandleSymbol::with(normalize(symbol), Given::default(), true)
     }
 
     /// The normalized candle symbol of `symbol` with `attributes`, which replace those of the same kinds in `symbol`
     /// (`CandleSymbol.valueOf(String, CandleSymbolAttribute...)`).
     ///
-    /// Returns [`Error::Java`] for a malformed attribute.
+    /// Returns [`Error::InvalidArgument`] for a malformed attribute of `symbol` or for two attributes of one kind, such
+    /// as two periods, as Java refuses them. A given attribute is kept as it is, as in Java, even one that its text
+    /// does not give back, such as a period of `NaN` minutes.
     #[doc(alias = "valueOf")]
     pub fn value_of_with(
         symbol: &str,
         attributes: impl IntoIterator<Item: Into<CandleAttribute>>,
     ) -> Result<CandleSymbol> {
+        let attributes: Vec<CandleAttribute> = attributes.into_iter().map(Into::into).collect();
         let mut text = symbol.to_owned();
-        for attribute in attributes {
-            text = attribute.into().change_attribute_for_symbol(&text);
+        for attribute in &attributes {
+            text = attribute.change_attribute_for_symbol(&text);
         }
-        normalize(&text).map(CandleSymbol)
+        let text = normalize(&text);
+        let mut given = Given::default();
+        for attribute in attributes {
+            given.check_in(attribute)?;
+        }
+        CandleSymbol::with(text, given, true)
     }
 
-    /// The candle symbol of a text the SDK has normalized.
+    /// The candle symbol of a text the SDK has normalized; an attribute that this crate cannot read, as the text of a
+    /// given period of `NaN` minutes, reads as its default.
     pub(crate) fn from_normalized(text: String) -> CandleSymbol {
-        CandleSymbol(text)
+        CandleSymbol::with(text, Given::default(), false).expect("a lenient read does not fail")
+    }
+
+    /// The candle symbol of the normalized text `symbol` with the `given` attributes and those it reads from the text,
+    /// as Java's `initTransientFields`; a malformed attribute fails if `strict`, else reads as its default.
+    fn with(symbol: String, given: Given, strict: bool) -> Result<CandleSymbol> {
+        /// The given attribute, else the one that `read` reads.
+        fn pick<T: Default>(given: Option<T>, read: impl FnOnce() -> Result<T>, strict: bool) -> Result<T> {
+            match given.map_or_else(read, Ok) {
+                Err(_) if !strict => Ok(T::default()),
+                result => result,
+            }
+        }
+        Ok(CandleSymbol {
+            exchange: pick(
+                given.exchange,
+                || Ok(CandleExchange::get_attribute_for_symbol(&symbol)),
+                strict,
+            )?,
+            price: pick(given.price, || CandlePrice::get_attribute_for_symbol(&symbol), strict)?,
+            session: pick(
+                given.session,
+                || Ok(CandleSession::get_attribute_for_symbol(&symbol)),
+                strict,
+            )?,
+            period: pick(given.period, || CandlePeriod::get_attribute_for_symbol(&symbol), strict)?,
+            alignment: pick(
+                given.alignment,
+                || CandleAlignment::get_attribute_for_symbol(&symbol),
+                strict,
+            )?,
+            price_level: pick(
+                given.price_level,
+                || CandlePriceLevel::get_attribute_for_symbol(&symbol),
+                strict,
+            )?,
+            data_type: pick(
+                given.data_type,
+                || Ok(CandleDataType::get_attribute_for_symbol(&symbol)),
+                strict,
+            )?,
+            symbol,
+        })
     }
 
     /// The text of the symbol (`toString`).
     pub fn as_str(&self) -> &str {
-        &self.0
+        &self.symbol
+    }
+
+    /// The base symbol, without the exchange code and the attributes, such as `AAPL` for `AAPL&Q{=d}`.
+    #[doc(alias = "getBaseSymbol")]
+    pub fn get_base_symbol(&self) -> &str {
+        get_base_symbol(&self.symbol)
+    }
+
+    /// The exchange, [`CandleExchange::COMPOSITE`] without an exchange code.
+    #[doc(alias = "getExchange")]
+    pub fn get_exchange(&self) -> CandleExchange {
+        self.exchange
+    }
+
+    /// The price the candles aggregate.
+    #[doc(alias = "getPrice")]
+    pub fn get_price(&self) -> CandlePrice {
+        self.price
+    }
+
+    /// The trading session of the candles.
+    #[doc(alias = "getSession")]
+    pub fn get_session(&self) -> CandleSession {
+        self.session
+    }
+
+    /// The aggregation period.
+    #[doc(alias = "getPeriod")]
+    pub fn get_period(&self) -> CandlePeriod {
+        self.period
+    }
+
+    /// The alignment of the candles.
+    #[doc(alias = "getAlignment")]
+    pub fn get_alignment(&self) -> CandleAlignment {
+        self.alignment
+    }
+
+    /// The price level of the candles, [`CandlePriceLevel::DEFAULT`] for none.
+    #[doc(alias = "getPriceLevel")]
+    pub fn get_price_level(&self) -> CandlePriceLevel {
+        self.price_level
+    }
+
+    /// The type of the data of the candles, [`CandleDataType::DEFAULT`] for none.
+    #[doc(alias = "getDataType")]
+    pub fn get_data_type(&self) -> &CandleDataType {
+        &self.data_type
+    }
+}
+
+impl PartialEq for CandleSymbol {
+    fn eq(&self, other: &Self) -> bool {
+        self.symbol == other.symbol
+    }
+}
+
+impl Eq for CandleSymbol {}
+
+impl Hash for CandleSymbol {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.symbol.hash(state);
     }
 }
 
 impl Display for CandleSymbol {
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        f.pad(&self.0)
+        f.pad(&self.symbol)
     }
 }
 
 impl AsRef<str> for CandleSymbol {
     fn as_ref(&self) -> &str {
-        &self.0
+        &self.symbol
     }
 }
 
@@ -221,6 +378,57 @@ impl CandlePeriod {
     pub fn get_type(self) -> CandleType {
         self.candle_type
     }
+
+    /// The width of the period in milliseconds, `0` for a unit without one, such as ticks or volume
+    /// (`getPeriodIntervalMillis`): the width of the unit times the value, the fraction dropped as Java casts it.
+    #[doc(alias = "getPeriodIntervalMillis")]
+    pub fn get_period_interval_millis(self) -> i64 {
+        (self.candle_type.get_period_interval_millis() as f64 * self.value) as i64
+    }
+
+    /// Parses a period as Java's `CandlePeriod.parse` does: a number, `1` if left out, then the unit as
+    /// [`CandleType::parse`] reads it, such as `5m`, `1.5h`, `d` or `Days`.
+    ///
+    /// Returns [`Error::InvalidArgument`] for a malformed number or unit.
+    pub fn parse(text: &str) -> Result<CandlePeriod> {
+        if text == CandleType::Day.as_str() {
+            return Ok(CandlePeriod::DAY);
+        }
+        if text == CandleType::Tick.as_str() {
+            return Ok(CandlePeriod::TICK);
+        }
+        let at = text
+            .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+            .unwrap_or(text.len());
+        let (value, unit) = text.split_at(at);
+        let value = if value.is_empty() { 1.0 } else { parse_double(value)? };
+        Ok(CandlePeriod::value_of(value, CandleType::parse(unit)?))
+    }
+
+    /// The period of `symbol`, [`DEFAULT`](Self::DEFAULT) without one (`CandlePeriod.getAttributeForSymbol`).
+    ///
+    /// Returns [`Error::InvalidArgument`] for a value that [`parse`](Self::parse) refuses.
+    #[doc(alias = "getAttributeForSymbol")]
+    pub fn get_attribute_for_symbol(symbol: &str) -> Result<CandlePeriod> {
+        get_attribute_string_by_key(symbol, Self::ATTRIBUTE_KEY).map_or(Ok(Self::DEFAULT), Self::parse)
+    }
+
+    /// `symbol` with the period written as Java writes it, such as `=d` for `=1d`; a malformed or default value is
+    /// kept, as in Java (`CandlePeriod.normalizeAttributeForSymbol`).
+    #[doc(alias = "normalizeAttributeForSymbol")]
+    pub fn normalize_attribute_for_symbol(symbol: &str) -> String {
+        normalize_attribute(symbol, Self::ATTRIBUTE_KEY, |text| {
+            Self::parse(text).ok().map(|period| period.to_string())
+        })
+    }
+}
+
+impl FromStr for CandlePeriod {
+    type Err = Error;
+
+    fn from_str(text: &str) -> Result<Self> {
+        CandlePeriod::parse(text)
+    }
 }
 
 impl Default for CandlePeriod {
@@ -359,15 +567,7 @@ impl CandlePriceLevel {
     ///
     /// Returns [`Error::InvalidArgument`] for any other text and the values [`value_of`](Self::value_of) refuses.
     pub fn parse(text: &str) -> Result<CandlePriceLevel> {
-        let value = parse_java_double(text).ok_or_else(|| {
-            let text = text.trim_matches(|c| c <= ' ');
-            Error::InvalidArgument(if text.is_empty() {
-                "empty String".to_owned()
-            } else {
-                format!("For input string: \"{text}\"")
-            })
-        })?;
-        CandlePriceLevel::value_of(value)
+        CandlePriceLevel::value_of(parse_double(text)?)
     }
 
     /// The value; `NaN` for [`DEFAULT`](Self::DEFAULT).
@@ -427,6 +627,20 @@ impl FromStr for CandlePriceLevel {
     fn from_str(text: &str) -> Result<Self> {
         CandlePriceLevel::parse(text)
     }
+}
+
+/// A number as Java's `Double.parseDouble` reads it, see [`parse_java_double`].
+///
+/// Returns [`Error::InvalidArgument`] with the message of Java's `NumberFormatException` for any other text.
+fn parse_double(text: &str) -> Result<f64> {
+    parse_java_double(text).ok_or_else(|| {
+        let text = text.trim_matches(|c| c <= ' ');
+        Error::InvalidArgument(if text.is_empty() {
+            "empty String".to_owned()
+        } else {
+            format!("For input string: \"{text}\"")
+        })
+    })
 }
 
 /// A number as Java's `Double.parseDouble` reads it: surrounding control characters and spaces are ignored, a
@@ -683,6 +897,26 @@ candle_enum!(
     }
 );
 
+impl CandleType {
+    /// The width of one unit in milliseconds, `0` for a unit without one: ticks, volume and the price units; a month
+    /// and an option expiration are 30 days, a year 365 days (`getPeriodIntervalMillis`).
+    #[doc(alias = "getPeriodIntervalMillis")]
+    pub fn get_period_interval_millis(self) -> i64 {
+        const DAY: i64 = 24 * 60 * 60 * 1000;
+        match self {
+            CandleType::Tick | CandleType::Volume | CandleType::Price | CandleType::PriceMomentum => 0,
+            CandleType::PriceRenko => 0,
+            CandleType::Second => 1000,
+            CandleType::Minute => 60 * 1000,
+            CandleType::Hour => 60 * 60 * 1000,
+            CandleType::Day => DAY,
+            CandleType::Week => 7 * DAY,
+            CandleType::Month | CandleType::OptExp => 30 * DAY,
+            CandleType::Year => 365 * DAY,
+        }
+    }
+}
+
 parsed_attribute!(CandlePrice, Last, "price");
 
 candle_enum!(
@@ -846,27 +1080,15 @@ fn unknown(what: &str, text: &str) -> Error {
     Error::InvalidArgument(format!("Unknown {what}: {text}"))
 }
 
-/// The text of the candle symbol `symbol` normalized by the SDK (Java `CandleSymbol.valueOf`).
-fn normalize(symbol: &str) -> Result<String> {
-    let text = c_string(symbol, "the candle symbol")?;
-    let mut raw = ptr::null_mut();
-    // SAFETY: the text is NUL-terminated and the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_Symbol_new(t, text.as_ptr(), sys::CANDLE, &mut raw) })?;
-    let symbol = NonNull::new(raw).ok_or_else(|| Error::Java(JavaException::null_result()))?;
-    // SAFETY: the symbol is live until it is released below; a candle symbol is a `dxfg_candle_symbol_t`.
-    let normalized = unsafe {
-        let symbol = symbol.as_ptr();
-        ((*symbol).type_ == sys::CANDLE)
-            .then(|| (*symbol.cast::<sys::dxfg_candle_symbol_t>()).symbol)
-            .filter(|text| !text.is_null())
-            .map(|text| isolate::string(text).into_owned())
-    };
-    // SAFETY: the symbol came from dxfg_v4_Symbol_new and is released once; a failed release leaks it.
-    crate::error_manager::report_release(
-        "CandleSymbol",
-        call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol.as_ptr()) }),
-    );
-    normalized.ok_or_else(|| Error::Java(JavaException::from_message("the SDK returned no candle symbol")))
+/// `symbol` with each attribute written as its type writes it, as Java's `CandleSymbol.normalize`: a malformed
+/// attribute is kept, as is a default one.
+fn normalize(symbol: &str) -> String {
+    let symbol = CandlePrice::normalize_attribute_for_symbol(symbol);
+    let symbol = CandleSession::normalize_attribute_for_symbol(&symbol);
+    let symbol = CandlePeriod::normalize_attribute_for_symbol(&symbol);
+    let symbol = CandleAlignment::normalize_attribute_for_symbol(&symbol);
+    let symbol = CandlePriceLevel::normalize_attribute_for_symbol(&symbol);
+    CandleDataType::normalize_attribute_for_symbol(&symbol)
 }
 
 #[cfg(test)]

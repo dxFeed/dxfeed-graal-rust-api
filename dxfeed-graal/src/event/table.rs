@@ -41,9 +41,9 @@ macro_rules! event_type {
                 "A `", stringify!($name), "` for `symbol` with the default values of Java's `new ",
                 stringify!($name), "(symbol)`."
             )]
-            pub fn new(symbol: &str) -> Self {
+            pub fn new(symbol: impl AsRef<str>) -> Self {
                 $name {
-                    symbol: symbol.to_owned(),
+                    symbol: symbol.as_ref().to_owned(),
                     event_time: 0,
                     $( $field: $default, )*
                 }
@@ -822,12 +822,21 @@ macro_rules! candle_fields {
     (
         [$($p:ident).*]
         $cb:ident! {
-            head { $(#[$doc:meta])* $name:ident, $($head:tt)* }
+            head { $(#[$doc:meta])* $name:ident, $view:ident, $($head:tt)* }
             fields { $($fields:tt)* }
             derived { $($derived:tt)* }
         }
     ) => {
         impl $name {
+            /// The symbol as a candle symbol (`getEventSymbol`), normalized as
+            /// [`CandleSymbol::value_of`]($crate::event::CandleSymbol::value_of) normalizes it.
+            ///
+            /// Returns [`Error::InvalidArgument`]($crate::Error::InvalidArgument) for a malformed attribute.
+            #[doc(alias = "getEventSymbol")]
+            pub fn candle_symbol(&self) -> $crate::Result<$crate::event::CandleSymbol> {
+                $crate::event::CandleSymbol::value_of(&self.symbol)
+            }
+
             /// Writes the text of Java's `Candle.toString` after `{` and before `}`.
             fn fmt_candle(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
                 use $crate::event::format::{JavaDouble, Time};
@@ -855,10 +864,21 @@ macro_rules! candle_fields {
             }
         }
 
+        impl $view {
+            /// The symbol as a candle symbol (`getEventSymbol`), normalized as
+            /// [`CandleSymbol::value_of`]($crate::event::CandleSymbol::value_of) normalizes it.
+            ///
+            /// Returns [`Error::InvalidArgument`]($crate::Error::InvalidArgument) for a malformed attribute.
+            #[doc(alias = "getEventSymbol")]
+            pub fn candle_symbol(&self) -> $crate::Result<$crate::event::CandleSymbol> {
+                $crate::event::CandleSymbol::value_of(&self.symbol())
+            }
+        }
+
         time_series_fields! {
             [$($p).*]
             $cb! {
-                head { $(#[$doc])* $name, $($head)* }
+                head { $(#[$doc])* $name, $view, $($head)* }
                 fields {
                     /// The number of the original events (trades or quotes) in the candle.
                     count: i64 [$($p.)* count] = 0,

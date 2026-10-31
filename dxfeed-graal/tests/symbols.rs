@@ -231,7 +231,10 @@ fn candle_symbols_are_normalized() {
             .as_str(),
         "AAPL{=d}"
     );
-    assert!(matches!(CandleSymbol::value_of("AAPL{=zzz}"), Err(Error::Java(_))));
+    assert!(matches!(
+        CandleSymbol::value_of("AAPL{=zzz}"),
+        Err(Error::InvalidArgument(message)) if message == "Unknown candle type: zzz"
+    ));
 }
 
 #[test]
@@ -270,4 +273,82 @@ fn symbols_print_as_in_java() {
         Symbol::time_series("AAPL", FROM).to_string(),
         format!("AAPL{{fromTime={text}}}")
     );
+}
+
+#[test]
+fn candle_symbols_give_their_attributes() {
+    let symbol = CandleSymbol::value_of("AAPL&Q{=5m,price=bid}").unwrap();
+    assert_eq!(symbol.get_base_symbol(), "AAPL");
+    assert_eq!(symbol.get_period().get_period_interval_millis(), 300_000);
+    assert_eq!(symbol.get_price(), CandlePrice::Bid);
+    assert_eq!(symbol.get_exchange(), CandleExchange::value_of('Q'));
+    assert_eq!(symbol.get_session(), CandleSession::Any);
+    assert_eq!(symbol.get_alignment(), CandleAlignment::Midnight);
+    assert_eq!(symbol.get_price_level(), CandlePriceLevel::DEFAULT);
+    assert_eq!(symbol.get_data_type(), &CandleDataType::DEFAULT);
+
+    // The texts that the SDK's `CandleSymbol.valueOf` gave for these symbols.
+    for (text, normalized) in [
+        ("AAPL{=1d}", "AAPL{=d}"),
+        ("AAPL{tho=TRUE}", "AAPL{tho=true}"),
+        ("AAPL{pl=1.0,dt=}", "AAPL{pl=1}"),
+        ("AAPL{=2.0m}", "AAPL{=2m}"),
+        ("AAPL&Q{=5m,price=bid}", "AAPL&Q{=5m,price=bid}"),
+    ] {
+        assert_eq!(CandleSymbol::value_of(text).unwrap().as_str(), normalized);
+    }
+    // Java keeps a default value written in the text and reads the first of two values of one key.
+    assert_eq!(
+        CandleSymbol::value_of("AAPL{price=last}").unwrap().as_str(),
+        "AAPL{price=last}"
+    );
+    let repeated = CandleSymbol::value_of("AAPL{=d,=h}").unwrap();
+    assert_eq!(
+        (repeated.as_str(), repeated.get_period()),
+        ("AAPL{=d,=h}", CandlePeriod::DAY)
+    );
+    assert!(matches!(
+        CandleSymbol::value_of_with(
+            "AAPL",
+            [CandlePeriod::DAY, CandlePeriod::value_of(1.0, CandleType::Hour)]
+        ),
+        Err(Error::InvalidArgument(message)) if message == "Already initialized"
+    ));
+    // As in Java, a given attribute is kept even when its text does not read back.
+    let nan = CandlePeriod::value_of(f64::NAN, CandleType::Minute);
+    let symbol = CandleSymbol::value_of_with("AAPL", [nan]).unwrap();
+    assert_eq!((symbol.as_str(), symbol.get_period()), ("AAPL{=NaNm}", nan));
+    assert!(CandleSymbol::value_of("AAPL{=NaNm}").is_err());
+    let given = CandleSymbol::value_of_with(
+        "AAPL{=d,tho=true,dt=tho}",
+        [CandleAttribute::from(CandlePrice::Ask), CandleSession::Any.into()],
+    )
+    .unwrap();
+    // As in Java, a new attribute goes before the first greater key of the unsorted text.
+    assert_eq!(given.as_str(), "AAPL{=d,price=ask,dt=tho}");
+    assert_eq!(
+        (
+            given.get_price(),
+            given.get_session(),
+            given.get_period(),
+            given.get_data_type()
+        ),
+        (
+            CandlePrice::Ask,
+            CandleSession::Any,
+            CandlePeriod::DAY,
+            &CandleDataType::THO
+        )
+    );
+    assert_eq!(given, CandleSymbol::value_of("AAPL{=d,price=ask,dt=tho}").unwrap());
+    assert_ne!(given, CandleSymbol::value_of("AAPL{=d,dt=tho,price=ask}").unwrap());
+}
+
+#[test]
+fn candles_carry_candle_symbols() {
+    let symbol = CandleSymbol::value_of("AAPL{=1d}").unwrap();
+    let candle = Candle::new(&symbol);
+    assert_eq!(candle.symbol, "AAPL{=d}");
+    assert_eq!(candle.candle_symbol().unwrap(), symbol);
+    assert!(Candle::new("AAPL{price=zzz}").candle_symbol().is_err());
 }

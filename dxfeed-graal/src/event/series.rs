@@ -37,6 +37,19 @@ time_sequence_values! {
             interest: f64 [interest] = f64::NAN,
         }
         derived {
+            /// The options traded today, puts and calls, as Java's `getOptionVolume` gives it: one of the volumes if the
+            /// other is NaN, else their sum.
+            #[doc(alias = "getOptionVolume")]
+            fn option_volume(put_volume, call_volume) -> f64 {
+                if put_volume.is_nan() {
+                    call_volume
+                } else if call_volume.is_nan() {
+                    put_volume
+                } else {
+                    put_volume + call_volume
+                }
+            }
+
             /// The source of the event: always the default source `DEFAULT`, as Java's `getSource` gives it.
             #[doc(alias = "getSource")]
             fn source() -> super::IndexedEventSource {

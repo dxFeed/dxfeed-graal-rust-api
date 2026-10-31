@@ -25,7 +25,20 @@ time_series_fields! {
             /// The ratio of the put volume to the call volume over 30 days; NaN if unknown.
             put_call_ratio: f64 [put_call_ratio] = f64::NAN,
         }
-        derived {}
+        derived {
+            /// The options traded today, puts and calls, as Java's `getOptionVolume` gives it: one of the volumes if the
+            /// other is NaN, else their sum.
+            #[doc(alias = "getOptionVolume")]
+            fn option_volume(put_volume, call_volume) -> f64 {
+                if put_volume.is_nan() {
+                    call_volume
+                } else if call_volume.is_nan() {
+                    put_volume
+                } else {
+                    put_volume + call_volume
+                }
+            }
+        }
     }
 }
 
