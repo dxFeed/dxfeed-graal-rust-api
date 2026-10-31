@@ -52,6 +52,10 @@ name = "candle"
 path = "examples/candle/candle.rs"
 
 [[example]]
+name = "candle_data"
+path = "examples/candle/candle_data.rs"
+
+[[example]]
 name = "fetch_daily_candles"
 path = "examples/candle/fetch_daily_candles.rs"
 

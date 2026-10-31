@@ -288,7 +288,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 - [x] [candle](dxfeed-graal/examples/candle/candle.rs)
   demonstrates how to subscribe to `Candle` events from a time with the candle symbol attributes
-- [ ] candle_data
+- [x] [candle_data](dxfeed-graal/examples/candle/candle_data.rs)
   demonstrates how to query the CandleData service using the `HistoryEndpoint`
 - [x] [fetch_daily_candles](dxfeed-graal/examples/candle/fetch_daily_candles.rs)
   demonstrates how to fetch the candles of the last N days for a symbol
@@ -410,7 +410,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Market depth model of orders: `MarketDepthModel`
 - [x] On-demand historical data replay: `OnDemandService`
 - [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`
-- [ ] The history endpoint
+- [x] Candles and time and sales from the history service: `HistoryEndpoint`
 
 ## Development
 

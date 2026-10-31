@@ -112,6 +112,7 @@ pub mod event;
 mod executor;
 mod feed;
 mod handle;
+pub mod history;
 pub mod ipf;
 mod isolate;
 mod listener;
