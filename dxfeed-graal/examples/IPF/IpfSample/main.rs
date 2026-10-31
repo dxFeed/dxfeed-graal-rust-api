@@ -81,16 +81,18 @@ fn main() -> dxfeed_graal::Result<()> {
     Ok(())
 }
 
-/// The names of all event types (QUOTE, TIME_AND_SALE etc.), comma-separated.
+/// The names of all event types (QUOTE, TIME_AND_SALE etc.) in alphabetical order, comma-separated.
 fn get_event_type_enum_names_list() -> String {
-    let names: Vec<String> = EventType::ALL.iter().map(|t| to_upper_snake_case(t.name())).collect();
+    let mut names: Vec<String> = EventType::ALL.iter().map(|t| to_upper_snake_case(t.name())).collect();
+    names.sort();
 
     names.join(",")
 }
 
-/// The class names of all event types (Candle, Quote, TimeAndSale etc.), comma-separated.
+/// The class names of all event types (Candle, Quote, TimeAndSale etc.) in alphabetical order, comma-separated.
 fn get_event_type_enum_class_names_list() -> String {
-    let names: Vec<&str> = EventType::ALL.iter().map(|t| t.name()).collect();
+    let mut names: Vec<&str> = EventType::ALL.iter().map(|t| t.name()).collect();
+    names.sort();
 
     names.join(",")
 }
