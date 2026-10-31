@@ -458,9 +458,9 @@ impl<E: IndexedEvent + EventKind> IndexedTxModel<E> {
             .map(|list| unsafe { std::slice::from_raw_parts(list.elements, list.size as usize) })
             .unwrap_or_default()
             .iter()
-            // SAFETY: the elements of a live list are NULL or live sources.
+            // SAFETY: the elements of a live list are NULL or live sources with live names.
             .filter_map(|&source| unsafe { source.as_ref() })
-            .map(|source| IndexedEventSource::from_id(source.id).unwrap_or_default())
+            .map(|source| unsafe { IndexedEventSource::from_sys(source) })
             .collect();
         // SAFETY: the list is ours and nothing uses it afterwards.
         crate::error_manager::report_release(

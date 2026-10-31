@@ -3,8 +3,8 @@
 use dxfeed_graal_sys as sys;
 
 use super::flags::{IMBALANCE_AUCTION_TYPE, IMBALANCE_SIDE};
-use super::format::{JavaDouble, SourceName, Time};
-use super::{AuctionType, ImbalanceSide};
+use super::format::{JavaDouble, Time};
+use super::{AuctionType, ImbalanceSide, IndexedEventSource};
 
 time_sequence_values! {
     time_sequence
@@ -15,10 +15,8 @@ time_sequence_values! {
             [market_event]
         }
         fields {
-            /// The id of the source of the event: `0` for the default source `DEFAULT`, `1` to `9` for the special
-            /// sources (`COMPOSITE_BID` to `AGGREGATE`), or one to four letters and digits packed big-endian, such as
-            /// `0x4e5456` for `NTV`. A later version keeps the source itself.
-            #[doc(alias = "getSource")]
+            /// The id of the [`source`](Self::source) of the event, such as `0` for `DEFAULT` or `0x4e5456` for
+            /// `NTV`.
             source_id: i32 [source_id] = 0,
             /// The time and the sequence of the event, packed as [`time`](Self::time) and
             /// [`sequence`](Self::sequence) read them.
@@ -38,6 +36,12 @@ time_sequence_values! {
             flags: i32 [flags] = 0,
         }
         derived {
+            /// The source of the event, such as `NTV`.
+            #[doc(alias = "getSource")]
+            fn source(source_id) -> IndexedEventSource {
+                IndexedEventSource::of(source_id)
+            }
+
             /// The side of the imbalance.
             #[doc(alias = "getImbalanceSide")]
             fn imbalance_side(flags) -> ImbalanceSide {
@@ -54,6 +58,12 @@ time_sequence_values! {
 }
 
 impl OrderImbalance {
+    /// Changes the source of the event.
+    #[doc(alias = "setSource")]
+    pub fn set_source(&mut self, source: IndexedEventSource) {
+        self.source_id = source.get_id();
+    }
+
     /// Changes the side of the imbalance.
     #[doc(alias = "setImbalanceSide")]
     pub fn set_imbalance_side(&mut self, side: ImbalanceSide) {
@@ -76,7 +86,7 @@ impl std::fmt::Display for OrderImbalance {
              imbalanceSize={}, nearPrice={}, farPrice={}, imbalanceSide={}, auctionType={}}}",
             self.symbol,
             Time(self.event_time),
-            SourceName(self.source_id),
+            self.source(),
             Time(self.time()),
             self.sequence(),
             JavaDouble(self.ref_price),

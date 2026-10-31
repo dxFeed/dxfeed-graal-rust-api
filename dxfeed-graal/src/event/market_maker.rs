@@ -34,11 +34,10 @@ event_type! {
         ask_count: i64 [ask_count] = 0,
     }
     derived {
-        /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's `getSource` gives
-        /// it.
+        /// The source of the event: always the default source `DEFAULT`, as Java's `getSource` gives it.
         #[doc(alias = "getSource")]
-        fn source() -> i32 {
-            0
+        fn source() -> super::IndexedEventSource {
+            super::IndexedEventSource::DEFAULT
         }
 
         /// The time of the event: the later of [`bid_time`](Self::bid_time) and [`ask_time`](Self::ask_time).

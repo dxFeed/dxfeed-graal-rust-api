@@ -37,11 +37,10 @@ time_sequence_values! {
             interest: f64 [interest] = f64::NAN,
         }
         derived {
-            /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's `getSource`
-            /// gives it.
+            /// The source of the event: always the default source `DEFAULT`, as Java's `getSource` gives it.
             #[doc(alias = "getSource")]
-            fn source() -> i32 {
-                0
+            fn source() -> super::IndexedEventSource {
+                super::IndexedEventSource::DEFAULT
             }
         }
     }

@@ -53,10 +53,10 @@ pub trait IndexedEvent: BaseEvent {
     #[doc(alias = "getEventFlags")]
     fn event_flags(&self) -> EventFlags;
 
-    /// The id of the source of the event: `0` (`DEFAULT`) for all but the orders, whose index keeps it;
-    /// [`IndexedEventSource::from_id`](super::IndexedEventSource::from_id) gives the source.
+    /// The source of the event: [`DEFAULT`](super::IndexedEventSource::DEFAULT) for all but the orders, whose index
+    /// keeps it.
     #[doc(alias = "getSource")]
-    fn source(&self) -> i32;
+    fn source(&self) -> super::IndexedEventSource;
 }
 
 /// An indexed event with a time, as Java's `TimeSeriesEvent`: the index of the event is its time and sequence.
@@ -205,7 +205,7 @@ macro_rules! impl_event_trait {
                 get!($kind, self, event_flags)
             }
 
-            fn source(&self) -> i32 {
+            fn source(&self) -> $crate::event::IndexedEventSource {
                 <$ty>::source(self)
             }
         }

@@ -372,11 +372,10 @@ macro_rules! time_series_fields {
                     $($fields)*
                 }
                 derived {
-                    /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's
-                    /// `getSource` gives it.
+                    /// The source of the event: always the default source `DEFAULT`, as Java's `getSource` gives it.
                     #[doc(alias = "getSource")]
-                    fn source() -> i32 {
-                        0
+                    fn source() -> $crate::event::IndexedEventSource {
+                        $crate::event::IndexedEventSource::DEFAULT
                     }
 
                     $($derived)*
@@ -557,11 +556,10 @@ macro_rules! sale_fields {
                 head { $(#[$doc])* $name, $($head)* }
                 fields { $($fields)* }
                 derived {
-                    /// The id of the source of the event: always `0`, the default source `DEFAULT`, as Java's
-                    /// `getSource` gives it.
+                    /// The source of the event: always the default source `DEFAULT`, as Java's `getSource` gives it.
                     #[doc(alias = "getSource")]
-                    fn source() -> i32 {
-                        0
+                    fn source() -> $crate::event::IndexedEventSource {
+                        $crate::event::IndexedEventSource::DEFAULT
                     }
 
                     $($derived)*
@@ -936,7 +934,7 @@ macro_rules! order_base_fields {
         impl $name {
             /// Writes the text of Java's `OrderBase.baseFieldsToString` after `{`: the symbol to `tradeSize=...`.
             fn fmt_order_base(&self, f: &mut ::std::fmt::Formatter<'_>) -> ::std::fmt::Result {
-                use $crate::event::format::{JavaChar, JavaDouble, SourceName, Time};
+                use $crate::event::format::{JavaChar, JavaDouble, Time};
                 write!(
                     f,
                     "{}, eventTime={}, source={}, eventFlags=0x{:x}, index=0x{:x}, time={}, sequence={}, \
@@ -945,7 +943,7 @@ macro_rules! order_base_fields {
                      tradeSize={}",
                     self.symbol,
                     Time(self.event_time),
-                    SourceName(self.source()),
+                    self.source(),
                     self.event_flags,
                     self.index,
                     Time(self.time()),
@@ -970,18 +968,24 @@ macro_rules! order_base_fields {
 
             /// Changes the source of the order and keeps the low bits of the index, as Java's `setSource` does: a
             /// special source (`1` to `9`) goes to bits 48 to 63, any other to bits 32 to 63. Change the
-            /// [`index`](Self::index) first: a new index replaces the source.
+            /// [`index`](Self::index) first: a new index replaces the source. Writing the index directly skips the
+            /// check below.
             ///
             /// # Errors
             ///
-            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if Java has no source with the id: one to
-            /// four letters and digits packed big-endian, such as `0x4e5456` for `NTV`, or `0` to `9`.
+            /// [`Error::InvalidArgument`]($crate::Error::InvalidArgument) if the id is unknown, as a source read from
+            /// an order with an index that Java cannot decode, which
+            /// [`IndexedEventSource::from_id`]($crate::event::IndexedEventSource::from_id) refuses, or if the index
+            /// cannot keep it: a negative id, or a source given to
+            /// [`IndexedEventSource::new`]($crate::event::IndexedEventSource::new) whose bits 16 to 31 read as a
+            /// special source, such as `0x1_0000`.
             #[doc(alias = "setSource")]
-            pub fn set_source(&mut self, source: i32) -> $crate::Result<()> {
-                if $crate::event::flags::source_name(source).is_none() {
-                    return Err($crate::Error::InvalidArgument(format!("{source} is not an order source id")));
+            pub fn set_source(&mut self, source: $crate::event::IndexedEventSource) -> $crate::Result<()> {
+                let id = source.get_id();
+                if !source.fits_order_index() || $crate::event::IndexedEventSource::from_id(id).is_err() {
+                    return Err($crate::Error::InvalidArgument(format!("{id} is not an order source id")));
                 }
-                self.index = $crate::event::flags::with_source(self.index, source);
+                self.index = $crate::event::flags::with_source(self.index, id);
                 Ok(())
             }
 
@@ -1077,13 +1081,11 @@ macro_rules! order_base_fields {
                     size as i64
                 }
 
-                /// The id of the source of the order, from the high bits of the [`index`](Self::index): `0` for the
-                /// default source `DEFAULT`, `1` to `9` for the special sources (`COMPOSITE_BID` to `AGGREGATE`), or
-                /// one to four letters and digits packed big-endian, such as `0x4e5456` for `NTV`. A later version
-                /// returns the source itself.
+                /// The source of the order, from the high bits of the [`index`](Self::index): bits 48 to 63 for the
+                /// special sources (`COMPOSITE_BID` to `AGGREGATE`), bits 32 to 63 for the others, such as `NTV`.
                 #[doc(alias = "getSource")]
-                fn source(index) -> i32 {
-                    $crate::event::flags::source_of(index)
+                fn source(index) -> $crate::event::IndexedEventSource {
+                    $crate::event::IndexedEventSource::of($crate::event::flags::source_of(index))
                 }
 
                 /// The time of the order, in nanoseconds since the Unix epoch.

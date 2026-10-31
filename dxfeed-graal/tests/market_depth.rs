@@ -28,7 +28,7 @@ fn order_of(source: IndexedEventSource, index: i64, side: Side, price: f64, size
         event_flags: flags,
         ..Order::new("DEPTH")
     };
-    order.set_source(source.get_id()).unwrap();
+    order.set_source(source).unwrap();
     order.set_order_side(side);
     order.set_scope(Scope::Aggregate);
     order

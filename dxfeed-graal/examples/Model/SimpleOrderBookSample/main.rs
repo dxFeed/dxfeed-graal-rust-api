@@ -232,5 +232,5 @@ fn main() -> dxfeed_graal::Result<()> {
 
 /// The source of an order.
 fn get_source(order: &Order) -> IndexedEventSource {
-    IndexedEventSource::from_id(order.source()).unwrap_or_default()
+    order.source()
 }

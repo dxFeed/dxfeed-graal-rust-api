@@ -39,7 +39,7 @@ fn flagged_candle(symbol: &str, time: i64, flags: EventFlags) -> Event {
 fn flagged_order(source: OrderSource, index: i64, flags: EventFlags) -> Event {
     let mut order = order("AAPL");
     order.index = index;
-    order.set_source(source.get_id()).unwrap();
+    order.set_source(source).unwrap();
     order.event_flags = flags;
     order.into()
 }
@@ -139,14 +139,14 @@ fn indexed_symbol_selects_its_source() {
         flagged_order(OrderSource::NTV, 1, flags),
         flagged_order(OrderSource::DEA, 1, flags),
     ]);
-    let sources: Vec<i32> = events
+    let sources: Vec<OrderSource> = events
         .try_iter()
         .map(|event| match event {
             Event::Order(order) => order.source(),
             other => panic!("not an order: {other:?}"),
         })
         .collect();
-    assert_eq!(sources, [OrderSource::NTV.get_id()]);
+    assert_eq!(sources, [OrderSource::NTV]);
 }
 
 #[test]
@@ -178,11 +178,11 @@ fn list_promises_complete_with_a_snapshot() {
     let times: Vec<i64> = candles.iter().map(TimeSeriesEvent::time).collect();
     assert_eq!(times, [FROM - DAY, FROM]);
     let orders = orders.wait(Duration::from_secs(10)).unwrap();
-    let orders: Vec<(i32, i64)> = orders
+    let orders: Vec<(OrderSource, i64)> = orders
         .iter()
         .map(|order| (order.source(), order.index() & 0xffff_ffff))
         .collect();
-    assert_eq!(orders, [(OrderSource::NTV.get_id(), 1), (OrderSource::NTV.get_id(), 2)]);
+    assert_eq!(orders, [(OrderSource::NTV, 1), (OrderSource::NTV, 2)]);
     assert_eq!(live_events(), 0);
 }
 

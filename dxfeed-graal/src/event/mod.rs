@@ -214,9 +214,9 @@ macro_rules! event_types {
                 self.as_indexed_event().map(IndexedEvent::event_flags)
             }
 
-            /// The source id of an [`IndexedEvent`].
+            /// The source of an [`IndexedEvent`].
             #[doc(alias = "getSource")]
-            pub fn source(&self) -> Option<i32> {
+            pub fn source(&self) -> Option<IndexedEventSource> {
                 self.as_indexed_event().map(IndexedEvent::source)
             }
 
@@ -344,9 +344,9 @@ macro_rules! event_types {
                 self.as_indexed_event().map(IndexedEvent::event_flags)
             }
 
-            /// The source id of an [`IndexedEvent`].
+            /// The source of an [`IndexedEvent`].
             #[doc(alias = "getSource")]
-            pub fn source(&self) -> Option<i32> {
+            pub fn source(&self) -> Option<IndexedEventSource> {
                 self.as_indexed_event().map(IndexedEvent::source)
             }
 

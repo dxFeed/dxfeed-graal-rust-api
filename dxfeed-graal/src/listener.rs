@@ -303,9 +303,9 @@ unsafe extern "C" fn tx_trampoline(
     is_snapshot: i32,
     user_data: *mut c_void,
 ) {
-    // SAFETY: the SDK keeps the source alive until this call returns; a source Java does not know cannot come.
+    // SAFETY: the SDK keeps the source and its name alive until this call returns.
     let source = unsafe { source.as_ref() }
-        .and_then(|source| IndexedEventSource::from_id(source.id).ok())
+        .map(|source| unsafe { IndexedEventSource::from_sys(source) })
         .unwrap_or_default();
     // SAFETY: `user_data` is the state of a transactional model listener, and the SDK keeps the list alive until this
     // call returns.

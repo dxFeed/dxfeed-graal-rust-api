@@ -7,10 +7,10 @@ use std::sync::mpsc;
 use dxfeed_graal::event::{
     AnalyticOrder, AuctionType, BaseEvent, Candle, Configuration, DailyCandle, Direction, EventFlags, Greeks,
     IcebergType, ImbalanceSide, IndexedEvent, MarketMaker, Message, NuamOrder, NuamOrderType, NuamTimeAndSale,
-    NuamTimeInForceType, NuamTrade, OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OtcMarketsOrder,
-    OtcMarketsPriceType, PriceType, Profile, Quote, Scope, Series, ShortSaleRestriction, Side, SpreadOrder, Summary,
-    TextConfiguration, TextMessage, TheoPrice, TimeAndSale, TimeAndSaleType, TimeSeriesEvent, Trade, TradeETH,
-    TradingStatus, Underlying,
+    NuamTimeInForceType, NuamTrade, OptionSale, Order, OrderAction, OrderBase, OrderImbalance, OrderSource,
+    OtcMarketsOrder, OtcMarketsPriceType, PriceType, Profile, Quote, Scope, Series, ShortSaleRestriction, Side,
+    SpreadOrder, Summary, TextConfiguration, TextMessage, TheoPrice, TimeAndSale, TimeAndSaleType, TimeSeriesEvent,
+    Trade, TradeETH, TradingStatus, Underlying,
 };
 use dxfeed_graal::{Error, Event, EventRef, EventType};
 use support::{Hub, is_time, is_time_without_millis, quote};
@@ -873,8 +873,8 @@ fn new_order_events_print_as_in_java() {
     }
 }
 
-/// The id of Java's order source `NTV`.
-const NTV: i32 = 0x4e5456;
+/// Java's order source `NTV`.
+const NTV: OrderSource = OrderSource::NTV;
 
 /// Fills an order as Java's reference strings do: `setIndex(17)`, `setSource(NTV)`, `setSequence(5)`,
 /// `setTimeNanoPart(7)`, `setAction(NEW)`, `setOrderId(1001)`, `setAuxOrderId(1002)`, `setPrice(1.5)`, `setSize(10)`,
@@ -1022,7 +1022,7 @@ fn filled_order_events_print_as_in_java() {
     );
 
     let mut imbalance = OrderImbalance {
-        source_id: NTV,
+        source_id: NTV.get_id(),
         ref_price: 1.5,
         paired_size: 10.0,
         imbalance_size: 2.25,
@@ -1062,12 +1062,21 @@ fn order_values_have_typed_accessors() {
     assert_eq!(BaseEvent::symbol(&order), "AAPL");
 
     // A special source moves to bits 48 to 63 and back; the low bits stay.
-    order.set_source(3).unwrap();
-    assert_eq!((order.index, order.source()), (0x3_0000_0000_0011, 3));
+    order.set_source(OrderSource::REGIONAL_BID).unwrap();
+    assert_eq!(
+        (order.index, order.source()),
+        (0x3_0000_0000_0011, OrderSource::REGIONAL_BID)
+    );
     assert!(field(&order.to_string(), "source").starts_with("REGIONAL_BID"));
-    order.set_source(0).unwrap();
-    assert_eq!((order.index, order.source()), (17, 0));
-    for bad in [10, 65535, -1, i32::MAX] {
+    order.set_source(OrderSource::DEFAULT).unwrap();
+    assert_eq!((order.index, order.source()), (17, OrderSource::DEFAULT));
+
+    // A source read from an index that Java cannot decode and a negative id are refused.
+    let mut unknown = Order::new("AAPL");
+    unknown.index = 10 << 32;
+    assert_eq!(unknown.source().to_string(), "10");
+    let negative = OrderSource::new(-7, "NEG");
+    for bad in [unknown.source(), negative] {
         assert!(matches!(order.set_source(bad), Err(Error::InvalidArgument(_))), "{bad}");
     }
     assert_eq!(order.index, 17);
@@ -1104,7 +1113,7 @@ fn order_values_have_typed_accessors() {
     };
     assert_eq!(
         (market_maker.time(), IndexedEvent::source(&market_maker)),
-        (1_700_000_001_000, 0)
+        (1_700_000_001_000, OrderSource::DEFAULT)
     );
     market_maker.set_market_maker("ABCD").unwrap();
     assert!(matches!(

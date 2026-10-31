@@ -22,7 +22,7 @@ fn order(index: i64, flags: EventFlags) -> Order {
         event_flags: flags,
         ..Order::new("TX")
     };
-    order.set_source(OrderSource::NTV.get_id()).unwrap();
+    order.set_source(OrderSource::NTV).unwrap();
     order.set_order_side(Side::Buy);
     order
 }

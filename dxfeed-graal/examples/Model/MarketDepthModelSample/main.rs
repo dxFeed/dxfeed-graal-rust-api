@@ -129,7 +129,7 @@ fn parse_event_sources(sources: &str) -> dxfeed_graal::Result<Vec<IndexedEventSo
 
 /// The source of an order.
 fn get_source(order: &Order) -> IndexedEventSource {
-    IndexedEventSource::from_id(order.source()).unwrap_or_default()
+    order.source()
 }
 
 /// The text of `dxfcpp::encodeChar`: a printable ASCII character as is, `\0`, or `\uXXXX`.

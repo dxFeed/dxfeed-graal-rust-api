@@ -160,7 +160,7 @@ impl Symbol {
                     let indexed = &*symbol.cast::<sys::dxfg_indexed_event_subscription_symbol_t>();
                     Symbol::IndexedEventSubscription {
                         symbol: Box::new(Symbol::from_sys(indexed.symbol)?),
-                        source: IndexedEventSource::from_id(indexed.source.as_ref()?.id).ok()?,
+                        source: IndexedEventSource::from_sys(indexed.source.as_ref()?),
                     }
                 }
                 sys::TIME_SERIES_SUBSCRIPTION => {
@@ -306,13 +306,14 @@ impl SymbolArena {
 
     /// The SDK struct of `source`.
     pub(crate) fn source(&mut self, source: IndexedEventSource) -> *mut sys::dxfg_indexed_event_source_t {
-        let name = source.get_name();
+        // The SDK finds an `OrderSource` by its name, so a source of Java goes with the name of its id and any other,
+        // made by `IndexedEventSource::new`, as Java's `new IndexedEventSource(id, name)`.
+        let (type_, name) = match source.order_source_name() {
+            Some(name) if source != IndexedEventSource::DEFAULT => (sys::ORDER_SOURCE, name),
+            _ => (sys::INDEXED_EVENT_SOURCE, source.get_name()),
+        };
         let source = sys::dxfg_indexed_event_source_t {
-            type_: if source == IndexedEventSource::DEFAULT {
-                sys::INDEXED_EVENT_SOURCE
-            } else {
-                sys::ORDER_SOURCE
-            },
+            type_,
             id: source.get_id(),
             // A source name has no NUL bytes.
             name: self.string(&name, "the source name").unwrap_or(c"".as_ptr()),

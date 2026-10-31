@@ -35,7 +35,7 @@ impl PriceLevel {
     pub fn new(order: &Order) -> Self {
         PriceLevel {
             event_symbol: Some(order.symbol.clone()),
-            event_source: IndexedEventSource::from_id(order.source()).unwrap_or_default(),
+            event_source: order.source(),
             side: order.order_side(),
             price: order.price,
             size: order.size,

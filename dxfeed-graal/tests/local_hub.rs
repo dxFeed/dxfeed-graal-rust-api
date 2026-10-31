@@ -9,9 +9,9 @@ use std::time::Duration;
 
 use dxfeed_graal::event::{
     AnalyticOrder, Candle, Configuration, DailyCandle, EventFlags, Greeks, MarketMaker, Message, NuamOrder,
-    NuamTimeAndSale, NuamTrade, OptionSale, Order, OrderImbalance, OtcMarketsOrder, Profile, Quote, QuoteRef, Scope,
-    Series, Side, SpreadOrder, Summary, TextConfiguration, TextMessage, TheoPrice, TimeAndSale, Trade, TradeETH,
-    Underlying,
+    NuamTimeAndSale, NuamTrade, OptionSale, Order, OrderImbalance, OrderSource, OtcMarketsOrder, Profile, Quote,
+    QuoteRef, Scope, Series, Side, SpreadOrder, Summary, TextConfiguration, TextMessage, TheoPrice, TimeAndSale, Trade,
+    TradeETH, Underlying,
 };
 use dxfeed_graal::{
     DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
@@ -53,7 +53,7 @@ fn split_price_levels(events: Vec<Event>) -> (Vec<Event>, Vec<Order>) {
     let others = events
         .into_iter()
         .filter_map(|event| match event {
-            Event::Order(order) if (1..=9).contains(&order.source()) => {
+            Event::Order(order) if OrderSource::is_special_source_id(order.source().get_id()) => {
                 levels.push(order);
                 None
             }
@@ -789,12 +789,12 @@ fn quotes_and_market_makers_arrive_as_price_levels() {
     hub.publish_and_process(&[quote("AAPL").into(), market_maker("AAPL").into()]);
     let (orders, mut levels) = split_price_levels(received(&events));
     assert!(orders.is_empty(), "{orders:?}");
-    levels.sort_by_key(Order::source);
+    levels.sort_by_key(|o| o.source().get_id());
     let levels: Vec<_> = levels
         .iter()
         .map(|o| {
             (
-                o.source(),
+                o.source().get_id(),
                 o.scope(),
                 o.order_side(),
                 o.exchange_code(),

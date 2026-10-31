@@ -403,7 +403,6 @@ impl<O: OrderEvent + EventKind + Sync> State<O> {
     fn update(&mut self, source: IndexedEventSource, orders: Vec<O>, is_snapshot: bool) -> bool {
         let limit = self.depth_limit;
         if is_snapshot {
-            let source = source.get_id();
             self.by_index.retain(|_, order| order.source() != source);
             self.buy.clear_source(source);
             self.sell.clear_source(source);
@@ -460,7 +459,7 @@ impl<O: OrderEvent + EventKind + Sync, const BUY: bool> BookSide<O, BUY> {
         }
     }
 
-    fn clear_source(&mut self, source: i32) {
+    fn clear_source(&mut self, source: IndexedEventSource) {
         let before = self.orders.len();
         self.orders.retain(|order| order.0.source() != source);
         if self.orders.len() != before {

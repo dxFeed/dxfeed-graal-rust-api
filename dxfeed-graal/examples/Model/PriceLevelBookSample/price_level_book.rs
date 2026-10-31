@@ -419,8 +419,7 @@ impl State {
     }
 
     fn clear_by_source(&mut self, source: IndexedEventSource) {
-        self.orders_by_index
-            .retain(|_, order| IndexedEventSource::from_id(order.source()).unwrap_or_default() != source);
+        self.orders_by_index.retain(|_, order| order.source() != source);
 
         self.buy_price_levels.clear_by_source(source);
         self.sell_price_levels.clear_by_source(source);
