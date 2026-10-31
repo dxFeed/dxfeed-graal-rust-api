@@ -1,148 +1,125 @@
-//! Builds the option chains of a file of instrument profiles and prints the quotes of the options with strikes
-//! around the last price of a symbol, like `OptionChainSample` of the other dxFeed APIs. It uses the default feed,
-//! whose address is the `dxfeed.address` system property.
-//!
-//! Usage: `cargo run --example OptionChainSample -- <IPF_FILE> <SYMBOL> <N_STRIKES> <N_MONTHS> [ADDRESS]`, for example
-//! `https://demo:demo@tools.dxfeed.com/ipf AAPL 5 5`. Without ADDRESS the address is `dxfeed.address` of the
-//! `dxfeed.system.properties` file in the current directory or of the `DXFEED_dxfeed.address` environment variable,
-//! else `demo.dxfeed.com:7300`.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example OptionChainSample -- <ipf-file> <symbol> <strikes-number> <months-number>`.
 
 use std::collections::HashMap;
-use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{Quote, Trade};
-use dxfeed_graal::ipf::option::{OptionChainsBuilder, OptionSeries};
-use dxfeed_graal::ipf::{InstrumentProfile, InstrumentProfileReader};
-use dxfeed_graal::{DXEndpoint, DXFeed, Error, Promise, system};
+use dxfeed_graal::ipf::InstrumentProfileReader;
+use dxfeed_graal::ipf::option::OptionChainsBuilder;
+use dxfeed_graal::{DXFeed, Error, Promise};
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let parsed = match args.as_slice() {
-        [file, symbol, strikes, months] => parse(file, symbol, strikes, months, None),
-        [file, symbol, strikes, months, address] => parse(file, symbol, strikes, months, Some(address.clone())),
-        _ => None,
-    };
-    let Some(args) = parsed else {
-        eprintln!("Usage: option_chain <ipf-file> <symbol> <n-strikes> <n-months> [<address>]");
-        eprintln!("  ipf-file  - the file or the URL of the instrument profiles, for example");
-        eprintln!("              https://demo:demo@tools.dxfeed.com/ipf");
-        eprintln!("  symbol    - the product or underlying symbol, for example AAPL");
-        eprintln!("  n-strikes - the number of strikes to print for each series");
-        eprintln!("  n-months  - the number of months to print");
-        eprintln!("  address   - the address to connect to; dxfeed.address of dxfeed.system.properties by default");
-        return ExitCode::from(2);
-    };
-    match run(args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 5 {
+        print!(
+            r#"
+Usage:
+OptionChainSample <ipf-file> <symbol> <strikes-number> <months-number>
+
+Where:
+    <ipf-file>       - a name of instrument profiles file
+    <symbol>         - the product or underlying symbol
+    <strikes-number> - a number of strikes to print for each series
+    <months-number>  - a number of months to print
+Examples:
+    OptionChainSample "https://demo:demo@tools.dxfeed.com/ipf" AAPL 5 5
+"#
+        );
+
+        return Ok(());
     }
-}
 
-struct Args {
-    file: String,
-    symbol: String,
-    n_strikes: usize,
-    n_months: usize,
-    address: Option<String>,
-}
+    let ipf_file = &args[1];
+    // Specified instrument name, for example AAPL, IBM, MSFT, etc.
+    let symbol = &args[2];
+    let strikes_number: usize = args[3]
+        .parse()
+        .map_err(|e| Error::InvalidArgument(format!("{}: {e}", args[3])))?;
+    let mut months_number: usize = args[4]
+        .parse()
+        .map_err(|e| Error::InvalidArgument(format!("{}: {e}", args[4])))?;
 
-fn parse(file: &str, symbol: &str, strikes: &str, months: &str, address: Option<String>) -> Option<Args> {
-    Some(Args {
-        file: file.to_owned(),
-        symbol: symbol.to_owned(),
-        n_strikes: strikes.parse().ok()?,
-        n_months: months.parse().ok()?,
-        address,
-    })
-}
-
-fn run(args: Args) -> dxfeed_graal::Result<()> {
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address_or_default(args.address)?)?;
     let feed = DXFeed::get_instance()?;
 
-    // Subscribe to Trade to learn the last price of the instrument.
-    println!("Waiting for price of {} ...", args.symbol);
+    // subscribe to trade to learn an instrument last price
+    println!("Waiting for price of {symbol} ...");
     let trade = feed
-        .get_last_event_promise::<Trade>(&args.symbol)?
+        .get_last_event_promise::<Trade>(symbol)?
         .wait(Duration::from_secs(1))?;
-    let price = trade.price;
-    println!("Price of {} is {price:?}", args.symbol);
 
-    println!("Reading instruments from {} ...", args.file);
-    let instruments = InstrumentProfileReader::new()?.read_from_file(&args.file)?;
+    let price = trade.price;
+
+    println!("Price of {symbol} is {price:?}");
+    println!("Reading instruments from {ipf_file}");
+
+    let instruments = InstrumentProfileReader::new()?.read_from_file(ipf_file)?;
 
     println!("Building option chains ...");
     let chains = OptionChainsBuilder::build(&instruments).into_chains();
     let chain = chains
-        .get(&args.symbol)
-        .ok_or_else(|| Error::InvalidArgument(format!("no option chain of {}", args.symbol)))?;
-    let series = &chain.get_series()[..args.n_months.min(chain.get_series().len())];
+        .get(symbol)
+        .ok_or_else(|| Error::InvalidArgument(format!("no option chain of {symbol}")))?;
+
+    months_number = months_number.min(chain.get_series().len());
+
+    let series_vector = &chain.get_series()[..months_number];
 
     println!("Requesting option quotes ...");
+
     let mut quotes: HashMap<String, Promise<Quote>> = HashMap::new();
-    for s in series {
-        for option in options_around(s, args.n_strikes, price) {
-            quotes.insert(
-                option.symbol.clone(),
-                feed.get_last_event_promise::<Quote>(&option.symbol)?,
-            );
+
+    for series in series_vector {
+        for &strike in series.get_n_strikes_around(strikes_number, price) {
+            if let Some(call) = series.call(strike) {
+                quotes.insert(call.symbol.clone(), feed.get_last_event_promise::<Quote>(&call.symbol)?);
+            }
+
+            if let Some(put) = series.put(strike) {
+                quotes.insert(put.symbol.clone(), feed.get_last_event_promise::<Quote>(&put.symbol)?);
+            }
         }
     }
-    // Ignore the timeout and print the quotes that came.
+
+    // ignore timeout and continue to print retrieved quotes even on timeout
     let deadline = Instant::now() + Duration::from_secs(10);
+
     for promise in quotes.values() {
         let _ = promise.wait(deadline.saturating_duration_since(Instant::now()));
     }
 
     println!("Printing option series ...");
-    let quote = |option: Option<&&InstrumentProfile>| {
-        option
-            .and_then(|option| quotes.get(&option.symbol))
-            .and_then(|promise| promise.get_result().ok().flatten())
-            .unwrap_or_else(|| Quote::new(""))
-    };
-    for s in series {
-        println!("Option series {s}");
+
+    for series in series_vector {
+        println!("Option series {series}");
         println!(
             "    {:>10} {:>10} {:>10} {:>10} {:>10}",
             "C.BID", "C.ASK", "STRIKE", "P.BID", "P.ASK"
         );
-        for &strike in s.get_n_strikes_around(args.n_strikes, price) {
-            let call = quote(s.call(strike));
-            let put = quote(s.put(strike));
+
+        for &strike in series.get_n_strikes_around(strikes_number, price) {
+            let mut call_quote = Quote::new("");
+            let mut put_quote = Quote::new("");
+
+            if let Some(call) = series.call(strike)
+                && let Ok(Some(new_call_quote)) = quotes[&call.symbol].get_result()
+            {
+                call_quote = new_call_quote;
+            }
+
+            if let Some(put) = series.put(strike)
+                && let Ok(Some(new_put_quote)) = quotes[&put.symbol].get_result()
+            {
+                put_quote = new_put_quote;
+            }
+
             println!(
                 "    {:10.3} {:10.3} {:10.3} {:10.3} {:10.3}",
-                call.bid_price, call.ask_price, strike, put.bid_price, put.ask_price
+                call_quote.bid_price, call_quote.ask_price, strike, put_quote.bid_price, put_quote.ask_price
             );
         }
     }
-    DXEndpoint::get_instance()?.close_and_await_termination()
-}
 
-/// The calls and the puts of the strikes around a price.
-fn options_around<'a>(
-    series: &OptionSeries<&'a InstrumentProfile>,
-    n: usize,
-    price: f64,
-) -> impl Iterator<Item = &'a InstrumentProfile> {
-    series
-        .get_n_strikes_around(n, price)
-        .iter()
-        .flat_map(|&strike| [series.call(strike), series.put(strike)])
-        .flatten()
-        .copied()
-}
-
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
-    }
+    Ok(())
 }

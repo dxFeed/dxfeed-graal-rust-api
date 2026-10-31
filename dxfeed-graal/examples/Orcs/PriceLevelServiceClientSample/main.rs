@@ -1,19 +1,16 @@
-//! Gets the price levels (orders) and the quotes of a candle symbol for a period from the Order Reconstruction Service
-//! (ORCS), like `PriceLevelServiceClientSample` of the other dxFeed APIs, and optionally validates the price levels.
-//!
-//! Usage: `cargo run --example PriceLevelServiceClientSample -- <ADDRESS> <SYMBOL> <SOURCE> <FROM> <TO> [--validate]
-//! [--verbose]`; run it without arguments for the details.
+//! Usage: `cargo run --example PriceLevelServiceClientSample -- <address> <symbol> <source> <from> <to> [--validate]
+//! [--verbose]`
 
-use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::TimeFormat;
 use dxfeed_graal::event::{CandleSymbol, OrderSource};
 use dxfeed_graal::orcs::{PriceLevelChecker, PriceLevelService};
+use dxfeed_graal::{TimeFormat, system};
 
-const USAGE: &str = r#"
+fn print_usage() {
+    let usage_string = r#"
 Usage:
-price_level_service_client <address> <symbol> <source> <from> <to> [--validate] [--verbose]
+PriceLevelServiceClientSample <address> <symbol> <source> <from> <to> [--validate] [--verbose]
 
 Where:
     address    - The RMI address of the ORCS server. To pass an authorization token, add "[login=entitle:<token>]" to
@@ -22,7 +19,7 @@ Where:
                  the price levels in seconds).
     source     - The order source to retrieve, for example "NTV".
     from       - Is from-time for the request in standard formats.
-                 Some examples of valid from-time:
+                 Same examples of valid from-time:
                      20070101-123456
                      20070101-123456.123
                      2005-12-31 21:00:00
@@ -35,31 +32,43 @@ Where:
     --verbose  - Print the available symbols of each authorized order source.
 
 Examples:
-    price_level_service_client "orcs.example.com:7777[login=entitle:<token>]" "AAPL{=d,gr=s}" NTV 20260110-100000 20260110-230000 --validate"#;
+    PriceLevelServiceClientSample "orcs.example.com:7777[login=entitle:<token>]" "AAPL{=d,gr=s}" NTV 20260110-100000 20260110-230000 --validate"#;
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.len() < 5 {
-        println!("{USAGE}");
-        return ExitCode::SUCCESS;
-    }
-    match run(&args) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
+    println!("{usage_string}");
 }
 
-fn run(args: &[String]) -> dxfeed_graal::Result<()> {
-    let address = &args[0];
-    let symbol = CandleSymbol::value_of(&args[1])?;
-    let source = OrderSource::value_of(&args[2])?;
-    let from_time = TimeFormat::DEFAULT.parse(&args[3])?;
-    let to_time = TimeFormat::DEFAULT.parse(&args[4])?;
-    let validate = args[5..].iter().any(|arg| arg == "--validate");
-    let verbose = args[5..].iter().any(|arg| arg == "--verbose");
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 6 {
+        print_usage();
+
+        return Ok(());
+    }
+
+    // Parse args.
+    let address = &args[1];
+    let symbol = CandleSymbol::value_of(&args[2])?;
+    let source = OrderSource::value_of(&args[3])?;
+    let from_time = TimeFormat::DEFAULT.parse(&args[4])?;
+    let to_time = TimeFormat::DEFAULT.parse(&args[5])?;
+    let mut validate = false;
+    let mut verbose = false;
+
+    for arg in &args[6..] {
+        if arg == "--validate" {
+            validate = true;
+        } else if arg == "--verbose" {
+            verbose = true;
+        }
+    }
+
+    // Disable QD logging, unless PriceLevelChecker logs the validation to it.
+    if !validate {
+        system::set_property("log.className", "com.devexperts.logging.InterceptableLogging")?;
+        system::set_property("log.level", "OFF")?;
+        system::set_property("err.level", "OFF")?;
+    }
 
     let service = PriceLevelService::new(address)?;
     let mut symbols_by_source: Vec<_> = service
@@ -67,35 +76,53 @@ fn run(args: &[String]) -> dxfeed_graal::Result<()> {
         .get_by_order_sources()?
         .into_iter()
         .collect();
-    symbols_by_source.sort_by_key(|(source, _)| source.to_string());
-    let sources: Vec<_> = symbols_by_source.iter().map(|(source, _)| source.to_string()).collect();
-    println!("Authorized sources: [{}]", sources.join(", "));
+    // The order of the sources is the order of their names.
+    symbols_by_source.sort_by_key(|(order_source, _)| order_source.to_string());
+
+    print!("Authorized sources: [");
+
+    for (i, (order_source, _symbols)) in symbols_by_source.iter().enumerate() {
+        print!("{}{order_source}", if i == 0 { "" } else { ", " });
+    }
+
+    println!("]");
+
     if verbose {
-        for (source, symbols) in &symbols_by_source {
-            println!("{source}: [{}]", symbols.join(", "));
+        for (order_source, symbols) in &symbols_by_source {
+            print!("{order_source}: [");
+
+            for (i, s) in symbols.iter().enumerate() {
+                print!("{}{s}", if i == 0 { "" } else { ", " });
+            }
+
+            println!("]");
         }
     }
 
-    let start = Instant::now();
+    let mut start = Instant::now();
     let orders = service.get_orders(&symbol, source, from_time, to_time, "sample")?;
+
     println!("Received {} orders in {} ms", orders.len(), start.elapsed().as_millis());
+
     if validate {
         let valid = PriceLevelChecker::validate(&orders, Duration::from_secs(60), true)?;
+
         println!("The orders are {}", if valid { "valid" } else { "not valid" });
     }
 
-    // The quotes of the base symbol with the granularity of a second.
-    let base_symbol = base_symbol(symbol.as_str());
-    let start = Instant::now();
+    start = Instant::now();
     let quotes = service.get_quotes(
-        &CandleSymbol::value_of(&format!("{base_symbol}{{gr=s}}"))?,
+        &CandleSymbol::value_of(&format!("{}{{gr=s}}", base_symbol(symbol.as_str())))?,
         from_time,
         to_time,
         "sample",
     )?;
+
     println!("Received {} quotes in {} ms", quotes.len(), start.elapsed().as_millis());
 
-    service.close()
+    service.close()?;
+
+    Ok(())
 }
 
 /// The symbol without its attributes and its exchange code, such as `AAPL` for `AAPL&Q{=d,gr=s}`, like

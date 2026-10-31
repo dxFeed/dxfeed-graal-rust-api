@@ -1,122 +1,236 @@
-//! Builds the order book of a symbol and an order source from the transactions of an `IndexedEventTxModel` and prints
-//! its best orders every second until Enter is pressed, like `SimpleOrderBookSample` of the other dxFeed APIs. The
-//! model works on the default feed, whose address is the `dxfeed.address` system property.
-//!
-//! Usage: `cargo run --example SimpleOrderBookSample -- [SYMBOL] [SOURCE] [ADDRESS]`, by default `AAPL` and `ntv`. Without
-//! ADDRESS the address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
+//! Builds an order book of a symbol and an order source with `IndexedEventTxModel` and prints its top levels every
+//! second. Use the default DXFeed instance for that data feed address is defined by "dxfeed.system.properties" file.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example SimpleOrderBookSample -- <symbol> <source>`.
 
-use std::collections::HashMap;
-use std::process::ExitCode;
-use std::sync::mpsc::{self, RecvTimeoutError};
+use std::cmp::Ordering;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 
-use dxfeed_graal::event::{EventFlags, IndexedEventSource, Order, OrderEvent, OrderSource, Side};
+use dxfeed_graal::DXFeed;
+use dxfeed_graal::event::{EventFlags, Events, IndexedEventSource, Order, OrderEvent, OrderSource, Side};
 use dxfeed_graal::model::IndexedEventTxModel;
-use dxfeed_graal::{DXEndpoint, DXFeed, system};
 
-/// How many orders of each side are printed.
-const DEPTH: usize = 5;
+fn print_usage() {
+    let usage_string = r#"
+Usage:
+SimpleOrderBookSample <symbol> <source>
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let symbol = args.next().unwrap_or_else(|| "AAPL".into());
-    let source = args.next().unwrap_or_else(|| "ntv".into());
-    match run(&symbol, &source, args.next()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
+Where:
+    symbol - The security symbol to get events for (e.g. "AAPL").
+    source - The order source (e.g. "ntv").
+
+Example:
+    SimpleOrderBookSample AAPL ntv"#;
+
+    println!("{usage_string}");
+}
+
+struct OrderBook {
+    buy_orders: Vec<Arc<Order>>,
+    sell_orders: Vec<Arc<Order>>,
+}
+
+/// A buy order in a set: the price in descending order, the index if the prices are equal (`BuyOrderComparator`).
+struct BuyOrder(Arc<Order>);
+
+impl Ord for BuyOrder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // The price in descending order, the index if the prices are equal.
+        other
+            .0
+            .price
+            .total_cmp(&self.0.price)
+            .then_with(|| self.0.index.cmp(&other.0.index))
+    }
+}
+
+impl PartialOrd for BuyOrder {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for BuyOrder {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for BuyOrder {}
+
+/// A sell order in a set: the price in ascending order, the index if the prices are equal (`SellOrderComparator`).
+struct SellOrder(Arc<Order>);
+
+impl Ord for SellOrder {
+    fn cmp(&self, other: &Self) -> Ordering {
+        // The price in ascending order, the index if the prices are equal.
+        self.0
+            .price
+            .total_cmp(&other.0.price)
+            .then_with(|| self.0.index.cmp(&other.0.index))
+    }
+}
+
+impl PartialOrd for SellOrder {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl PartialEq for SellOrder {
+    fn eq(&self, other: &Self) -> bool {
+        self.cmp(other) == Ordering::Equal
+    }
+}
+
+impl Eq for SellOrder {}
+
+#[derive(Default)]
+struct OrderListener {
+    mutex: Mutex<Orders>,
+}
+
+/// What the mutex of the listener guards.
+#[derive(Default)]
+struct Orders {
+    orders_by_index: HashMap<i64, Arc<Order>>,
+    buy_orders: BTreeSet<BuyOrder>,
+    sell_orders: BTreeSet<SellOrder>,
+}
+
+impl Orders {
+    fn remove(&mut self, order: &Arc<Order>) {
+        if order.order_side() == Side::Buy {
+            self.buy_orders.remove(&BuyOrder(Arc::clone(order)));
+        } else {
+            self.sell_orders.remove(&SellOrder(Arc::clone(order)));
+        }
+    }
+
+    fn add(&mut self, order: &Arc<Order>) {
+        if order.order_side() == Side::Buy {
+            self.buy_orders.insert(BuyOrder(Arc::clone(order)));
+        } else {
+            self.sell_orders.insert(SellOrder(Arc::clone(order)));
         }
     }
 }
 
-fn run(symbol: &str, source: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    let address = address_or_default(address)?;
-    let source = OrderSource::value_of(source)?;
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address)?;
+impl OrderListener {
+    fn events_received(&self, events: Events<'_, Order>, is_snapshot: bool) {
+        let mut orders = self.mutex.lock().unwrap();
 
-    // The orders of the book by their indices; each transaction or snapshot comes whole.
-    let book = Arc::new(Mutex::new(HashMap::<i64, Order>::new()));
-    let orders = Arc::clone(&book);
-    let model = IndexedEventTxModel::<Order>::new_builder()
-        .with_feed(DXFeed::get_instance()?)
-        .with_symbol(symbol)
-        .with_source(source)
-        .with_listener(move |events, is_snapshot| {
-            let mut orders = orders.lock().unwrap();
-            if is_snapshot {
-                orders.clear();
-            }
-            for order in events {
-                let order = order.to_owned();
-                // A removed order or one without a size removes the order of its index.
-                if order.has_size() && !order.event_flags.contains(EventFlags::REMOVE_EVENT) {
-                    orders.insert(order.index, order);
-                } else {
-                    orders.remove(&order.index);
-                }
-            }
-        })
-        .build()?;
-    println!("Subscribed to the {source} orders of {symbol} from {address}; press Enter to stop.");
-
-    // The book is printed every second until Enter or the end of input.
-    let (stop, stopped) = mpsc::channel::<()>();
-    let printer = thread::spawn(move || {
-        while let Err(RecvTimeoutError::Timeout) = stopped.recv_timeout(Duration::from_secs(1)) {
-            print_book(&book.lock().unwrap());
+        if is_snapshot {
+            // if this is a snapshot, clear the order book
+            orders.orders_by_index.clear();
+            orders.buy_orders.clear();
+            orders.sell_orders.clear();
         }
-    });
-    let _ = std::io::stdin().read_line(&mut String::new());
-    drop(stop);
-    let _ = printer.join();
-    drop(model);
-    DXEndpoint::get_instance()?.close_and_await_termination()
+
+        for order in events {
+            let order = Arc::new(order.to_owned());
+
+            // Remove the old order if it exists.
+            if let Some(found) = orders.orders_by_index.remove(&order.index) {
+                orders.remove(&found);
+            }
+
+            if order.event_flags.contains(EventFlags::REMOVE_EVENT) {
+                // skip removed events
+                continue;
+            }
+
+            orders.orders_by_index.insert(order.index, Arc::clone(&order));
+
+            if order.has_size() {
+                // add the order to the appropriate side if needed
+                orders.add(&order);
+            }
+        }
+    }
+
+    fn get_book(&self) -> OrderBook {
+        let orders = self.mutex.lock().unwrap();
+
+        OrderBook {
+            buy_orders: orders.buy_orders.iter().map(|order| Arc::clone(&order.0)).collect(),
+            sell_orders: orders.sell_orders.iter().map(|order| Arc::clone(&order.0)).collect(),
+        }
+    }
 }
 
-/// Prints the best buy and sell orders side by side: buy orders by price descending, sell orders by price ascending,
-/// orders of one price by index.
-fn print_book(orders: &HashMap<i64, Order>) {
-    let mut buy: Vec<_> = orders
-        .values()
-        .filter(|order| order.order_side() == Side::Buy)
-        .collect();
-    let mut sell: Vec<_> = orders
-        .values()
-        .filter(|order| order.order_side() == Side::Sell)
-        .collect();
-    buy.sort_by(|a, b| b.price.total_cmp(&a.price).then_with(|| a.index.cmp(&b.index)));
-    sell.sort_by(|a, b| a.price.total_cmp(&b.price).then_with(|| a.index.cmp(&b.index)));
-    for i in 0..DEPTH {
-        println!("BUY {}\tSELL {}", describe(buy.get(i)), describe(sell.get(i)));
+fn get_order_info(orders: &[Arc<Order>], i: usize, side: &Side) -> String {
+    let mut info = String::new();
+
+    info += &side.to_string();
+
+    if i < orders.len() {
+        let order = &orders[i];
+
+        info += &format!(
+            " [Source: {}, Size: {:8.4}, Price: {:8.2}]",
+            get_source(order),
+            order.size,
+            order.price
+        );
+    } else {
+        info += " [None]";
     }
+
+    info
+}
+
+fn print_book(book: &OrderBook, depth_limit: usize) {
+    if book.buy_orders.is_empty() && book.sell_orders.is_empty() {
+        return;
+    }
+
+    let limit = book.buy_orders.len().max(book.sell_orders.len()).min(depth_limit);
+
+    for i in 0..limit {
+        println!(
+            "{}\t{}",
+            get_order_info(&book.buy_orders, i, &Side::Buy),
+            get_order_info(&book.sell_orders, i, &Side::Sell)
+        );
+    }
+
     println!();
 }
 
-/// The source, size and price of an order, or `[None]`.
-fn describe(order: Option<&&Order>) -> String {
-    match order {
-        Some(order) => {
-            let source = IndexedEventSource::from_id(order.source())
-                .map_or_else(|_| order.source().to_string(), |source| source.to_string());
-            format!(
-                "[Source: {source}, Size: {:8.4}, Price: {:8.2}]",
-                order.size, order.price
-            )
-        }
-        None => "[None]".into(),
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 3 {
+        print_usage();
+
+        return Ok(());
+    }
+
+    let symbol = args[1].as_str();
+    let source = OrderSource::value_of(&args[2])?;
+    let listener = Arc::new(OrderListener::default());
+    let model_listener = Arc::clone(&listener);
+
+    // The endpoint address to use is stored in the "dxfeed.system.properties" file.
+    let _model = IndexedEventTxModel::<Order>::new_builder()
+        .with_feed(DXFeed::get_instance()?)
+        .with_symbol(symbol)
+        .with_source(source)
+        .with_listener(move |events, is_snapshot| model_listener.events_received(events, is_snapshot))
+        .build()?;
+
+    let depth_limit: usize = 5;
+
+    loop {
+        print_book(&listener.get_book(), depth_limit); // prints an order book every second
+        std::thread::sleep(Duration::from_secs(1));
     }
 }
 
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
-    }
+/// The source of an order.
+fn get_source(order: &Order) -> IndexedEventSource {
+    IndexedEventSource::from_id(order.source()).unwrap_or_default()
 }

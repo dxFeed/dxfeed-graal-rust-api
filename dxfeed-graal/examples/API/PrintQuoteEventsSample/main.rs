@@ -1,51 +1,32 @@
-//! Prints the quotes of a symbol until Enter is pressed, like `PrintQuoteEventsSample` of the other dxFeed APIs. It
-//! uses the default feed, whose address is the `dxfeed.address` system property.
-//!
-//! Usage: `cargo run --example PrintQuoteEventsSample -- [SYMBOL] [ADDRESS]`, by default `AAPL`. Without ADDRESS the
-//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
-
-use std::process::ExitCode;
+//! A simple sample that shows how to subscribe to quotes for one instrument and print all received quotes to the
+//! console. Use the default DXFeed instance for that data feed address is defined by "dxfeed.system.properties" file.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example PrintQuoteEventsSample -- [SYMBOL]`.
 
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{DXEndpoint, DXFeed, system};
+use dxfeed_graal::{DXFeed, ErrorManager};
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let symbol = args.next().unwrap_or_else(|| "AAPL".into());
-    match run(&symbol, args.next()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+fn main() -> dxfeed_graal::Result<()> {
+    // Specified instrument name, for example AAPL, IBM, MSFT, etc.
+    let symbol = std::env::args().nth(1).unwrap_or_else(|| "AAPL".into());
 
-fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    let address = address_or_default(address)?;
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address)?;
+    // Errors that have no caller go to ErrorManager: for example, a panic of the listener below, which runs on a
+    // thread of the SDK. The default handler writes one line per error to stderr; this one adds a prefix.
+    // The handler is called on the thread of the error and must be thread-safe.
+    ErrorManager::set_handler(|error| eprintln!("PrintQuoteEventsSample: {error}"));
+
+    // Creates a subscription attached to a default DXFeed with a Quote event type.
+    // The endpoint address to use is stored in the "dxfeed.system.properties" file.
     let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
-    // Listeners go before symbols, so the first quotes are not missed.
-    subscription.add_event_listener(|quotes| {
-        for quote in quotes {
-            println!("{quote}");
+    // Listener must be attached before symbols are added.
+    subscription.add_event_listener(|events| {
+        // Prints all received events.
+        for e in events {
+            println!("{e}");
         }
     })?;
+    // Adds specified symbol.
     subscription.add_symbols([symbol])?;
-    eprintln!("Printing quotes of {symbol} from {address}; press Enter to stop.");
-
-    // Enter or the end of input stops the program.
     let _ = std::io::stdin().read_line(&mut String::new());
-    DXEndpoint::get_instance()?.close_and_await_termination()
-}
-
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
-    }
+    Ok(())
 }

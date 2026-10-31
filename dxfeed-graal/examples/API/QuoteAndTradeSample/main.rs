@@ -1,97 +1,122 @@
-//! Shows several ways to receive quotes and trades of a symbol from the default feed, like `QuoteAndTradeSample` of
-//! the other dxFeed APIs: a typed listener, a last-event promise, an untyped listener for two event types and
-//! snapshots of the last trade. Runs until the process is killed.
-//!
-//! Usage: `cargo run --example QuoteAndTradeSample -- <SYMBOL> [ADDRESS]`. Without ADDRESS the
-//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
+//! Creates multiple event listener and subscribe to Quote and Trade events.
+//! Use default DXFeed instance for that data feed address is defined by "dxfeed.system.properties" file.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example QuoteAndTradeSample -- <symbol>`.
 
-use std::process::ExitCode;
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-use dxfeed_graal::event::{Event, EventRef, EventType, Quote, Trade};
-use dxfeed_graal::{DXFeed, DXFeedSubscription, system};
+use dxfeed_graal::event::{EventRef, EventType, Quote, Trade};
+use dxfeed_graal::{DXFeed, DXFeedSubscription, Event};
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let Some(symbol) = args.next() else {
-        eprintln!("Usage: quote_and_trade <symbol> [address]");
-        eprintln!("    symbol  - a security symbol, such as IBM, AAPL or SPX");
-        eprintln!("    address - the address to connect to; dxfeed.address of dxfeed.system.properties by default");
-        return ExitCode::from(2);
-    };
-    match run(&symbol, args.next()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+// Unlike C++, the subscription is returned: dropping a subscription closes it.
+fn test_quote_listener(symbol: &str) -> dxfeed_graal::Result<DXFeedSubscription<Quote>> {
+    // Creates a subscription attached to a default DXFeed with a Quote event type.
+    // The endpoint address to use is stored in the "dxfeed.system.properties" file.
+    let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
 
-fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address_or_default(address)?)?;
-    let feed = DXFeed::get_instance()?;
-    // Dropping a subscription closes it, so both are kept until the end.
-    let _quotes = test_quote_listener(feed, symbol)?;
-    test_quote_promise(feed, symbol)?;
-    let _quotes_and_trades = test_quote_and_trade_listener(feed, symbol)?;
-    test_trade_snapshots(feed, symbol)
-}
-
-fn test_quote_listener(feed: &DXFeed, symbol: &str) -> dxfeed_graal::Result<DXFeedSubscription<Quote>> {
-    let subscription = feed.create_subscription::<Quote>()?;
-    // Listeners go before symbols, so the first events are not missed.
+    // Listener must be attached before symbols are added.
+    // Filtered by quotes
     subscription.add_event_listener(|quotes| {
-        for quote in quotes {
-            println!("Mid = {}", (quote.bid_price() + quote.ask_price()) / 2.0);
+        for q in quotes {
+            println!("Mid = {:.6}", (q.bid_price() + q.ask_price()) / 2.0);
         }
     })?;
+
+    // C++ also shows another way to subscribe, with MarketEvent. Rust has no MarketEvent-typed subscription, so that
+    // alternative is left out.
+
+    // Adds specified symbol.
     subscription.add_symbols([symbol])?;
+
     Ok(subscription)
 }
 
-fn test_quote_promise(feed: &DXFeed, symbol: &str) -> dxfeed_graal::Result<()> {
-    let quote = feed
-        .get_last_event_promise::<Quote>(symbol)?
-        .wait(Duration::from_secs(5))?;
-    println!("Mid = {}", (quote.bid_price + quote.ask_price) / 2.0);
+fn test_quote_promises(symbol: &str) -> dxfeed_graal::Result<()> {
+    // Creates a subscription attached to a default DXFeed with a Quote event type.
+    // The endpoint address to use is stored in the "dxfeed.system.properties" file.
+
+    let feed = DXFeed::get_instance()?;
+    let promises = [symbol]
+        .into_iter()
+        .map(|symbol| feed.get_last_event_promise::<Quote>(symbol))
+        .collect::<dxfeed_graal::Result<Vec<_>>>()?;
+
+    // There is no Promises::allOf in Rust: wait for every promise, all within the same 5 seconds, without an exception
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    for promise in &promises {
+        let _ = promise.wait(deadline.saturating_duration_since(Instant::now()));
+    }
+
+    // now iterate the promises to retrieve results
+    for promise in &promises {
+        if let Ok(Some(q)) = promise.get_result() {
+            println!("Mid = {:.6}", (q.bid_price + q.ask_price) / 2.0);
+        }
+    }
+
     Ok(())
 }
 
-fn test_quote_and_trade_listener(feed: &DXFeed, symbol: &str) -> dxfeed_graal::Result<DXFeedSubscription<Event>> {
-    let subscription = feed.create_subscription_with_types(&[EventType::Quote, EventType::Trade])?;
+// Unlike C++, the subscription is returned: dropping a subscription closes it.
+fn test_quote_and_trade_listener(symbol: &str) -> dxfeed_graal::Result<DXFeedSubscription<Event>> {
+    // Creates a subscription attached to a default DXFeed with Quote and Trade event types.
+    // The endpoint address to use is stored in the "dxfeed.system.properties" file.
+    let subscription = DXFeed::get_instance()?.create_subscription_with_types(&[EventType::Quote, EventType::Trade])?;
+
+    // Listener must be attached before symbols are added.
     subscription.add_event_listener(|events| {
-        for event in events {
-            match event {
-                EventRef::Quote(quote) => println!("{quote}"),
-                EventRef::Trade(trade) => println!("{trade}"),
+        for e in events {
+            // An example of matching the type of an event
+            match e {
+                EventRef::Quote(q) => println!("{q}"),
+                EventRef::Trade(t) => println!("{t}"),
                 _ => {}
             }
         }
     })?;
+
+    // Adds specified symbol.
     subscription.add_symbols([symbol])?;
+
     Ok(subscription)
 }
 
-fn test_trade_snapshots(feed: &DXFeed, symbol: &str) -> dxfeed_graal::Result<()> {
-    // The cache of the feed keeps the last trade only for subscribed symbols.
-    let subscription = feed.create_subscription::<Trade>()?;
-    subscription.add_symbols([symbol])?;
-    let trade = Trade::new(symbol);
+fn test_trade_snapshots(symbol: &str) -> dxfeed_graal::Result<()> {
+    let feed = DXFeed::get_instance()?;
+    let sub = feed.create_subscription::<Trade>()?;
+
+    sub.add_symbols([symbol])?;
+
     loop {
-        println!("LAST: {}", feed.get_last_event(&trade)?);
+        println!("LAST: {}", feed.get_last_event(&Trade::new(symbol))?);
         thread::sleep(Duration::from_secs(1));
     }
 }
 
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        print!(
+            r"
+Usage:
+QuoteAndTradeSample <symbol>
+
+Where:
+    symbol - Is security symbol (e.g. IBM, AAPL, SPX etc.)
+"
+        );
+
+        return Ok(());
     }
+
+    // Specified instrument name, for example AAPL, IBM, MSFT, etc.
+    let symbol = &args[1];
+
+    let _quote_subscription = test_quote_listener(symbol)?;
+    test_quote_promises(symbol)?;
+    let _quote_and_trade_subscription = test_quote_and_trade_listener(symbol)?;
+    test_trade_snapshots(symbol)
 }

@@ -1,58 +1,54 @@
-//! Fetches the daily candles of the last 20 days of a symbol and prints them, like `FetchDailyCandlesSample` of the
-//! other dxFeed APIs. It uses the default feed, whose address is the `dxfeed.address` system property.
+//! Fetches last 20 days of candles for a specified symbol, prints them, and exits.
 //!
-//! Usage: `cargo run --example FetchDailyCandlesSample -- <BASE_SYMBOL> [ADDRESS]`, for example `AAPL`. Without ADDRESS
-//! the address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example FetchDailyCandlesSample -- <baseSymbol>`.
 
-use std::process::ExitCode;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use dxfeed_graal::DXFeed;
 use dxfeed_graal::event::{Candle, CandlePeriod, CandleSymbol};
-use dxfeed_graal::{DXEndpoint, DXFeed, system};
 
-const DAYS: i64 = 20;
-const DAY: i64 = 24 * 60 * 60 * 1000;
+fn fetch_and_print(candle_symbol: &CandleSymbol, to_time: i64, from_time: i64) -> dxfeed_graal::Result<()> {
+    // Use the default DXFeed instance for that data feed address is defined by "dxfeed.system.properties" file
+    let result = DXFeed::get_instance()?
+        .get_time_series_promise::<Candle>(candle_symbol, from_time, to_time)?
+        .wait(Duration::from_secs(5))?;
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let Some(base_symbol) = args.next() else {
-        eprintln!("Usage: fetch_daily_candles <baseSymbol> [<address>]");
-        eprintln!("  baseSymbol - the security symbol, for example IBM, AAPL or SPX");
-        eprintln!("  address    - the address to connect to; dxfeed.address of dxfeed.system.properties by default");
-        return ExitCode::from(2);
-    };
-    match run(&base_symbol, args.next()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+    for candle in &result {
+        println!("{candle}");
     }
+
+    Ok(())
 }
 
-fn run(base_symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address_or_default(address)?)?;
+fn main() -> dxfeed_graal::Result<()> {
+    const DAYS: u64 = 20;
+
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 2 {
+        print!(
+            r#"
+Usage:
+FetchDailyCandlesSample <baseSymbol>
+
+Where:
+    baseSymbol - Is security symbol (e.g. IBM, AAPL, SPX etc.)
+"#
+        );
+
+        return Ok(());
+    }
+
+    // Specified instrument name, for example AAPL, IBM, MSFT, etc.
+    let base_symbol = &args[1];
     let candle_symbol = CandleSymbol::value_of_with(base_symbol, [CandlePeriod::DAY])?;
     let to_time = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64);
-    let from_time = to_time - DAYS * DAY;
+    let from_time = to_time - Duration::from_secs(DAYS * 24 * 60 * 60).as_millis() as i64;
+
     println!("Fetching last {DAYS} days of candles for {base_symbol}");
 
-    let promise = DXFeed::get_instance()?.get_time_series_promise::<Candle>(&candle_symbol, from_time, to_time)?;
-    for candle in promise.wait(Duration::from_secs(5))? {
-        println!("{candle}");
-    }
-    DXEndpoint::get_instance()?.close_and_await_termination()
-}
-
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
-    }
+    fetch_and_print(&candle_symbol, to_time, from_time)
 }

@@ -1,52 +1,41 @@
-//! Publishes two quotes into the text tape file `WriteTapeFile.out.txt` in the current directory, like
-//! `WriteTapeFileSample` of the other dxFeed APIs. The `file_parser` sample reads such a file.
-//!
-//! Usage: `cargo run --example WriteTapeFileSample`.
-
-use std::process::ExitCode;
+//! Usage: `cargo run --example WriteTapeFileSample`
 
 use dxfeed_graal::event::Quote;
 use dxfeed_graal::{DXEndpoint, Event, Role};
 
-const FILE: &str = "WriteTapeFile.out.txt";
-
-fn main() -> ExitCode {
-    match run() {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
-
-fn run() -> dxfeed_graal::Result<()> {
-    // Without a subscription a publisher drops its events; the wildcard subscribes the tape to every symbol.
+/// Write events to a tape file.
+fn main() -> dxfeed_graal::Result<()> {
+    // Create an appropriate endpoint.
     let endpoint = DXEndpoint::new_builder()
+        // Is required for tape connector to be able to receive everything.
         .with_property("dxfeed.wildcard.enable", "true")
         .with_role(Role::Publisher)
         .build()?;
-    endpoint.connect(&format!("tape:{FILE}[format=text]"))?;
 
-    let quotes: [Event; 2] = [
-        Quote {
-            bid_price: 10.1,
-            ask_price: 10.2,
-            ..Quote::new("TEST1")
-        }
-        .into(),
-        Quote {
-            bid_price: 17.1,
-            ask_price: 17.2,
-            ..Quote::new("TEST2")
-        }
-        .into(),
-    ];
-    endpoint.get_publisher().publish_events(&quotes)?;
+    // Connect to the address, remove [format=text] or change on [format=binary] for binary format
+    endpoint.connect("tape:WriteTapeFile.out.txt[format=text]")?;
 
-    // The events are written once they are processed, so wait before closing.
+    // Get a publisher.
+    let pubr = endpoint.get_publisher();
+
+    // Creates new Quote market events.
+    let quote1 = Quote {
+        bid_price: 10.1,
+        ask_price: 10.2,
+        ..Quote::new("TEST1")
+    };
+    let quote2 = Quote {
+        bid_price: 17.1,
+        ask_price: 17.2,
+        ..Quote::new("TEST2")
+    };
+
+    // Publish events.
+    pubr.publish_events(&[Event::Quote(quote1), Event::Quote(quote2)])?;
+
+    // Wait until all data is written, close, and wait until it closes.
     endpoint.await_processed()?;
     endpoint.close_and_await_termination()?;
-    println!("Wrote {} quotes to {FILE}", quotes.len());
+
     Ok(())
 }

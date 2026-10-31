@@ -1,68 +1,78 @@
-//! Converts one tape file into another, passing every event through a listener that may change or filter it, like
-//! `ConvertTapeFileSample` of the other dxFeed APIs. The `write_tape_file` sample writes a tape file to convert.
+//! Converts one tape file into another tape file with optional intermediate processing or filtering.
+//! This project contains a sample tape file `ConvertTapeFile.in`.
 //!
-//! Usage: `cargo run --example ConvertTapeFileSample -- [INPUT] [OUTPUT]`, by default
-//! `file:ConvertTapeFile.in[readAs=stream_data,speed=max]` and
-//! `tape:ConvertTapeFile.out[saveAs=stream_data,format=text]`.
-
-use std::process::ExitCode;
+//! Usage: `cargo run --example ConvertTapeFileSample -- [<inputAddress> [<outputAddress>]]`, run from the sample
+//! directory when the default input file `ConvertTapeFile.in` is used.
 
 use dxfeed_graal::{DXEndpoint, Event, EventType, Role, Symbol};
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let input = args
-        .next()
-        .unwrap_or_else(|| "file:ConvertTapeFile.in[readAs=stream_data,speed=max]".into());
-    let output = args
-        .next()
-        .unwrap_or_else(|| "tape:ConvertTapeFile.out[saveAs=stream_data,format=text]".into());
-    match run(&input, &output) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
 
-fn run(input: &str, output: &str) -> dxfeed_graal::Result<()> {
-    // A stream feed neither conflates nor drops events; the wildcard subscribes to every symbol, and the events keep
-    // the times of the file.
+    // Determine input and output tapes and specify appropriate configuration parameters.
+    let input_address = if args.len() > 1 {
+        args[1].clone()
+    } else {
+        "file:ConvertTapeFile.in[readAs=stream_data,speed=max]".to_owned()
+    };
+    let output_address = if args.len() > 2 {
+        args[2].clone()
+    } else {
+        "tape:ConvertTapeFile.out[saveAs=stream_data,format=text]".to_owned()
+    };
+
+    // Create an input endpoint configured for tape reading.
     let input_endpoint = DXEndpoint::new_builder()
-        .with_role(Role::StreamFeed)
-        .with_property("dxfeed.wildcard.enable", "true")
-        .with_property("dxendpoint.eventTime", "true")
-        .build()?;
-    // A stream publisher writes every event it publishes.
-    let output_endpoint = DXEndpoint::new_builder()
-        .with_role(Role::StreamPublisher)
-        .with_property("dxfeed.wildcard.enable", "true")
-        .with_property("dxendpoint.eventTime", "true")
+        .with_role(Role::StreamFeed) // Prevents event conflation and loss due to buffer overflow.
+        .with_property("dxfeed.wildcard.enable", "true") // Enables wildcard subscription.
+        .with_property("dxendpoint.eventTime", "true") // Use provided event times.
         .build()?;
 
-    // The listener of all the event types copies the events to the output; here they could be changed, removed or
-    // added, for example the event times moved by an hour.
-    let subscription = input_endpoint
+    // Create an output endpoint configured for tape writing.
+    let output_endpoint = DXEndpoint::new_builder()
+        .with_role(Role::StreamPublisher) // Prevents event conflation and loss due to buffer overflow.
+        .with_property("dxfeed.wildcard.enable", "true") // Enables wildcard subscription.
+        .with_property("dxendpoint.eventTime", "true") // Use provided event times.
+        .build()?;
+
+    // Create and link event processor for all types of events.
+    // Note: Set of processed event types could be limited if needed.
+    let sub = input_endpoint
         .get_feed()
         .create_subscription_with_types(EventType::ALL)?;
-    let publisher = output_endpoint.get_publisher();
-    subscription.add_event_listener(move |events| {
+
+    let output = output_endpoint.clone();
+
+    sub.add_event_listener(move |events| {
+        // Here event processing occurs. Events could be modified, removed, or new events added.
+        // For example, the event times could be moved by 1 hour: match every `Event` variant and add 3_600_000 to the
+        // `event_time` field of its struct (there is no setter common for all the event types).
         let events: Vec<Event> = events.filter_map(|event| event.to_owned()).collect();
-        if let Err(error) = publisher.publish_events(&events) {
-            eprintln!("error: {error}");
+
+        // Publish processed events
+        let publisher = output.get_publisher();
+
+        if let Err(e) = publisher.publish_events(&events) {
+            eprintln!("{e}");
         }
     })?;
-    subscription.add_symbols([Symbol::Wildcard])?;
 
-    // The output starts writing before the input starts reading.
-    output_endpoint.connect(output)?;
-    input_endpoint.connect(input)?;
+    // Subscribe to all symbols.
+    // Note: Set of processed symbols could be limited if needed.
+    sub.add_symbols([Symbol::Wildcard])?;
 
-    // The input disconnects when the file is read; closing waits for the listener.
+    // Connect output endpoint and start output tape writing BEFORE starting input tape reading.
+    output_endpoint.connect(&output_address)?;
+    // Connect input endpoint and start input tape reading AFTER starting output tape writing.
+    input_endpoint.connect(&input_address)?;
+
+    // Wait until all data is read and processed, and then gracefully close the input endpoint.
     input_endpoint.await_not_connected()?;
     input_endpoint.close_and_await_termination()?;
-    // The output writes the events it has, then closes.
+
+    // Wait until all data is processed and written, and then gracefully close the output endpoint.
     output_endpoint.await_processed()?;
-    output_endpoint.close_and_await_termination()
+    output_endpoint.close_and_await_termination()?;
+
+    Ok(())
 }

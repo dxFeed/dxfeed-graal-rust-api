@@ -1,61 +1,56 @@
-//! Prints the state changes of an endpoint while it connects, disconnects and connects again, like `ReconnectSample`
-//! of the other dxFeed APIs.
+//! Demonstrates how to connect to an endpoint, subscribe to market data events, handle reconnections and
+//! re-subscribing.
 //!
-//! Usage: `cargo run --example ReconnectSample -- [SYMBOL] [ADDRESS]`, by default `ETH/USD:GDAX`. Without ADDRESS the
-//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
+//! Usage: `cargo run --example ReconnectSample`
 
-use std::process::ExitCode;
 use std::thread;
 use std::time::Duration;
 
+use dxfeed_graal::DXEndpoint;
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{DXEndpoint, system};
 
-fn main() -> ExitCode {
-    let mut args = std::env::args().skip(1);
-    let symbol = args.next().unwrap_or_else(|| "ETH/USD:GDAX".into());
-    match run(&symbol, args.next()) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+fn main() -> dxfeed_graal::Result<()> {
+    let address = "demo.dxfeed.com:7300"; // The address of the DxFeed endpoint.
+    let symbol = "ETH/USD:GDAX"; // The symbol for which we want to receive quotes.
 
-fn run(symbol: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    let address = &address_or_default(address)?;
+    // Create a new endpoint and add a listener for state changes.
     let endpoint = DXEndpoint::create()?;
-    endpoint.add_state_listener(|old, new| println!("Connection state changed: {old}->{new}"))?;
+
+    endpoint.add_state_listener(|old_state, new_state| {
+        println!("Connection state changed: {old_state}->{new_state}");
+    })?;
+
+    // Connect to the endpoint using the specified address.
     endpoint.connect(address)?;
 
+    // Create a subscription for Quote events.
     let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
+
     subscription.add_event_listener(|quotes| {
+        // Event listener that prints each received event.
         for quote in quotes {
             println!("{quote}");
         }
     })?;
+
+    // Add the specified symbol to the subscription.
     subscription.add_symbols([symbol])?;
 
+    // Wait for five seconds to allow some quotes to be received.
     thread::sleep(Duration::from_secs(5));
-    println!("Disconnecting");
+
+    // Disconnect from the endpoint.
     endpoint.disconnect()?;
+
+    // Wait for another five seconds to ensure quotes stop coming in.
     thread::sleep(Duration::from_secs(5));
-    println!("Connecting again");
+
+    // Reconnect to the endpoint.
+    // The subscription is automatically re-subscribed, and quotes start coming into the listener again.
+    // Another address can also be passed on.
     endpoint.connect(address)?;
-    eprintln!("Press Enter to stop.");
 
-    // Enter or the end of input stops the program.
+    // Keep the application running indefinitely.
     let _ = std::io::stdin().read_line(&mut String::new());
-    endpoint.close_and_await_termination()
-}
-
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
-    }
+    Ok(())
 }

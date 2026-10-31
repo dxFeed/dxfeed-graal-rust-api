@@ -1,99 +1,147 @@
-//! Reads the instrument profiles of a file, selects the stocks of computer and office equipment traded at NYSE,
-//! subscribes to the events of the given types for them and prints the events until Enter is pressed, like
-//! `IpfSample` of the other dxFeed APIs. It uses the default feed, whose address is the `dxfeed.address` system
-//! property.
-//!
-//! Usage: `cargo run --example IpfSample -- <TYPES> <IPF_FILE> [ADDRESS]`, for example
-//! `Quote https://dxfeed.s3.amazonaws.com/masterdata/ipf/demo/mux-demo.ipf.zip`. Without ADDRESS the
-//! address is `dxfeed.address` of the `dxfeed.system.properties` file in the current directory or of the
-//! `DXFEED_dxfeed.address` environment variable, else `demo.dxfeed.com:7300`.
+//! This sample demonstrates how to subscribe to available symbols using IPF.
+//! Use the default DXFeed instance for that data feed address is defined by "dxfeed.system.properties" file.
+//! The properties file is read from the current directory, so run the sample from its directory:
+//! `cargo run --example IpfSample -- <type> <ipf-file>`.
 
-use std::process::ExitCode;
+use std::time::Duration;
 
 use dxfeed_graal::ipf::{InstrumentProfile, InstrumentProfileReader};
-use dxfeed_graal::{DXEndpoint, DXFeed, EventType, system};
+use dxfeed_graal::{DXFeed, EventType};
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let (types, file, address) = match args.as_slice() {
-        [types, file] => (types, file, None),
-        [types, file, address] => (types, file, Some(address.clone())),
-        _ => {
-            eprintln!("Usage: ipf <types> <ipf-file> [<address>]");
-            eprintln!("  types    - comma-separated event types, for example Quote,Trade");
-            eprintln!("  ipf-file - the file or the URL of the instrument profiles, for example");
-            eprintln!("             https://dxfeed.s3.amazonaws.com/masterdata/ipf/demo/mux-demo.ipf.zip");
-            eprintln!("  address  - the address to connect to; dxfeed.address of dxfeed.system.properties by default");
-            return ExitCode::from(2);
-        }
-    };
-    match run(types, file, address) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
+fn print_usage() {
+    let usage_string = format!(
+        r#"
+Usage:
+IpfSample <type> <ipf-file>
+
+Where:
+    type     - Is dxfeed event type ({names} or {class_names}).
+    ipf-file - Is name of instrument profiles file.
+
+Examples:
+    IpfSample Quote https://dxfeed.s3.amazonaws.com/masterdata/ipf/demo/mux-demo.ipf.zip
+"#,
+        // Rust has no market flag, so all event types are listed.
+        names = get_event_type_enum_names_list(),
+        class_names = get_event_type_enum_class_names_list(),
+    );
+
+    println!("{usage_string}");
 }
 
-fn run(types: &str, file: &str, address: Option<String>) -> dxfeed_graal::Result<()> {
-    let types = parse_types(types)?;
-    let symbols = symbols(file)?;
+fn get_symbols(filename: &str) -> dxfeed_graal::Result<Vec<String>> {
+    println!("Reading instruments from {filename}...");
 
-    // The default feed connects to `dxfeed.address` when it is first used.
-    system::set_property("dxfeed.address", &address_or_default(address)?)?;
-    let subscription = DXFeed::get_instance()?.create_subscription_with_types(&types)?;
-    subscription.add_event_listener(|events| {
-        for event in events {
-            println!("{event}");
-        }
-    })?;
-    subscription.add_symbols(&symbols)?;
-    eprintln!("Press Enter to stop.");
-
-    // Enter or the end of input stops the program.
-    let _ = std::io::stdin().read_line(&mut String::new());
-    DXEndpoint::get_instance()?.close_and_await_termination()
-}
-
-/// The symbols of the selected instruments of a file.
-fn symbols(file: &str) -> dxfeed_graal::Result<Vec<String>> {
-    println!("Reading instruments from {file}...");
-    let profiles = InstrumentProfileReader::new()?.read_from_file(file)?;
-    // This is just a sample, any arbitrary filtering may go here.
-    let selected = |profile: &InstrumentProfile| {
+    let profiles = InstrumentProfileReader::new()?.read_from_file(filename)?;
+    let profile_filter = |profile: &InstrumentProfile| -> bool {
+        // This is just a sample, any arbitrary filtering may go here.
         profile.instrument_type == "STOCK" // stocks
             && profile.sic / 10 == 357 // Computer And Office Equipment
             && profile.exchanges.contains("XNYS") // traded at NYSE
     };
+
+    let mut result = Vec::new();
+
     println!("Selected symbols are:");
-    let mut symbols = Vec::new();
-    for profile in profiles.into_iter().filter(selected) {
-        println!("{} ({})", profile.symbol, profile.description);
-        symbols.push(profile.symbol);
+
+    for profile in profiles {
+        if profile_filter(&profile) {
+            println!("{} ({})", profile.symbol, profile.description);
+            result.push(profile.symbol);
+        }
     }
-    Ok(symbols)
+
+    Ok(result)
 }
 
-/// The event types of comma-separated names in any case.
-fn parse_types(types: &str) -> dxfeed_graal::Result<Vec<EventType>> {
-    types
-        .split(',')
-        .map(|name| {
-            EventType::ALL
-                .iter()
-                .copied()
-                .find(|t| t.name().eq_ignore_ascii_case(name.trim()))
-                .ok_or_else(|| dxfeed_graal::Error::InvalidArgument(format!("unknown event type {name:?}")))
-        })
-        .collect()
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 3 {
+        print_usage();
+
+        return Ok(());
+    }
+
+    let (parsed_types, _unknown_types) = parse_types(&args[1]);
+    let ipf_file = &args[2];
+    let sub = DXFeed::get_instance()?.create_subscription_with_types(&parsed_types)?;
+
+    sub.add_event_listener(|events| {
+        for event in events {
+            // Java's toString() of the event already contains the symbol.
+            println!("{event}");
+        }
+    })?;
+
+    sub.add_symbols(get_symbols(ipf_file)?)?;
+
+    std::thread::sleep(Duration::from_secs(365 * 24 * 60 * 60));
+
+    Ok(())
 }
 
-/// The ADDRESS argument; without it, `dxfeed.address` of the `dxfeed.system.properties` file or of the
-/// `DXFEED_dxfeed.address` environment variable, and the demo feed as the last resort.
-fn address_or_default(address: Option<String>) -> dxfeed_graal::Result<String> {
-    match address {
-        Some(address) => Ok(address),
-        None => Ok(system::get_property("dxfeed.address")?.unwrap_or_else(|| "demo.dxfeed.com:7300".into())),
+/// The names of all event types (QUOTE, TIME_AND_SALE etc.), comma-separated.
+fn get_event_type_enum_names_list() -> String {
+    let names: Vec<String> = EventType::ALL.iter().map(|t| to_upper_snake_case(t.name())).collect();
+
+    names.join(",")
+}
+
+/// The class names of all event types (Candle, Quote, TimeAndSale etc.), comma-separated.
+fn get_event_type_enum_class_names_list() -> String {
+    let names: Vec<&str> = EventType::ALL.iter().map(|t| t.name()).collect();
+
+    names.join(",")
+}
+
+/// `TimeAndSale` -> `TIME_AND_SALE`.
+fn to_upper_snake_case(name: &str) -> String {
+    let chars: Vec<char> = name.chars().collect();
+    let mut result = String::new();
+
+    for (i, &c) in chars.iter().enumerate() {
+        // A word starts at an uppercase letter that follows a lowercase one, or that ends a run of uppercase letters.
+        if i > 0
+            && c.is_ascii_uppercase()
+            && (chars[i - 1].is_ascii_lowercase() || chars.get(i + 1).is_some_and(|n| n.is_ascii_lowercase()))
+        {
+            result.push('_');
+        }
+
+        result.push(c.to_ascii_uppercase());
     }
+
+    result
+}
+
+/// The event types of a comma-separated list of names (QUOTE) or class names (Quote), without repeats, and the unknown
+/// names; `all`, `All`, `ALL` or `*` for all the types.
+fn parse_types(types: &str) -> (Vec<EventType>, Vec<String>) {
+    let types = types.trim();
+
+    if types.is_empty() {
+        return Default::default();
+    }
+
+    if matches!(types, "*" | "all" | "All" | "ALL") {
+        return (EventType::ALL.to_vec(), Vec::new());
+    }
+
+    let (mut result, mut unknown) = (Vec::new(), Vec::new());
+
+    for t in types.split(',').map(str::trim).filter(|t| !t.is_empty()) {
+        let found = EventType::ALL
+            .iter()
+            .copied()
+            .find(|e| to_upper_snake_case(e.name()) == t.to_uppercase() || e.name() == t);
+
+        match found {
+            Some(event_type) if !result.contains(&event_type) => result.push(event_type),
+            Some(_) => {}
+            None => unknown.push(t.to_owned()),
+        }
+    }
+
+    (result, unknown)
 }

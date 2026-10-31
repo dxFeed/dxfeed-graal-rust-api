@@ -1,80 +1,105 @@
-//! Subscribes to the candles of a symbol from a time on, with the given candle attributes, and prints them until Enter
-//! is pressed, like `CandleSample` of the other dxFeed APIs.
+//! Subscribes to the Candle events of a symbol from the specified time and prints them.
 //!
-//! Usage: `cargo run --example CandleSample -- <ADDRESS> <SYMBOL> [FROM_TIME] [ATTRIBUTE=VALUE ...]`, for example
-//! `demo.dxfeed.com:7300 AAPL 20260101-000000 period=1 type=day price=mark`.
-
-use std::process::ExitCode;
+//! Usage: `cargo run --example CandleSample -- <address> <symbol> [<fromTime>] [<attribute>=<value> ...]`
 
 use dxfeed_graal::event::{
     Candle, CandleAlignment, CandleAttribute, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
 };
-use dxfeed_graal::{DXEndpoint, Error, Symbol, TimeFormat};
+use dxfeed_graal::{DXEndpoint, Symbol, TimeFormat};
 
-const USAGE: &str = "Usage: candle <address> <symbol> [<fromTime>] [<attribute>=<value> ...]
-  address   - the address to connect to, for example demo.dxfeed.com:7300
-  symbol    - the base symbol of the candles, for example AAPL
-  fromTime  - the time of the first candle, for example 20260101-000000, 2026-01-01 00:00:00+03:00 or
-              milliseconds since the epoch; 0 by default
-  attribute - an attribute of the candle symbol:
-              exchange   - the exchange code, a character, for example Q
-              period     - the number of units of the period, for example 5
-              type       - the unit of the period: tick, second, minute, hour, day, week, month, optexp, year,
-                           volume, price, price_momentum, price_renko or their short names (t, s, m, h, d, ...)
-              price      - the price of the candles: last, bid, ask, mark or settlement
-              session    - the trading session: any or regular
-              alignment  - the alignment of the candles: midnight or session
-              priceLevel - the price level of the price candles, for example 0.5";
+fn print_usage() {
+    let usage_string = r#"
+Usage:
+CandleSample <address> <symbol> [<fromTime>] [<attribute>=<value> ...]
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let [address, symbol, rest @ ..] = args.as_slice() else {
-        eprintln!("{USAGE}");
-        return ExitCode::from(2);
-    };
-    match run(address, symbol, rest) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(Error::InvalidArgument(message)) => {
-            eprintln!("{message}\n{USAGE}");
-            ExitCode::from(2)
-        }
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
+Where:
+    address   - The address to connect to retrieve data (e.g. "demo.dxfeed.com:7300") or a path to a tape file.
+    symbol    - The candle symbol: a base symbol (e.g. "AAPL") with optional attributes (e.g. "AAPL{=d}").
+    fromTime  - The from-time of the history subscription in standard formats (e.g. "2025-12-31",
+                "20251231-123456", "1735689600000" in milliseconds). The default is 1970-01-01.
+    attribute - Adds an attribute to the symbol:
+                    exchange   - The exchange code letter (e.g. "exchange=A").
+                    period     - The number of aggregation period units (e.g. "period=5"). The default is 1.
+                    type       - The aggregation period type: "t" (TICK), "s" (SECOND), "m" (MINUTE),
+                                 "h" (HOUR), "d" (DAY), "w" (WEEK), "mo" (MONTH), "o" (OPTEXP), "y" (YEAR),
+                                 "v" (VOLUME), "p" (PRICE), "pm" (PRICE_MOMENTUM), "pr" (PRICE_RENKO).
+                                 The default is TICK.
+                    price      - The price type: "last", "bid", "ask", "mark", "s" (SETTLEMENT).
+                    session    - "true" for the regular trading hours only, "false" for any session.
+                    alignment  - The alignment: "m" (MIDNIGHT), "s" (SESSION).
+                    priceLevel - The price level (e.g. "priceLevel=0.5").
+
+Examples:
+    CandleSample demo.dxfeed.com:7300 AAPL{=d} 2025-12-01
+    CandleSample demo.dxfeed.com:7300 AAPL 2025-12-01 period=5 type=m session=true
+"#;
+
+    println!("{usage_string}");
 }
 
-fn run(address: &str, base_symbol: &str, args: &[String]) -> dxfeed_graal::Result<()> {
-    let mut from_time = 0;
-    let mut attributes = Vec::new();
-    let (mut period_value, mut period_type) = (None, None);
-    for (i, arg) in args.iter().enumerate() {
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 3 {
+        print_usage();
+
+        return Ok(());
+    }
+
+    let address = &args[1];
+    let base_symbol = &args[2];
+    let mut from_time: i64 = 0;
+    let mut attributes: Vec<CandleAttribute> = Vec::new();
+    let mut period_value: Option<f64> = None;
+    let mut period_type: Option<String> = None;
+
+    for (i, arg) in args.iter().enumerate().skip(3) {
         let Some((name, value)) = arg.split_once('=') else {
-            if i != 0 {
-                return Err(Error::InvalidArgument(format!("Unexpected argument: {arg}")));
+            if i != 3 {
+                eprintln!("Unexpected argument: {arg}");
+                print_usage();
+
+                std::process::exit(1);
             }
+
             from_time = TimeFormat::DEFAULT.parse(arg)?;
+
             continue;
         };
-        let invalid = || Error::InvalidArgument(format!("Invalid attribute: {arg}"));
-        let mut chars = value.chars();
-        match (name, chars.next(), chars.next()) {
-            ("exchange", Some(code), None) => attributes.push(CandleAttribute::Exchange(code)),
-            ("period", ..) => period_value = Some(value.parse::<f64>().map_err(|_| invalid())?),
-            ("type", ..) => period_type = Some(value.parse::<CandleType>()?),
-            ("price", ..) => attributes.push(value.parse::<CandlePrice>()?.into()),
-            ("session", ..) => attributes.push(value.parse::<CandleSession>()?.into()),
-            ("alignment", ..) => attributes.push(value.parse::<CandleAlignment>()?.into()),
-            ("priceLevel", ..) => attributes.push(CandleAttribute::PriceLevel(value.parse().map_err(|_| invalid())?)),
-            _ => return Err(invalid()),
+
+        if name == "exchange" && value.len() == 1 {
+            attributes.push(CandleAttribute::Exchange(value.as_bytes()[0] as char));
+        } else if name == "period" {
+            period_value = Some(stod(value));
+        } else if name == "type" {
+            period_type = Some(value.to_owned());
+        } else if name == "price" {
+            attributes.push(CandlePrice::parse(value)?.into());
+        } else if name == "session" {
+            attributes.push(CandleSession::parse(value)?.into());
+        } else if name == "alignment" {
+            attributes.push(CandleAlignment::parse(value)?.into());
+        } else if name == "priceLevel" {
+            attributes.push(CandleAttribute::PriceLevel(stod(value)));
+        } else {
+            eprintln!("Invalid attribute: {arg}");
+            print_usage();
+
+            std::process::exit(1);
         }
     }
+
     if period_value.is_some() || period_type.is_some() {
-        let period = CandlePeriod::value_of(period_value.unwrap_or(1.0), period_type.unwrap_or(CandleType::Tick));
-        attributes.push(period.into());
+        let candle_type = match &period_type {
+            Some(period_type) => CandleType::parse(period_type)?,
+            None => CandleType::Tick,
+        };
+
+        attributes.push(CandlePeriod::value_of(period_value.unwrap_or(1.0), candle_type).into());
     }
+
     let symbol = CandleSymbol::value_of_with(base_symbol, attributes)?;
+
     println!(
         "Subscribing to {symbol} from {}",
         TimeFormat::DEFAULT.format(from_time)?
@@ -83,17 +108,30 @@ fn run(address: &str, base_symbol: &str, args: &[String]) -> dxfeed_graal::Resul
     let endpoint = DXEndpoint::create()?;
     endpoint.connect(address)?;
     let subscription = endpoint.get_feed().create_subscription::<Candle>()?;
-    // Listeners go before symbols, so the first candles are not missed.
+
+    // Listener must be attached before symbols are added.
     subscription.add_event_listener(|candles| {
         for candle in candles {
             println!("{candle}");
         }
     })?;
-    // The candles from the time on, and then their updates.
-    subscription.add_symbols([Symbol::time_series(symbol, from_time)])?;
-    println!("Press enter to stop");
 
-    // Enter or the end of input stops the program.
+    // The history subscription: the candles from the specified time and then the updates.
+    subscription.add_symbols([Symbol::time_series(symbol, from_time)])?;
+
+    println!("Press enter to stop");
     let _ = std::io::stdin().read_line(&mut String::new());
-    endpoint.close_and_await_termination()
+
+    endpoint.close_and_await_termination()?;
+
+    Ok(())
+}
+
+/// Parses a number like `std::stod` of the C++ sample: a malformed number prints its error and exits with 1.
+fn stod(value: &str) -> f64 {
+    value.parse().unwrap_or_else(|e| {
+        eprintln!("{e}");
+
+        std::process::exit(1);
+    })
 }

@@ -1,58 +1,51 @@
-//! Using an address like `:7700`, starts a server on that port that publishes a `Profile` event for any symbol ending
-//! with `:TEST` that its clients subscribe to, until Enter is pressed, like `PublishProfilesSample` of the dxFeed Java
-//! API. The `request_profile` sample is such a client.
+//! Using address like ":7700" it starts a server on a specified port where it provides a `Profile` event for any
+//! symbol ending with ":TEST" suffix.
 //!
-//! Usage: `cargo run --example PublishProfilesSample -- <ADDRESS>`, for example `:7700`.
-
-use std::process::ExitCode;
+//! Usage: `cargo run --example PublishProfilesSample -- <address>`
 
 use dxfeed_graal::event::Profile;
 use dxfeed_graal::{DXEndpoint, Event, Role, Symbol};
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let [address] = args.as_slice() else {
-        eprintln!("Usage: publish_profiles <address>");
-        eprintln!("  address - the address of the server, for example :7700");
-        return ExitCode::from(2);
-    };
-    match run(address) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
-    }
-}
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
 
-fn run(address: &str) -> dxfeed_graal::Result<()> {
+    if args.len() < 2 {
+        return Ok(());
+    }
+
+    // Parse args.
+    let address = &args[1];
+
+    // Create a publisher endpoint and connect it to the specified address
     let endpoint = DXEndpoint::create_with_role(Role::Publisher)?;
     endpoint.connect(address)?;
     let publisher = endpoint.get_publisher();
 
-    // The subscription of the publisher tells which symbols the clients ask the profiles of.
-    let subscription = publisher.get_subscription::<Profile>()?;
-    subscription.add_change_listener(move |symbols: &[Symbol]| {
-        let profiles: Vec<Event> = symbols
-            .iter()
-            .filter_map(|symbol| match symbol {
-                Symbol::String(symbol) if symbol.ends_with(":TEST") => Some(
-                    Profile {
-                        description: Some("Test symbol".into()),
-                        ..Profile::new(symbol)
-                    }
-                    .into(),
-                ),
-                _ => None,
-            })
-            .collect();
-        if let Err(error) = publisher.publish_events(&profiles) {
-            eprintln!("error: {error}");
-        }
-    })?;
-    eprintln!("Press Enter to stop.");
+    // Observe Profile subscriptions and publish profiles for "xxx:TEST" symbols
+    publisher
+        .get_subscription::<Profile>()?
+        .add_change_listener(move |symbols: &[Symbol]| /* symbols_added */ {
+            let mut events: Vec<Event> = Vec::with_capacity(symbols.len());
 
-    // Enter or the end of input stops the program.
+            for symbol in symbols {
+                if let Symbol::String(s) = symbol
+                    && s.len() > 5
+                    && s.ends_with(":TEST")
+                {
+                    let mut profile = Profile::new(s);
+
+                    profile.description = Some("Test symbol".into());
+                    events.push(profile.into());
+                }
+            }
+
+            events.shrink_to_fit();
+
+            if let Err(e) = publisher.publish_events(&events) {
+                eprintln!("{e}");
+            }
+        })?;
+
     let _ = std::io::stdin().read_line(&mut String::new());
-    endpoint.close_and_await_termination()
+    Ok(())
 }

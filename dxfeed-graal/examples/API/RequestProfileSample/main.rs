@@ -1,36 +1,32 @@
-//! Connects to an address, prints the profile of a symbol and exits, like `RequestProfileSample` of the other dxFeed
-//! APIs. With a running `publish_profiles` sample, use an address like `localhost:7700` and a symbol like `A:TEST`.
+//! Using address like "localhost:7700" and a symbol list "A:TEST" it connects to the running PublishProfilesSample,
+//! prints symbol profile event, and exits.
 //!
-//! Usage: `cargo run --example RequestProfileSample -- <ADDRESS> <SYMBOL>`, for example `demo.dxfeed.com:7300 AAPL`.
+//! Usage: `cargo run --example RequestProfileSample -- <address> <symbol>`
 
-use std::process::ExitCode;
 use std::time::Duration;
 
-use dxfeed_graal::DXEndpoint;
 use dxfeed_graal::event::Profile;
+use dxfeed_graal::{DXEndpoint, Role};
 
-fn main() -> ExitCode {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    let [address, symbol] = args.as_slice() else {
-        eprintln!("Usage: request_profile <address> <symbol>");
-        return ExitCode::from(2);
-    };
-    match run(address, symbol) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => {
-            eprintln!("error: {error}");
-            ExitCode::FAILURE
-        }
+fn main() -> dxfeed_graal::Result<()> {
+    let args: Vec<String> = std::env::args().collect();
+
+    if args.len() < 3 {
+        return Ok(());
     }
-}
 
-fn run(address: &str, symbol: &str) -> dxfeed_graal::Result<()> {
-    let endpoint = DXEndpoint::create()?;
+    // Parse args.
+    let address = &args[1];
+    let symbol = &args[2];
+    let endpoint = DXEndpoint::create_with_role(Role::Feed)?;
     endpoint.connect(address)?;
     let profile = endpoint
         .get_feed()
         .get_last_event_promise::<Profile>(symbol)?
         .wait(Duration::from_secs(5))?;
+
     println!("{profile}");
-    endpoint.close()
+    endpoint.close()?;
+
+    Ok(())
 }
