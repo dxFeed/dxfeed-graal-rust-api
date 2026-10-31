@@ -17,104 +17,105 @@ dxfeed-graal-sys = { path = "../dxfeed-graal-sys" }
 [lints]
 workspace = true
 
-# The samples are grouped like the samples of the other dxFeed APIs.
+# The samples have the names and groups of the samples of the C++ API; run a sample from its directory, which
+# holds its dxfeed.system.properties.
 
 [[example]]
-name = "auth"
-path = "examples/api/auth.rs"
+name = "AuthSample"
+path = "examples/API/AuthSample/main.rs"
 
 [[example]]
-name = "connect"
-path = "examples/api/connect.rs"
+name = "ConnectSample"
+path = "examples/API/ConnectSample/main.rs"
 
 [[example]]
-name = "print_quote_events"
-path = "examples/api/print_quote_events.rs"
+name = "PrintQuoteEventsSample"
+path = "examples/API/PrintQuoteEventsSample/main.rs"
 
 [[example]]
-name = "publish_profiles"
-path = "examples/api/publish_profiles.rs"
+name = "PublishProfilesSample"
+path = "examples/API/PublishProfilesSample/main.rs"
 
 [[example]]
-name = "quote_and_trade"
-path = "examples/api/quote_and_trade.rs"
+name = "QuoteAndTradeSample"
+path = "examples/API/QuoteAndTradeSample/main.rs"
 
 [[example]]
-name = "reconnect"
-path = "examples/api/reconnect.rs"
+name = "ReconnectSample"
+path = "examples/API/ReconnectSample/main.rs"
 
 [[example]]
-name = "request_profile"
-path = "examples/api/request_profile.rs"
+name = "RequestProfileSample"
+path = "examples/API/RequestProfileSample/main.rs"
 
 [[example]]
-name = "candle"
-path = "examples/candle/candle.rs"
+name = "CandleSample"
+path = "examples/Candle/CandleSample/main.rs"
 
 [[example]]
-name = "candle_data"
-path = "examples/candle/candle_data.rs"
+name = "CandleDataSample"
+path = "examples/Candle/CandleDataSample/main.rs"
 
 [[example]]
-name = "fetch_daily_candles"
-path = "examples/candle/fetch_daily_candles.rs"
+name = "FetchDailyCandlesSample"
+path = "examples/Candle/FetchDailyCandlesSample/main.rs"
 
 [[example]]
-name = "last_event_console"
-path = "examples/console/last_event_console.rs"
+name = "LastEventConsoleSample"
+path = "examples/Console/LastEventConsoleSample/main.rs"
 
 [[example]]
-name = "convert_tape_file"
-path = "examples/file/convert_tape_file.rs"
+name = "ConvertTapeFileSample"
+path = "examples/File/ConvertTapeFileSample/main.rs"
 
 [[example]]
-name = "file_parser"
-path = "examples/file/file_parser.rs"
+name = "FileParserSample"
+path = "examples/File/FileParserSample/main.rs"
 
 [[example]]
-name = "write_tape_file"
-path = "examples/file/write_tape_file.rs"
+name = "WriteTapeFileSample"
+path = "examples/File/WriteTapeFileSample/main.rs"
 
 [[example]]
-name = "ipf"
-path = "examples/ipf/ipf.rs"
+name = "IpfSample"
+path = "examples/IPF/IpfSample/main.rs"
 
 [[example]]
-name = "ipf_live"
-path = "examples/ipf/ipf_live.rs"
+name = "IpfLiveSample"
+path = "examples/IPF/IpfLiveSample/main.rs"
 
 [[example]]
-name = "option_chain"
-path = "examples/ipf/option_chain.rs"
+name = "OptionChainSample"
+path = "examples/IPF/OptionChainSample/main.rs"
 
 [[example]]
-name = "schedule"
-path = "examples/schedule/schedule.rs"
+name = "IncOrderSnapshotSample"
+path = "examples/Model/IncOrderSnapshotSample/main.rs"
 
 [[example]]
-name = "inc_order_snapshot"
-path = "examples/model/inc_order_snapshot.rs"
+name = "MarketDepthModelSample"
+path = "examples/Model/MarketDepthModelSample/main.rs"
 
 [[example]]
-name = "market_depth_model"
-path = "examples/model/market_depth_model.rs"
+name = "MultipleMarketDepthSample"
+path = "examples/Model/MultipleMarketDepthSample/main.rs"
 
 [[example]]
-name = "simple_order_book"
-path = "examples/model/simple_order_book.rs"
+name = "PriceLevelBookSample"
+path = "examples/Model/PriceLevelBookSample/main.rs"
 
 [[example]]
-name = "multiple_market_depth"
-path = "examples/model/multiple_market_depth.rs"
+name = "SimpleOrderBookSample"
+path = "examples/Model/SimpleOrderBookSample/main.rs"
 
 [[example]]
-name = "price_level_book"
-path = "examples/model/price_level_book.rs"
+name = "OnDemandSample"
+path = "examples/OnDemand/OnDemandSample/main.rs"
 
 [[example]]
-name = "on_demand"
-path = "examples/ondemand/on_demand.rs"
+name = "PriceLevelServiceClientSample"
+path = "examples/Orcs/PriceLevelServiceClientSample/main.rs"
 
 [[example]]
-name = "price_level_service_client"
-path = "examples/orcs/price_level_service_client.rs"
+name = "ScheduleSample"
+path = "examples/Schedule/ScheduleSample/main.rs"
