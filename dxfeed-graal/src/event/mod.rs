@@ -84,7 +84,7 @@ pub use theo_price::{TheoPrice, TheoPriceRef};
 pub use time_and_sale::{TimeAndSale, TimeAndSaleRef};
 pub use trade::{Trade, TradeRef};
 pub use trade_eth::{TradeETH, TradeETHRef};
-pub use traits::{IndexedEvent, LastingEvent, MarketEvent, TimeSeriesEvent};
+pub use traits::{IndexedEvent, LastingEvent, MarketEvent, OrderEvent, TimeSeriesEvent};
 pub use underlying::{Underlying, UnderlyingRef};
 
 use crate::error::{Error, Result, c_string};

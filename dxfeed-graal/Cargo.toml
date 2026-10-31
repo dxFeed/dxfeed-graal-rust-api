@@ -90,3 +90,7 @@ path = "examples/schedule/schedule.rs"
 [[example]]
 name = "inc_order_snapshot"
 path = "examples/model/inc_order_snapshot.rs"
+
+[[example]]
+name = "market_depth_model"
+path = "examples/model/market_depth_model.rs"

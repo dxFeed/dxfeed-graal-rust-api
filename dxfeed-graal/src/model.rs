@@ -38,6 +38,10 @@ use crate::isolate::{self, call};
 use crate::listener::{TxClosure, TxListener};
 use crate::symbol::{Symbol, SymbolArena};
 
+mod market_depth;
+
+pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
+
 type Thread = *mut sys::graal_isolatethread_t;
 /// A setter of an SDK builder: it writes the builder to use next to its out-pointer.
 type With<B, A> = unsafe extern "C" fn(Thread, *mut B, A, *mut *mut B) -> i32;

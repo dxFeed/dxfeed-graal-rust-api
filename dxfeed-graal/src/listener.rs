@@ -533,7 +533,7 @@ unsafe fn dispatch<C: ?Sized>(
 }
 
 /// Prints the panic of a call of a listener named by `what`, if it panicked.
-fn report(what: &str, result: std::thread::Result<()>) {
+pub(crate) fn report(what: &str, result: std::thread::Result<()>) {
     if let Err(payload) = result {
         let message = payload
             .downcast_ref::<&str>()

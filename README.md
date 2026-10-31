@@ -328,7 +328,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [ ] price_level_book
   demonstrates how to compile a price level book (market by price) that aggregates individual orders (market by
   order)
-- [ ] market_depth_model
+- [x] [market_depth_model](dxfeed-graal/examples/model/market_depth_model.rs)
   demonstrates how to use the `MarketDepthModel`
 
 ### Schedule
@@ -407,7 +407,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Instrument profiles: reading files and URLs, a collector, a live connection and option chains
 - [x] Trading schedules: days, sessions, holidays, venues and the schedule defaults
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`
-- [ ] Market depth and price level models, the history endpoint, on-demand
+- [x] Market depth model of orders: `MarketDepthModel`
+- [ ] Price level models, the history endpoint, on-demand
 
 ## Development
 

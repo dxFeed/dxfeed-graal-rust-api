@@ -203,6 +203,7 @@ fn types_are_send_and_sync() {
     send_sync::<DXFeedSubscription<Quote>>();
     send_sync::<dxfeed_graal::model::IndexedTxModel<Order>>();
     send_sync::<dxfeed_graal::model::TimeSeriesTxModel<TimeAndSale>>();
+    send_sync::<dxfeed_graal::model::MarketDepthModel<Order>>();
 }
 
 #[test]
