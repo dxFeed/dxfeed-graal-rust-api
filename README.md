@@ -325,7 +325,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
   demonstrates how to subscribe to the `Order` event and handle snapshots and updates
 - [x] [multiple_market_depth](dxfeed-graal/examples/model/multiple_market_depth.rs)
   demonstrates how to use the `MarketDepthModel` to manage and display order books for multiple symbols
-- [ ] price_level_book
+- [x] [price_level_book](dxfeed-graal/examples/model/price_level_book.rs)
   demonstrates how to compile a price level book (market by price) that aggregates individual orders (market by
   order)
 - [x] [market_depth_model](dxfeed-graal/examples/model/market_depth_model.rs)
