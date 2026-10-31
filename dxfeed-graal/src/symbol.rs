@@ -286,6 +286,21 @@ impl SymbolArena {
         })
     }
 
+    /// The SDK list of `sources`, valid while the arena lives.
+    pub(crate) fn source_list(
+        &mut self,
+        sources: impl IntoIterator<Item = IndexedEventSource>,
+    ) -> *mut sys::dxfg_indexed_event_source_list {
+        let mut pointers: Vec<_> = sources.into_iter().map(|source| self.source(source)).collect();
+        let list = sys::dxfg_indexed_event_source_list {
+            size: pointers.len() as i32,
+            elements: pointers.as_mut_ptr(),
+        };
+        let list = self.keep(list);
+        self.keep(pointers);
+        list
+    }
+
     /// The SDK struct of `source`.
     pub(crate) fn source(&mut self, source: IndexedEventSource) -> *mut sys::dxfg_indexed_event_source_t {
         let name = source.name();

@@ -115,6 +115,7 @@ mod handle;
 pub mod ipf;
 mod isolate;
 mod listener;
+pub mod model;
 mod observable;
 mod promise;
 mod publisher;

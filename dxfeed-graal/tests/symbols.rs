@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
 use dxfeed_graal::event::{
@@ -11,6 +12,12 @@ use dxfeed_graal::event::{
 };
 use dxfeed_graal::{DXEndpoint, Error, Event, Role, Symbol, TimeFormat, live_events};
 use support::{Hub, candle, collect, order, quote};
+
+/// Serializes the tests that count the live events, which are process-wide.
+fn counting_events() -> MutexGuard<'static, ()> {
+    static LOCK: Mutex<()> = Mutex::new(());
+    LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
 
 const DAY: i64 = 86_400_000;
 const FROM: i64 = 1_700_000_000_000;
@@ -144,6 +151,7 @@ fn indexed_symbol_selects_its_source() {
 
 #[test]
 fn list_promises_complete_with_a_snapshot() {
+    let _counting = counting_events();
     let hub = Hub::with_default_executor();
     // A promise completes with the snapshot the uplink sends for its subscription: here the publisher of the hub.
     let candles = hub
@@ -180,6 +188,7 @@ fn list_promises_complete_with_a_snapshot() {
 
 #[test]
 fn cancelled_list_promises_fail() {
+    let _counting = counting_events();
     let hub = Hub::with_default_executor();
     let candles = hub
         .feed

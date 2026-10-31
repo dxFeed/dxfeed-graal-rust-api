@@ -321,7 +321,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 
 - [ ] simple_order_book
   demonstrates how to build an order book of a symbol and an order source with `IndexedEventTxModel`
-- [ ] inc_order_snapshot
+- [x] [inc_order_snapshot](dxfeed-graal/examples/model/inc_order_snapshot.rs)
   demonstrates how to subscribe to the `Order` event and handle snapshots and updates
 - [ ] multiple_market_depth
   demonstrates how to use the `MarketDepthModel` to manage and display order books for multiple symbols
@@ -406,7 +406,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example print_quote_e
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [x] Instrument profiles: reading files and URLs, a collector, a live connection and option chains
 - [x] Trading schedules: days, sessions, holidays, venues and the schedule defaults
-- [ ] Models, the history endpoint, on-demand
+- [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`
+- [ ] Market depth and price level models, the history endpoint, on-demand
 
 ## Development
 

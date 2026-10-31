@@ -25,6 +25,16 @@ pub struct DXFeed {
 }
 
 impl DXFeed {
+    /// The SDK feed, valid while `self` lives.
+    pub(crate) fn as_ptr(&self) -> *mut sys::dxfg_v4_feed_t {
+        self.state.feed.as_ptr()
+    }
+
+    /// Whether both are the feed of the same endpoint.
+    pub(crate) fn same_as(&self, other: &DXFeed) -> bool {
+        Arc::ptr_eq(&self.state, &other.state)
+    }
+
     pub(crate) fn new(state: Arc<EndpointState>) -> Self {
         DXFeed { state }
     }

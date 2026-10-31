@@ -2,7 +2,8 @@
 
 use std::cell::RefCell;
 
-use dxfeed_graal::event::Quote;
+use dxfeed_graal::event::{Order, Quote, TimeAndSale};
+use dxfeed_graal::model::{IndexedTxModel, TimeSeriesTxModel};
 use dxfeed_graal::schedule::Schedule;
 use dxfeed_graal::{DXEndpoint, Role, live_handles};
 
@@ -54,6 +55,40 @@ fn handles_are_released() {
         assert_eq!(live_handles(), before + 2 + 5);
         let _first = sessions[0].day().unwrap();
         assert_eq!(live_handles(), before + 2 + 5 + 1);
+    }
+    assert_eq!(live_handles(), before);
+
+    // A model keeps itself and its listener; the handles of its builders are released as it is built.
+    {
+        let endpoint = DXEndpoint::create_with_role(Role::LocalHub).unwrap();
+        let model = IndexedTxModel::<Order>::new_builder()
+            .with_feed(&endpoint.feed())
+            .with_symbol("AAPL")
+            .with_batch_processing(false)
+            .with_listener(|_, _, _| {})
+            .build()
+            .unwrap();
+        assert_eq!(live_handles(), before + 3 + 2);
+        let series = TimeSeriesTxModel::<TimeAndSale>::new_builder()
+            .with_feed(&endpoint.feed())
+            .with_symbol("AAPL")
+            .with_from_time(0)
+            .with_listener(|_, _, _| {})
+            .build()
+            .unwrap();
+        assert_eq!(live_handles(), before + 3 + 2 + 2);
+        drop(endpoint);
+        drop(model);
+        drop(series);
+    }
+    assert_eq!(live_handles(), before);
+
+    // A model that cannot be built, without a symbol, releases its builders and its listener.
+    {
+        let result = IndexedTxModel::<Order>::new_builder()
+            .with_listener(|_, _, _| {})
+            .build();
+        assert!(result.is_err());
     }
     assert_eq!(live_handles(), before);
     // The SDK still works after that.
