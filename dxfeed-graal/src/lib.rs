@@ -114,6 +114,7 @@ mod error_manager;
 pub mod event;
 mod executor;
 mod feed;
+pub mod glossary;
 mod handle;
 pub mod history;
 pub mod ipf;

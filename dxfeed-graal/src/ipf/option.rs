@@ -104,7 +104,7 @@ impl<T> OptionSeries<T> {
         self.spc
     }
 
-    /// The additional underlyings of the options, such as `SE=50; FIS=53` (`getAdditionalUnderlyings`).
+    /// The additional underlyings of the options, such as `SE 50; FIS 53` (`getAdditionalUnderlyings`).
     #[doc(alias = "getAdditionalUnderlyings")]
     pub fn get_additional_underlyings(&self) -> &str {
         &self.additional_underlyings
