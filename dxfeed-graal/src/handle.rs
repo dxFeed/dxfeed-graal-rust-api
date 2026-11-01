@@ -83,7 +83,9 @@ sdk_handle!(
     sys::dxfg_v4_order_book_model_t,
     sys::dxfg_v4_order_book_model_listener_t,
     sys::dxfg_v4_observable_list_model_t,
-    sys::dxfg_v4_observable_list_model_listener_t
+    sys::dxfg_v4_observable_list_model_listener_t,
+    sys::dxfg_v4_indexed_event_model_t,
+    sys::dxfg_v4_time_series_event_model_t
 );
 
 // SAFETY: a promise keeps its Java object handle in `handler`; the promises of an event and of a list start with a

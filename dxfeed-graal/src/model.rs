@@ -40,11 +40,13 @@ use crate::subscription_controller::{attach_feed, detach_feed};
 use crate::symbol::{Symbol, SymbolArena};
 use crate::time_period::TimePeriod;
 
+mod event_model;
 mod indexed_event;
 mod list;
 mod market_depth;
 mod order_book;
 
+pub use event_model::{IndexedEventModel, TimeSeriesEventModel};
 pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder};
 pub use list::ObservableListModel;
 pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
