@@ -44,6 +44,9 @@ pub(crate) type TxClosure = dyn FnMut(IndexedEventSource, Events<'_>, bool) + Se
 /// snapshot.
 pub(crate) type EventTxClosure = dyn FnMut(Events<'_>, bool) + Send;
 
+/// The closure of a listener of an order book model: it is called after the book has changed.
+pub(crate) type OrderBookClosure = dyn FnMut() + Send;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
@@ -65,6 +68,12 @@ pub(crate) type TxListener = Listener<sys::dxfg_v4_tx_model_listener_t, TxClosur
 /// A listener of an indexed event transactional model.
 pub(crate) type EventTxListener = Listener<sys::dxfg_v4_indexed_event_tx_model_listener_t, EventTxClosure>;
 
+/// A listener of an order book model.
+pub(crate) type OrderBookListener = Listener<sys::dxfg_v4_order_book_model_listener_t, OrderBookClosure>;
+
+/// A listener of a list of a model: it receives all the events of the list.
+pub(crate) type ListListener = Listener<sys::dxfg_v4_observable_list_model_listener_t, EventClosure>;
+
 /// The change listeners of a subscription.
 pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
 
@@ -74,6 +83,12 @@ pub(crate) type UpdateListeners = Listeners<sys::dxfg_v4_ipf_update_listener_t, 
 /// The state listeners of an instrument profile connection.
 pub(crate) type IpfStateListeners = Listeners<sys::dxfg_v4_ipf_connection_state_change_listener_t, IpfStateClosure>;
 
+/// The listeners of an order book model.
+pub(crate) type OrderBookListeners = Listeners<sys::dxfg_v4_order_book_model_listener_t, OrderBookClosure>;
+
+/// The listeners of a list of a model.
+pub(crate) type ListListeners = Listeners<sys::dxfg_v4_observable_list_model_listener_t, EventClosure>;
+
 /// What a trampoline needs; shared by the owner of the listener, the SDK (`user_data`) and running calls.
 struct ListenerState<C: ?Sized> {
     closure: Mutex<Box<C>>,
@@ -81,6 +96,8 @@ struct ListenerState<C: ?Sized> {
     running: AtomicU64,
     /// Whether a close was deferred during the running call (see [`Nested::Defer`]).
     close_deferred: AtomicBool,
+    /// Whether a nested call asked for one more call after the running one (see [`Nested::Repeat`]).
+    repeat: AtomicBool,
 }
 
 /// A listener added to an SDK object: its SDK handle and the SDK's strong reference to its state.
@@ -176,6 +193,28 @@ impl EventTxListener {
     }
 }
 
+impl OrderBookListener {
+    pub(crate) fn new(closure: Box<OrderBookClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `order_book_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_OrderBookModelListener_new(t, Some(order_book_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+impl ListListener {
+    pub(crate) fn new(closure: Box<EventClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `list_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_ObservableListModelListener_new(t, Some(list_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
 impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listener<H, C> {
     /// Creates the listener with `new`, which gets the `user_data` of the trampoline.
     fn create(closure: Box<C>, new: impl FnOnce(*mut c_void) -> Result<Handle<H>>) -> Result<Self> {
@@ -183,6 +222,7 @@ impl<H: SdkHandle + 'static, C: ?Sized + Send + 'static> Listener<H, C> {
             closure: Mutex::new(closure),
             running: AtomicU64::new(0),
             close_deferred: AtomicBool::new(false),
+            repeat: AtomicBool::new(false),
         }));
         match new(state as *mut c_void) {
             Ok(handle) => Ok(Listener { handle, state }),
@@ -337,6 +377,42 @@ unsafe extern "C" fn event_tx_trampoline(
             "an indexed event transactional model listener",
             Nested::Warn,
             |closure| closure(Events::new(events), is_snapshot != 0),
+        )
+    };
+}
+
+unsafe extern "C" fn order_book_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    _model: *mut sys::dxfg_order_book_model_t,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of an order book model listener.
+    unsafe {
+        dispatch::<OrderBookClosure>(
+            thread,
+            user_data,
+            "OrderBookModel",
+            "an order book model listener",
+            Nested::Repeat(|closure: &mut OrderBookClosure| closure()),
+            |closure| closure(),
+        )
+    };
+}
+
+unsafe extern "C" fn list_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    events: *mut sys::dxfg_event_type_list,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of a list listener, and the SDK keeps the list alive until this call returns.
+    unsafe {
+        dispatch::<EventClosure>(
+            thread,
+            user_data,
+            "ObservableListModel",
+            "a list listener",
+            Nested::Skip,
+            |closure| closure(Events::new(events)),
         )
     };
 }
@@ -536,6 +612,12 @@ enum Nested<C: ?Sized> {
     /// Defers it until the running call returns: the close of a change listener that removes itself or closes its
     /// subscription or endpoint in its own call.
     Defer,
+    /// Calls the closure once more with `again` after the running call returns, however many nested calls came: a
+    /// listener of a model that changes the model in its own call, which Java notifies on the same thread.
+    Repeat(fn(&mut C)),
+    /// Skips it: a listener of a list whose events are only valid during the nested call, which the running call
+    /// can read with `toArray`.
+    Skip,
 }
 
 /// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `component` and
@@ -569,6 +651,8 @@ unsafe fn dispatch<C: ?Sized>(
         if state.running.load(Ordering::Acquire) == me {
             match nested {
                 Nested::Defer => state.close_deferred.store(true, Ordering::Release),
+                Nested::Repeat(_) => state.repeat.store(true, Ordering::Release),
+                Nested::Skip => {}
                 Nested::Warn | Nested::WarnThenClose(_) => crate::ErrorManager::report(
                     component,
                     format!("skipped a nested call of {what} on the thread that runs it"),
@@ -583,6 +667,15 @@ unsafe fn dispatch<C: ?Sized>(
             what,
             panic::catch_unwind(AssertUnwindSafe(|| call(&mut **closure))),
         );
+        if let Nested::Repeat(again) = nested {
+            while state.repeat.swap(false, Ordering::AcqRel) {
+                crate::error_manager::report_panic(
+                    component,
+                    what,
+                    panic::catch_unwind(AssertUnwindSafe(|| again(&mut **closure))),
+                );
+            }
+        }
         if let Nested::WarnThenClose(close) = nested
             && state.close_deferred.swap(false, Ordering::AcqRel)
         {

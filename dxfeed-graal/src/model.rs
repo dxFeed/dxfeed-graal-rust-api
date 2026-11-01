@@ -41,10 +41,14 @@ use crate::symbol::{Symbol, SymbolArena};
 use crate::time_period::TimePeriod;
 
 mod indexed_event;
+mod list;
 mod market_depth;
+mod order_book;
 
 pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder};
+pub use list::ObservableListModel;
 pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
+pub use order_book::{OrderBookModel, OrderBookModelFilter};
 
 type Thread = *mut sys::graal_isolatethread_t;
 /// A setter of an SDK builder: it writes the builder to use next to its out-pointer.
