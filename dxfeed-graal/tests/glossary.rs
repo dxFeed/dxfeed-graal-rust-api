@@ -1,9 +1,10 @@
-//! The glossary of instrument attributes: price increments and additional underlyings, computed by Java.
+//! The glossary of instrument attributes: price increments, additional underlyings and CFI codes, computed by
+//! Java.
 
 use std::collections::BTreeMap;
 
 use dxfeed_graal::Error;
-use dxfeed_graal::glossary::{AdditionalUnderlyings, PriceIncrements, RoundingMode};
+use dxfeed_graal::glossary::{AdditionalUnderlyings, Cfi, PriceIncrements, RoundingMode};
 
 #[test]
 fn price_increments_compute_as_in_java() {
@@ -138,5 +139,89 @@ fn additional_underlyings_read_as_in_java() {
     assert_eq!(
         AdditionalUnderlyings::get_spc_from_text("SE x; FIS 53", "FIS").unwrap(),
         53.0
+    );
+}
+
+#[test]
+fn cfi_codes_are_classified_as_in_java() {
+    let option = Cfi::value_of("OCASPS").unwrap();
+    assert_eq!(option.get_code(), "OCASPS");
+    assert_eq!(option.to_string(), "OCASPS");
+    assert!(option.is_option());
+    assert!(!option.is_equity() && !option.is_future() && !option.is_other());
+    assert_eq!((option.get_category(), option.get_group()), ('O', 'C'));
+    assert_eq!(Cfi::value_of_int_code(option.get_int_code()).unwrap(), option);
+    assert_eq!(
+        option.describe().unwrap(),
+        "Options; Call options; American; Stock-Equities; Physical; Standardized"
+    );
+
+    let equity = "ES".parse::<Cfi>().unwrap();
+    assert_eq!(equity.get_code(), "ESXXXX");
+    assert!(equity.is_equity() && !equity.is_option());
+    assert!(Cfi::value_of("DB").unwrap().is_debt_instrument());
+    assert!(Cfi::value_of("RA").unwrap().is_entitlement());
+    assert!(Cfi::value_of("FF").unwrap().is_future());
+    assert!(Cfi::value_of("MR").unwrap().is_other());
+
+    let empty = Cfi::empty().unwrap();
+    assert_eq!(empty.get_code(), "XXXXXX");
+    assert_eq!(Cfi::value_of("").unwrap(), empty);
+    assert_eq!(Cfi::value_of("XX").unwrap(), empty);
+    assert_eq!(Cfi::value_of_int_code(0).unwrap(), empty);
+
+    assert!(matches!(Cfi::value_of("OCASPSX"), Err(Error::Java(_))));
+    assert!(matches!(Cfi::value_of("ocasps"), Err(Error::Java(_))));
+    assert!(matches!(Cfi::value_of("O\0"), Err(Error::InvalidArgument(_))));
+    assert!(matches!(Cfi::value_of_int_code(-1), Err(Error::Java(_))));
+}
+
+#[test]
+fn cfi_values_and_attributes_explain_the_letters() {
+    let values = Cfi::value_of("OCASPS").unwrap().decipher().unwrap();
+    let names: Vec<_> = values.iter().map(|value| value.get_name()).collect();
+    assert_eq!(
+        names,
+        [
+            "Options",
+            "Call options",
+            "American",
+            "Stock-Equities",
+            "Physical",
+            "Standardized"
+        ]
+    );
+    let call = &values[1];
+    assert_eq!(call.get_code(), 'C');
+    assert_eq!(call.to_string(), "C = Call options");
+    assert!(
+        call.get_description()
+            .starts_with("Contracts between a buyer and a seller")
+    );
+    let groups = call.get_attribute().unwrap().unwrap();
+    assert_eq!(groups.get_name(), "Options");
+    assert_eq!(groups.to_string(), "Options");
+    let group_values = groups.get_values().unwrap();
+    let codes: String = group_values.iter().map(|value| value.get_code()).collect();
+    assert_eq!(codes, "CPM");
+    let put = group_values[1].get_attribute().unwrap().unwrap();
+    assert_eq!(put.get_name(), "Options");
+    let scheme = values[2].get_attribute().unwrap().unwrap();
+    assert_eq!(scheme.get_name(), "Type of scheme");
+    assert!(!scheme.get_description().is_empty());
+    let category = values[0].get_attribute().unwrap().unwrap();
+    assert_eq!(category.get_name(), "Categories");
+
+    let unknown = Cfi::value_of("OC").unwrap().decipher().unwrap();
+    assert_eq!(unknown.len(), 6);
+    assert_eq!((unknown[2].get_code(), unknown[2].get_name()), ('X', "Unknown"));
+    assert_eq!(
+        unknown[2].get_attribute().unwrap().unwrap().get_name(),
+        "Type of scheme"
+    );
+    let unrecognized = Cfi::value_of("OCZ").unwrap().decipher().unwrap();
+    assert_eq!(
+        (unrecognized[2].get_code(), unrecognized[2].get_name()),
+        ('Z', "Unrecognized")
     );
 }
