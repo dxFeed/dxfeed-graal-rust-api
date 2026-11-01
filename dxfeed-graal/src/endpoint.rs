@@ -2,6 +2,7 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::ptr;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
@@ -14,8 +15,10 @@ use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::{ChangeListeners, StateListener};
+use crate::observable::event_types;
 use crate::publisher::DXPublisher;
-use crate::subscription::ListenerId;
+use crate::subscription::{ListenerId, check_aggregation_period};
+use crate::time_period::{TimePeriod, TimePeriodInfo};
 
 /// The role of an endpoint (`DXEndpoint.Role`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -127,10 +130,53 @@ impl DXEndpointBuilder {
         self
     }
 
-    /// Sets an endpoint property, e.g. `dxfeed.aggregationPeriod`.
+    /// Sets an endpoint property, such as [`DXEndpoint::DXFEED_AGGREGATION_PERIOD_PROPERTY`]; the endpoint ignores
+    /// the properties it does not support (`withProperty`): see [`supports_property`](Self::supports_property).
+    #[doc(alias = "withProperty")]
     pub fn with_property(mut self, key: &str, value: &str) -> Self {
         self.properties.push((key.to_owned(), value.to_owned()));
         self
+    }
+
+    /// Sets the properties of `properties` in their order, as [`with_property`](Self::with_property) does for each
+    /// (`withProperties`).
+    ///
+    /// For a properties file, set its path with [`DXEndpoint::DXFEED_PROPERTIES_PROPERTY`] or
+    /// [`DXEndpoint::DXPUBLISHER_PROPERTIES_PROPERTY`]: an endpoint with the [`Role::Feed`], [`Role::OnDemandFeed`] or
+    /// [`Role::Publisher`] role reads it when it is built, and a missing file is skipped.
+    #[doc(alias = "withProperties")]
+    pub fn with_properties<K: AsRef<str>, V: AsRef<str>>(
+        mut self,
+        properties: impl IntoIterator<Item = (K, V)>,
+    ) -> Self {
+        for (key, value) in properties {
+            self = self.with_property(key.as_ref(), value.as_ref());
+        }
+        self
+    }
+
+    /// Whether endpoints support the property `key` (`supportsProperty`); they ignore the others. Returns
+    /// [`Error::InvalidArgument`] for a NUL byte.
+    #[doc(alias = "supportsProperty")]
+    pub fn supports_property(&self, key: &str) -> Result<bool> {
+        let key = c_string(key, "property key")?;
+        let builder = self.sdk_builder()?;
+        let (b, mut supported) = (builder.as_ptr(), 0);
+        // SAFETY: the builder is live, the key is NUL-terminated and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_Builder_supportsProperty(t, b, key.as_ptr(), &mut supported) })?;
+        Ok(supported != 0)
+    }
+
+    /// A new SDK builder with the role of this builder.
+    fn sdk_builder(&self) -> Result<Handle<sys::dxfg_v4_endpoint_builder_t>> {
+        // SAFETY: the out-pointer is valid for writes.
+        let builder = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_newBuilder(t, out) })?;
+        if let Some(role) = self.role {
+            let b = builder.as_ptr();
+            // SAFETY: the builder is live.
+            call(|t| unsafe { sys::dxfg_v4_DXEndpoint_Builder_withRole(t, b, role.to_sys()) })?;
+        }
+        Ok(builder)
     }
 
     /// Runs the tasks of the endpoint, listener calls included, on `executor` (`withExecutor`), such as a thread pool
@@ -147,8 +193,8 @@ impl DXEndpointBuilder {
     ///
     /// Returns [`Error::InvalidArgument`] if a name or property contains a NUL byte.
     pub fn build(self) -> Result<DXEndpoint> {
-        let name = match self.name {
-            Some(name) => Some(name),
+        let name = match &self.name {
+            Some(name) => Some(name.clone()),
             None if self.properties.iter().any(|(k, _)| k == DXEndpoint::NAME_PROPERTY) => None,
             None => Some(default_name(NEXT_DEFAULT_NAME.fetch_add(1, Ordering::Relaxed))),
         };
@@ -159,13 +205,8 @@ impl DXEndpointBuilder {
             .map(|(k, v)| Ok((c_string(k, "property key")?, c_string(v, "property value")?)))
             .collect::<Result<Vec<_>>>()?;
 
-        // SAFETY: the out-pointer is valid for writes.
-        let builder = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_newBuilder(t, out) })?;
+        let builder = self.sdk_builder()?;
         let b = builder.as_ptr();
-        if let Some(role) = self.role {
-            // SAFETY: the builder is live.
-            call(|t| unsafe { sys::dxfg_v4_DXEndpoint_Builder_withRole(t, b, role.to_sys()) })?;
-        }
         if let Some(name) = &name {
             // SAFETY: the builder is live and the name is NUL-terminated.
             call(|t| unsafe { sys::dxfg_v4_DXEndpoint_Builder_withName(t, b, name.as_ptr()) })?;
@@ -184,6 +225,10 @@ impl DXEndpointBuilder {
         DXEndpoint::new(handle, true)
     }
 }
+
+/// The number of the roles; [`Role::LocalHub`] is the last.
+const ROLES: usize = 6;
+const _: () = assert!(Role::LocalHub as usize == ROLES - 1);
 
 /// The number of the next endpoint built without a name.
 static NEXT_DEFAULT_NAME: AtomicU64 = AtomicU64::new(0);
@@ -332,6 +377,77 @@ impl DXEndpoint {
     /// [`DXEndpointBuilder::with_name`].
     pub const NAME_PROPERTY: &'static str = "name";
 
+    /// The path of the properties file of an endpoint with the [`Role::Feed`] or [`Role::OnDemandFeed`] role
+    /// (`DXEndpoint.DXFEED_PROPERTIES_PROPERTY`); without it, the `/dxfeed.properties` resource of the native image,
+    /// if any.
+    pub const DXFEED_PROPERTIES_PROPERTY: &'static str = "dxfeed.properties";
+
+    /// The address that an endpoint with the [`Role::Feed`] role connects to when it is created, and one with the
+    /// [`Role::OnDemandFeed`] role when it replays (`DXEndpoint.DXFEED_ADDRESS_PROPERTY`).
+    pub const DXFEED_ADDRESS_PROPERTY: &'static str = "dxfeed.address";
+
+    /// The user name of an endpoint with the [`Role::Feed`] or [`Role::OnDemandFeed`] role
+    /// (`DXEndpoint.DXFEED_USER_PROPERTY`); see [`DXEndpoint::user`].
+    pub const DXFEED_USER_PROPERTY: &'static str = "dxfeed.user";
+
+    /// The password of an endpoint with the [`Role::Feed`] or [`Role::OnDemandFeed`] role
+    /// (`DXEndpoint.DXFEED_PASSWORD_PROPERTY`); see [`DXEndpoint::password`].
+    pub const DXFEED_PASSWORD_PROPERTY: &'static str = "dxfeed.password";
+
+    /// The size of the thread pool of an endpoint with the [`Role::Feed`] role, the number of processors by default
+    /// (`DXEndpoint.DXFEED_THREAD_POOL_SIZE_PROPERTY`).
+    pub const DXFEED_THREAD_POOL_SIZE_PROPERTY: &'static str = "dxfeed.threadPoolSize";
+
+    /// The aggregation period of an endpoint with the [`Role::Feed`] role, such as `0.1s`: a local limit of the rate
+    /// of the notifications of the listeners, which does not change what the servers send
+    /// (`DXEndpoint.DXFEED_AGGREGATION_PERIOD_PROPERTY`).
+    pub const DXFEED_AGGREGATION_PERIOD_PROPERTY: &'static str = "dxfeed.aggregationPeriod";
+
+    /// `true` turns on the support of wildcard symbols and of `tape:` addresses of a publisher
+    /// (`DXEndpoint.DXFEED_WILDCARD_ENABLE_PROPERTY`).
+    pub const DXFEED_WILDCARD_ENABLE_PROPERTY: &'static str = "dxfeed.wildcard.enable";
+
+    /// The symbol striping strategy of an endpoint (`DXEndpoint.DXFEED_STRIPE_PROPERTY`).
+    pub const DXFEED_STRIPE_PROPERTY: &'static str = "dxfeed.stripe";
+
+    /// The sticky subscription period, in the format of [`TimePeriod`]
+    /// (`DXEndpoint.DXFEED_STICKY_SUBSCRIPTION_PROPERTY`).
+    pub const DXFEED_STICKY_SUBSCRIPTION_PROPERTY: &'static str = "dxfeed.stickySubscriptionPeriod";
+
+    /// The aggregation period that the endpoint requests from the servers, in the format of [`TimePeriod`], such as
+    /// `1s` or `0` for real time (`DXEndpoint.DXFEED_REQUESTED_AGGREGATION_PERIOD_PROPERTY`); see
+    /// [`DXEndpoint::set_requested_aggregation_period`].
+    pub const DXFEED_REQUESTED_AGGREGATION_PERIOD_PROPERTY: &'static str = "dxfeed.requestedAggregationPeriod";
+
+    /// The path of the properties file of an endpoint with the [`Role::Publisher`] role
+    /// (`DXEndpoint.DXPUBLISHER_PROPERTIES_PROPERTY`); without it, the `/dxpublisher.properties` resource of the
+    /// native image, if any.
+    pub const DXPUBLISHER_PROPERTIES_PROPERTY: &'static str = "dxpublisher.properties";
+
+    /// The address that an endpoint with the [`Role::Publisher`] role connects to when it is created
+    /// (`DXEndpoint.DXPUBLISHER_ADDRESS_PROPERTY`).
+    pub const DXPUBLISHER_ADDRESS_PROPERTY: &'static str = "dxpublisher.address";
+
+    /// The size of the thread pool of an endpoint with the [`Role::Publisher`] role, the number of processors by
+    /// default (`DXEndpoint.DXPUBLISHER_THREAD_POOL_SIZE_PROPERTY`).
+    pub const DXPUBLISHER_THREAD_POOL_SIZE_PROPERTY: &'static str = "dxpublisher.threadPoolSize";
+
+    /// `true` turns on the event time of the events from a source that has it, such as a tape file or the on-demand
+    /// service (`DXEndpoint.DXENDPOINT_EVENT_TIME_PROPERTY`).
+    pub const DXENDPOINT_EVENT_TIME_PROPERTY: &'static str = "dxendpoint.eventTime";
+
+    /// `true` stores all the lasting and indexed events, also without a subscription to them, with no means to remove
+    /// them (`DXEndpoint.DXENDPOINT_STORE_EVERYTHING_PROPERTY`).
+    pub const DXENDPOINT_STORE_EVERYTHING_PROPERTY: &'static str = "dxendpoint.storeEverything";
+
+    /// `true` turns on the nanosecond precision of the business time (`DXEndpoint.DXSCHEME_NANO_TIME_PROPERTY`), as
+    /// `dxscheme.enabled.Sequence=*` and `dxscheme.enabled.TimeNanoPart=*` do.
+    pub const DXSCHEME_NANO_TIME_PROPERTY: &'static str = "dxscheme.nanoTime";
+
+    /// The prefix of the properties that enable a field of the scheme in the events that match a glob, such as
+    /// `dxscheme.enabled.TimeNanoPart=Trade` (`DXEndpoint.DXSCHEME_ENABLED_PROPERTY_PREFIX`).
+    pub const DXSCHEME_ENABLED_PROPERTY_PREFIX: &'static str = "dxscheme.enabled.";
+
     /// Returns a builder for an endpoint.
     #[doc(alias = "newBuilder")]
     pub fn new_builder() -> DXEndpointBuilder {
@@ -370,6 +486,100 @@ impl DXEndpoint {
             let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXEndpoint_getInstance(t, out) })?;
             Self::new(handle, false)
         })
+    }
+
+    /// Returns the default endpoint of the process with `role` (`DXEndpoint.getInstance(Role)`).
+    ///
+    /// It is [`get_instance`](Self::get_instance) for [`Role::Feed`]. For another role it is created on the first
+    /// successful call, as [`create_with_role`](Self::create_with_role) does; one with the [`Role::OnDemandFeed`] or
+    /// [`Role::Publisher`] role is configured by the properties file of the role and the system properties as of that
+    /// moment, as in Java. All callers share it and it is never dropped: closing it closes it for the whole process.
+    #[doc(alias = "getInstance")]
+    pub fn get_instance_with_role(role: Role) -> Result<&'static DXEndpoint> {
+        // One per role; the SDK has a default endpoint of the feed role only.
+        static INSTANCES: [OnceLock<DXEndpoint>; ROLES] = [const { OnceLock::new() }; ROLES];
+        static INIT: Mutex<()> = Mutex::new(());
+        match role {
+            Role::Feed => Self::get_instance(),
+            _ => crate::get_or_try_init(&INSTANCES[role as usize], &INIT, || Self::create_with_role(role)),
+        }
+    }
+
+    /// Changes the user name of the endpoint (`user`); call it before [`connect`](Self::connect), with
+    /// [`password`](Self::password), for a service that needs credentials.
+    ///
+    /// Returns the endpoint, so that calls chain, and [`Error::InvalidArgument`] for a NUL byte.
+    pub fn user(&self, user: &str) -> Result<&Self> {
+        let user = c_string(user, "user name")?;
+        let e = self.as_ptr();
+        // SAFETY: the endpoint is live and the SDK copies the string.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_user(t, e, user.as_ptr()) })?;
+        Ok(self)
+    }
+
+    /// Changes the password of the endpoint (`password`); see [`user`](Self::user).
+    pub fn password(&self, password: &str) -> Result<&Self> {
+        let password = c_string(password, "password")?;
+        let e = self.as_ptr();
+        // SAFETY: the endpoint is live and the SDK copies the string.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_password(t, e, password.as_ptr()) })?;
+        Ok(self)
+    }
+
+    /// The event types that the endpoint supports (`getEventTypes`), without those this crate does not know.
+    #[doc(alias = "getEventTypes")]
+    pub fn get_event_types(&self) -> Result<Vec<EventType>> {
+        let (e, mut list) = (self.as_ptr(), ptr::null_mut());
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getEventTypes(t, e, &mut list) })?;
+        // SAFETY: the SDK returned a live list of `size` live classes, or NULL.
+        let types = unsafe { event_types(list) };
+        // SAFETY: the list came from the SDK and is released once.
+        let released = call(|t| unsafe { sys::dxfg_v4_event_clazz_list_release(t, list) });
+        crate::error_manager::report_release("DXEndpoint", released);
+        Ok(types)
+    }
+
+    /// The aggregation period that the endpoint requests from the servers; `None` if it requests none
+    /// (`getRequestedAggregationPeriod`).
+    #[doc(alias = "getRequestedAggregationPeriod")]
+    pub fn get_requested_aggregation_period(&self) -> Result<Option<TimePeriod>> {
+        let e = self.as_ptr();
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        let period = Handle::create_optional(|t, out| unsafe {
+            sys::dxfg_v4_DXEndpoint_getRequestedAggregationPeriod(t, e, out)
+        })?;
+        period.as_ref().map(TimePeriod::from_sdk).transpose()
+    }
+
+    /// Requests an aggregation period from the servers, which keep it within their own bounds and apply it on their
+    /// side (`setRequestedAggregationPeriod`): [`TimePeriod::ZERO`] requests real-time delivery and `None` clears the
+    /// request. [`get_aggregation_period_info`](Self::get_aggregation_period_info) tells the period they apply.
+    ///
+    /// Returns [`Error::InvalidArgument`] for a period longer than
+    /// [`AGGREGATION_PERIOD_MAX_VALUE`](crate::DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE).
+    #[doc(alias = "setRequestedAggregationPeriod")]
+    pub fn set_requested_aggregation_period(&self, period: Option<TimePeriod>) -> Result<()> {
+        check_aggregation_period(period)?;
+        let period = period.map(TimePeriod::to_sdk).transpose()?;
+        let e = self.as_ptr();
+        let p = period.as_ref().map_or(ptr::null_mut(), Handle::as_ptr);
+        // SAFETY: the endpoint and the period, if any, are live.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_setRequestedAggregationPeriod(t, e, p) })
+    }
+
+    /// The aggregation period that the servers apply, over all the connections of the endpoint
+    /// (`getAggregationPeriodInfo`). It is [`TimePeriodInfo::UNKNOWN`] until a server reports it, and when none does,
+    /// such as for a local hub or a publisher.
+    #[doc(alias = "getAggregationPeriodInfo")]
+    pub fn get_aggregation_period_info(&self) -> Result<TimePeriodInfo> {
+        let (e, mut min, mut max) = (self.as_ptr(), 0, 0);
+        // SAFETY: the endpoint is live and the out-pointers are valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getAggregationPeriodInfo(t, e, &mut min, &mut max) })?;
+        if min < 0 || max < 0 {
+            return Ok(TimePeriodInfo::UNKNOWN);
+        }
+        TimePeriodInfo::value_of(min, max)
     }
 
     /// Connects to `address`, e.g. `demo.dxfeed.com:7300`; the connection is made in the background.

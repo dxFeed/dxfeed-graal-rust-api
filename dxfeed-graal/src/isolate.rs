@@ -363,16 +363,24 @@ pub(crate) unsafe fn string<'a>(s: *const c_char) -> Cow<'a, str> {
 /// Calls an SDK function that writes a new string to its out-pointer, copies the string and releases it; a NULL
 /// string is an error. `what` names the caller in a report of a failed release.
 pub(crate) fn out_string(what: &'static str, f: impl FnOnce(Thread, *mut *const c_char) -> i32) -> Result<String> {
+    out_optional_string(what, f)?.ok_or_else(|| Error::Java(JavaException::null_result()))
+}
+
+/// As [`out_string`], with `None` for a NULL string.
+pub(crate) fn out_optional_string(
+    what: &'static str,
+    f: impl FnOnce(Thread, *mut *const c_char) -> i32,
+) -> Result<Option<String>> {
     let mut text = ptr::null();
     call(|t| f(t, &mut text))?;
     if text.is_null() {
-        return Err(Error::Java(JavaException::null_result()));
+        return Ok(None);
     }
     // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
     let copy = unsafe { string(text) }.into_owned();
     // SAFETY: `text` came from the SDK to the caller and is released once.
     crate::error_manager::report_release(what, call(|t| unsafe { sys::dxfg_v4_String_release(t, text) }));
-    Ok(copy)
+    Ok(Some(copy))
 }
 
 #[cfg(test)]

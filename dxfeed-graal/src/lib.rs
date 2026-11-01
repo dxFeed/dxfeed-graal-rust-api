@@ -107,6 +107,7 @@
 //! The SDK library is linked dynamically and must be found at run time; see the README of the repository.
 #![warn(missing_docs)]
 
+mod auth_token;
 mod endpoint;
 mod error;
 mod error_manager;
@@ -133,6 +134,7 @@ mod time_format;
 mod time_period;
 mod time_zone;
 
+pub use auth_token::AuthToken;
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, Result};
 pub use error_manager::{ErrorInfo, ErrorManager};

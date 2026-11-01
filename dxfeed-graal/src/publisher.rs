@@ -1,10 +1,10 @@
 //! The publisher of an endpoint.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
-use crate::endpoint::EndpointState;
+use crate::endpoint::{DXEndpoint, EndpointState, Role};
 use crate::error::Result;
 use crate::event::{Event, EventKind, SysEvents};
 use crate::handle::Handle;
@@ -20,6 +20,21 @@ pub struct DXPublisher {
 }
 
 impl DXPublisher {
+    /// Returns the publisher of the default endpoint of the process with the [`Role::Publisher`] role,
+    /// [`DXEndpoint::get_instance_with_role`] (`DXPublisher.getInstance()`).
+    ///
+    /// The endpoint is configured on first use by the system properties, such as `dxpublisher.address`, and the
+    /// properties file that [`DXEndpoint::DXPUBLISHER_PROPERTIES_PROPERTY`] names; closing it closes it for the whole
+    /// process.
+    #[doc(alias = "getInstance")]
+    pub fn get_instance() -> Result<&'static DXPublisher> {
+        static INSTANCE: OnceLock<DXPublisher> = OnceLock::new();
+        static INIT: Mutex<()> = Mutex::new(());
+        crate::get_or_try_init(&INSTANCE, &INIT, || {
+            Ok(DXEndpoint::get_instance_with_role(Role::Publisher)?.get_publisher())
+        })
+    }
+
     pub(crate) fn new(state: Arc<EndpointState>) -> Self {
         DXPublisher { state }
     }
