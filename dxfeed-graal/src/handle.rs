@@ -133,6 +133,14 @@ impl<T: SdkHandle> Handle<T> {
         self.0.as_ptr()
     }
 
+    /// Another handle of the same Java object, released apart from this one (`JavaObjectHandler_clone`).
+    pub(crate) fn try_clone(&self) -> Result<Self> {
+        let this = self.as_ptr();
+        // SAFETY: the handle is live and the out-pointer is valid for writes. A typed handle consists of the handler
+        // only, so the clone is a handle of the same type.
+        Self::create(|t, out| unsafe { sys::dxfg_v4_JavaObjectHandler_clone(t, T::handler(this), out.cast()) })
+    }
+
     /// Releases the handle now and reports whether the SDK released it.
     pub(crate) fn release(self) -> Result<()> {
         let this = std::mem::ManuallyDrop::new(self);

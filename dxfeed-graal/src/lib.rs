@@ -144,7 +144,7 @@ pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
 pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
-pub use promise::{Promise, PromiseResult};
+pub use promise::{AnyOf, Promise, PromiseResult, Promises};
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
 pub use subscription_controller::SubscriptionController;
