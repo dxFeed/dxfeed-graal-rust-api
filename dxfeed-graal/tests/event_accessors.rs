@@ -137,7 +137,7 @@ fn owned_events_answer_the_accessors() {
 
     let mut mismatches = Vec::new();
     for event in &events {
-        let name = event.event_type().name();
+        let name = event.event_type().get_name();
         assert!(event.symbol().starts_with("AAPL"), "{event:?}");
         assert_eq!(BaseEvent::symbol(event), event.symbol());
         assert_eq!(BaseEvent::event_type(event), event.event_type());
@@ -263,7 +263,7 @@ fn view_mismatches(events: &[Event]) -> (Vec<EventType>, Vec<String>) {
 /// Compares the accessors of a received view with those of its owned copy.
 fn check_view(event: EventRef<'_>) -> (EventType, Vec<String>) {
     let owned = event.to_owned().unwrap();
-    let name = owned.event_type().name();
+    let name = owned.event_type().get_name();
     let mut mismatches = Vec::new();
     let mut expect = |what: &str, same: bool| {
         if !same {

@@ -37,8 +37,8 @@ time_sequence_values! {
             interest: f64 [interest] = f64::NAN,
         }
         derived {
-            /// The options traded today, puts and calls, as Java's `getOptionVolume` gives it: one of the volumes if the
-            /// other is NaN, else their sum.
+            /// The options traded today, puts and calls, as Java's `getOptionVolume` gives it: one of the volumes if
+            /// the other is NaN, else their sum.
             #[doc(alias = "getOptionVolume")]
             fn option_volume(put_volume, call_volume) -> f64 {
                 if put_volume.is_nan() {

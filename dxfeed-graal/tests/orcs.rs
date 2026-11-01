@@ -63,8 +63,15 @@ fn an_unreachable_service_reports_errors() {
     let service = PriceLevelService::new("127.0.0.1:1").unwrap();
     let symbol = CandleSymbol::value_of("AAPL{=d,gr=s}").unwrap();
     let start = Instant::now();
-    assert_rmi_error(service.get_orders(&symbol, OrderSource::NTV, 0, 1, "test"));
-    assert_rmi_error(service.get_quotes(&symbol, 0, 1, "test"));
+    assert_rmi_error(service.get_orders(&symbol, OrderSource::NTV, 0, 1, Some("test")));
+    assert_rmi_error(service.get_quotes(&symbol, 0, 1, Some("test")));
+    // Without a caller, the requests go out with the default caller of the SDK.
+    assert_rmi_error(service.get_orders(&symbol, OrderSource::NTV, 0, 1, None));
+    assert_rmi_error(service.get_quotes(&symbol, 0, 1, None));
+    assert!(matches!(
+        service.get_quotes(&symbol, 0, 1, Some("te\0st")),
+        Err(Error::InvalidArgument(_))
+    ));
     assert_rmi_error(service.get_auth_order_source());
     assert!(start.elapsed() < Duration::from_secs(30), "{:?}", start.elapsed());
 
@@ -72,7 +79,7 @@ fn an_unreachable_service_reports_errors() {
     service.close().unwrap();
     service.close().unwrap();
     assert!(service.is_closed());
-    assert!(service.get_quotes(&symbol, 0, 1, "test").is_err());
+    assert!(service.get_quotes(&symbol, 0, 1, None).is_err());
 }
 
 /// Asserts that a request failed in the RMI layer, not on its arguments.
@@ -81,6 +88,13 @@ fn assert_rmi_error<T: std::fmt::Debug>(result: Result<T>) {
         Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "com.devexperts.rmi.RuntimeRMIException"),
         other => panic!("expected RuntimeRMIException, got {other:?}"),
     }
+}
+
+#[test]
+fn the_granularity_key_is_the_java_one() {
+    assert_eq!(PriceLevelService::GRANULARITY_ATTRIBUTE_KEY, "gr");
+    let symbol = format!("AAPL{{=d,{}=s}}", PriceLevelService::GRANULARITY_ATTRIBUTE_KEY);
+    assert_eq!(CandleSymbol::value_of(&symbol).unwrap().to_string(), "AAPL{=d,gr=s}");
 }
 
 #[test]

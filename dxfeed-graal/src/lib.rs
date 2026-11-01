@@ -1,6 +1,7 @@
 //! Safe Rust API for dxFeed market data over the dxFeed Graal Native SDK.
 //!
-//! The project is in alpha: the API may change in any release, and only a part of the SDK is covered.
+//! The project is in alpha: the API may change in any release. It covers the dxFeed Java API 3.356 wherever the
+//! SDK exports it; the README lists the Java members that wait for new SDK exports.
 //!
 //! The names follow the dxFeed Java API: [`DXEndpoint`], [`DXFeed`], [`DXFeedSubscription`], [`DXPublisher`], with
 //! methods in snake case: `addEventListener` is [`add_event_listener`](DXFeedSubscription::add_event_listener) and

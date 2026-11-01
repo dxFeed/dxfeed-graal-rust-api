@@ -210,8 +210,8 @@ impl DXFeed {
     /// the Unix epoch, and returns the promise of the list, ordered by time (`getTimeSeriesPromise`).
     ///
     /// The request needs no subscription. A string symbol of candles is passed as a
-    /// [`CandleSymbol`](crate::event::CandleSymbol). The promise completes exceptionally when the events are permanently
-    /// unavailable; it keeps the endpoint open while it lives.
+    /// [`CandleSymbol`](crate::event::CandleSymbol). The promise completes exceptionally when the events are
+    /// permanently unavailable; it keeps the endpoint open while it lives.
     ///
     /// ```no_run
     /// # fn main() -> dxfeed_graal::Result<()> {

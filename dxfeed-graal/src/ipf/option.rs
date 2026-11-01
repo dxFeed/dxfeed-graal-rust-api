@@ -37,8 +37,9 @@ impl Ord for Strike {
 /// The options of one series of a chain: the same expiration and other attributes, by strike (`OptionSeries`).
 ///
 /// Series are equal, hashed and ordered by their attributes alone, not by their options, as in Java: by
-/// [`get_expiration`](Self::get_expiration), [`get_last_trade`](Self::get_last_trade), [`get_multiplier`](Self::get_multiplier),
-/// [`get_spc`](Self::get_spc), [`get_additional_underlyings`](Self::get_additional_underlyings), [`get_mmy`](Self::get_mmy),
+/// [`get_expiration`](Self::get_expiration), [`get_last_trade`](Self::get_last_trade),
+/// [`get_multiplier`](Self::get_multiplier), [`get_spc`](Self::get_spc),
+/// [`get_additional_underlyings`](Self::get_additional_underlyings), [`get_mmy`](Self::get_mmy),
 /// [`get_option_type`](Self::get_option_type), [`get_expiration_style`](Self::get_expiration_style),
 /// [`get_settlement_style`](Self::get_settlement_style) and [`get_cfi`](Self::get_cfi).
 #[derive(Debug, Clone)]

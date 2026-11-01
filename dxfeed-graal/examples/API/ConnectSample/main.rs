@@ -89,7 +89,10 @@ fn main() -> dxfeed_graal::Result<()> {
 
 /// The names of all event types (QUOTE, TIME_AND_SALE etc.) in alphabetical order, comma-separated.
 fn get_event_type_enum_names_list() -> String {
-    let mut names: Vec<String> = EventType::ALL.iter().map(|t| to_upper_snake_case(t.name())).collect();
+    let mut names: Vec<String> = EventType::ALL
+        .iter()
+        .map(|t| to_upper_snake_case(t.get_name()))
+        .collect();
     names.sort();
 
     names.join(",")
@@ -97,7 +100,7 @@ fn get_event_type_enum_names_list() -> String {
 
 /// The class names of all event types (Candle, Quote, TimeAndSale etc.) in alphabetical order, comma-separated.
 fn get_event_type_enum_class_names_list() -> String {
-    let mut names: Vec<&str> = EventType::ALL.iter().map(|t| t.name()).collect();
+    let mut names: Vec<&str> = EventType::ALL.iter().map(|t| t.get_name()).collect();
     names.sort();
 
     names.join(",")
@@ -142,7 +145,7 @@ fn parse_types(types: &str) -> (Vec<EventType>, Vec<String>) {
         let found = EventType::ALL
             .iter()
             .copied()
-            .find(|e| to_upper_snake_case(e.name()) == t.to_uppercase() || e.name() == t);
+            .find(|e| to_upper_snake_case(e.get_name()) == t.to_uppercase() || e.get_name() == t);
 
         match found {
             Some(event_type) if !result.contains(&event_type) => result.push(event_type),

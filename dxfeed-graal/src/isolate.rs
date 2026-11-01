@@ -212,7 +212,8 @@ fn load_system_properties(thread: Thread) {
         let (Ok(key), Ok(value)) = (CString::new(key), CString::new(value)) else {
             continue;
         };
-        // SAFETY: `thread` is the calling thread's isolate thread; both strings are NUL-terminated and outlive the call.
+        // SAFETY: `thread` is the calling thread's isolate thread; both strings are NUL-terminated and outlive the
+        // call.
         let code = unsafe { sys::dxfg_v4_system_set_property(thread, key.as_ptr(), value.as_ptr()) };
         // A failure is skipped; `check` clears its exception.
         let _ = check(thread, code);

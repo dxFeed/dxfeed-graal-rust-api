@@ -61,6 +61,13 @@ fn snapshots_and_transactions_come_whole() {
     hub.executor.process_all_pending().unwrap();
     assert_eq!(model.get_symbol().unwrap(), "EVENT");
     assert_eq!(model.get_source().unwrap(), OrderSource::NTV);
+    assert_eq!(
+        model.get_indexed_event_subscription_symbol().unwrap(),
+        Symbol::IndexedEventSubscription {
+            symbol: Box::new(Symbol::from("EVENT")),
+            source: OrderSource::NTV,
+        }
+    );
     assert!(!model.is_closed().unwrap());
 
     publish(&hub, snapshot());

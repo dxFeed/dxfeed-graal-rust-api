@@ -130,7 +130,8 @@ fn result_to_string<E: LastingEvent + EventKind + Display>(promise: &Promise<E>)
     }
 }
 
-/// Whether the symbol names a regional exchange, such as "IBM&N" or "IBM&N{=d}" (`MarketEventSymbols::hasExchangeCode`).
+/// Whether the symbol names a regional exchange, such as "IBM&N" or "IBM&N{=d}"
+/// (`MarketEventSymbols::hasExchangeCode`).
 fn has_exchange_code(symbol: &str) -> bool {
     let base = match symbol.strip_suffix('}').and_then(|_| symbol.rfind('{')) {
         Some(attributes) => &symbol[..attributes],

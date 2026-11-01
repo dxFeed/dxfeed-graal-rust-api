@@ -40,10 +40,10 @@ impl ListenerId {
 /// [`DXFeed::create_subscription_with_types`] or [`new_with_types`](DXFeedSubscription::new_with_types). One created
 /// without a feed receives events once it is [attached](Self::attach) to one.
 ///
-/// Dropping it removes and releases its event and change listeners, then closes it. A listener's closure is not called after the
-/// listener is released; dropping the subscription from another thread therefore waits for running calls of its
-/// listeners, so do not hold a lock their closures take while dropping it. It keeps the endpoints of the feeds it is
-/// attached to open.
+/// Dropping it removes and releases its event and change listeners, then closes it. A listener's closure is not called
+/// after the listener is released; dropping the subscription from another thread therefore waits for running calls of
+/// its listeners, so do not hold a lock their closures take while dropping it. It keeps the endpoints of the feeds it
+/// is attached to open.
 pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, EventListener)>>,

@@ -13,7 +13,7 @@
 //! let symbol = CandleSymbol::value_of("AAPL{=d,gr=s}")?;
 //! let from = TimeFormat::DEFAULT.parse("20260110-100000")?;
 //! let to = TimeFormat::DEFAULT.parse("20260110-230000")?;
-//! for order in service.get_orders(&symbol, OrderSource::NTV, from, to, "sample")? {
+//! for order in service.get_orders(&symbol, OrderSource::NTV, from, to, Some("sample"))? {
 //!     println!("{order}");
 //! }
 //! service.close()?;
@@ -39,14 +39,17 @@ use crate::symbol::{Symbol, SymbolArena};
 ///
 /// The client is an RMI client endpoint connected to the address of the service. A request blocks until the service
 /// answers or fails; while the service is not connected, the request fails after the
-/// `com.devexperts.rmi.RequestSendingTimeout` system property, in milliseconds, a minute by default. [`close`](Self::close)
-/// or dropping the client closes the connection.
+/// `com.devexperts.rmi.RequestSendingTimeout` system property, in milliseconds, a minute by default.
+/// [`close`](Self::close) or dropping the client closes the connection.
 pub struct PriceLevelService {
     handle: Handle<sys::dxfg_v4_price_level_service_t>,
     closed: AtomicBool,
 }
 
 impl PriceLevelService {
+    /// The key of the granularity attribute of a candle symbol, in seconds (`GRANULARITY_ATTRIBUTE_KEY`).
+    pub const GRANULARITY_ATTRIBUTE_KEY: &'static str = "gr";
+
     /// Creates a client of the service at an RMI `address`, such as `orcs.example.com:7777`; an authorization token
     /// goes to the address as `<address>[login=entitle:<token>]` (C++ `PriceLevelService::create`; in Java, the proxy
     /// of `PriceLevelService` of an RMI client endpoint connected to the address).
@@ -62,9 +65,11 @@ impl PriceLevelService {
     }
 
     /// The orders that rebuild the price levels of `candle_symbol` from `order_source` within the time range, sorted
-    /// by time (`getOrders`). Times are in milliseconds since the Unix epoch; `caller` names the client to the service.
+    /// by time (`getOrders`). Times are in milliseconds since the Unix epoch; `caller` names the client to the service,
+    /// and `None` sends the default caller of the SDK.
     ///
-    /// The candle symbol has a period and the granularity attribute `gr` in seconds, at least 1, such as
+    /// The candle symbol has a period and the granularity attribute
+    /// [`GRANULARITY_ATTRIBUTE_KEY`](Self::GRANULARITY_ATTRIBUTE_KEY) in seconds, at least 1, such as
     /// `AAPL{=d,gr=s}`. The list is empty when the service does not support the period or the granularity. The source
     /// is an order source, not [`IndexedEventSource::DEFAULT`].
     #[doc(alias = "getOrders")]
@@ -74,46 +79,60 @@ impl PriceLevelService {
         order_source: IndexedEventSource,
         from_time: i64,
         to_time: i64,
-        caller: &str,
+        caller: Option<&str>,
     ) -> Result<Vec<Order>> {
         let mut arena = SymbolArena::new();
         let symbol = arena.symbol(&Symbol::Candle(candle_symbol.clone()), true)?;
         let source = arena.source(order_source);
-        let caller = c_string(caller, "the caller")?;
+        let caller = caller.map(|caller| c_string(caller, "the caller")).transpose()?;
         let s = self.handle.as_ptr();
         // SAFETY: the service, the symbol, the source and the caller are live; the out-pointer is valid for writes.
         take_events(|t, out| unsafe {
-            sys::dxfg_v4_PriceLevelService_getOrdersWithCaller(
-                t,
-                s,
-                symbol,
-                source,
-                from_time,
-                to_time,
-                caller.as_ptr(),
-                out,
-            )
+            match &caller {
+                Some(caller) => sys::dxfg_v4_PriceLevelService_getOrdersWithCaller(
+                    t,
+                    s,
+                    symbol,
+                    source,
+                    from_time,
+                    to_time,
+                    caller.as_ptr(),
+                    out,
+                ),
+                None => sys::dxfg_v4_PriceLevelService_getOrders(t, s, symbol, source, from_time, to_time, out),
+            }
         })
         .map(Option::unwrap_or_default)
     }
 
     /// The quotes of `candle_symbol` within the time range, sorted by time (`getQuotes`). Times are in milliseconds
-    /// since the Unix epoch; `caller` names the client to the service.
+    /// since the Unix epoch; `caller` names the client to the service, and `None` sends the default caller of the SDK.
     #[doc(alias = "getQuotes")]
     pub fn get_quotes(
         &self,
         candle_symbol: &CandleSymbol,
         from_time: i64,
         to_time: i64,
-        caller: &str,
+        caller: Option<&str>,
     ) -> Result<Vec<Quote>> {
         let mut arena = SymbolArena::new();
         let symbol = arena.symbol(&Symbol::Candle(candle_symbol.clone()), true)?;
-        let caller = c_string(caller, "the caller")?;
+        let caller = caller.map(|caller| c_string(caller, "the caller")).transpose()?;
         let s = self.handle.as_ptr();
         // SAFETY: the service, the symbol and the caller are live; the out-pointer is valid for writes.
         take_events(|t, out| unsafe {
-            sys::dxfg_v4_PriceLevelService_getQuotesWithCaller(t, s, symbol, from_time, to_time, caller.as_ptr(), out)
+            match &caller {
+                Some(caller) => sys::dxfg_v4_PriceLevelService_getQuotesWithCaller(
+                    t,
+                    s,
+                    symbol,
+                    from_time,
+                    to_time,
+                    caller.as_ptr(),
+                    out,
+                ),
+                None => sys::dxfg_v4_PriceLevelService_getQuotes(t, s, symbol, from_time, to_time, out),
+            }
         })
         .map(Option::unwrap_or_default)
     }

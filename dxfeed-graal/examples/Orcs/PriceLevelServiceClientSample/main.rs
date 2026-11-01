@@ -100,7 +100,7 @@ fn main() -> dxfeed_graal::Result<()> {
     }
 
     let mut start = Instant::now();
-    let orders = service.get_orders(&symbol, source, from_time, to_time, "sample")?;
+    let orders = service.get_orders(&symbol, source, from_time, to_time, Some("sample"))?;
 
     println!("Received {} orders in {} ms", orders.len(), start.elapsed().as_millis());
 
@@ -112,10 +112,14 @@ fn main() -> dxfeed_graal::Result<()> {
 
     start = Instant::now();
     let quotes = service.get_quotes(
-        &CandleSymbol::value_of(&format!("{}{{gr=s}}", base_symbol(symbol.as_str())))?,
+        &CandleSymbol::value_of(&format!(
+            "{}{{{}=s}}",
+            base_symbol(symbol.as_str()),
+            PriceLevelService::GRANULARITY_ATTRIBUTE_KEY
+        ))?,
         from_time,
         to_time,
-        "sample",
+        Some("sample"),
     )?;
 
     println!("Received {} quotes in {} ms", quotes.len(), start.elapsed().as_millis());

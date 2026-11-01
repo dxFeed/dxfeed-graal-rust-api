@@ -20,12 +20,12 @@ use crate::symbol::Symbol;
 type DepthClosure<O> = dyn FnMut(&[O], &[O]) + Send;
 
 /// A model of the order book of a symbol: the buy orders sorted from the best (highest) price down and the sell orders
-/// from the best (lowest) price up, at most [`get_depth_limit`](Self::get_depth_limit) of each (`MarketDepthModel`). Build it
-/// with [`MarketDepthModel::new_builder`]; it needs a symbol and a feed.
+/// from the best (lowest) price up, at most [`get_depth_limit`](Self::get_depth_limit) of each (`MarketDepthModel`).
+/// Build it with [`MarketDepthModel::new_builder`]; it needs a symbol and a feed.
 ///
-/// The listener gets both sides whenever an update changes the orders within the depth limit: at once for a
-/// snapshot, and for the other updates once per [`get_aggregation_period`](Self::get_aggregation_period), if it is not zero.
-/// At one price, the price levels (the aggregate orders) go before the individual orders; the larger price levels go
+/// The listener gets both sides whenever an update changes the orders within the depth limit: at once for a snapshot,
+/// and for the other updates once per [`get_aggregation_period`](Self::get_aggregation_period), if it is not zero. At
+/// one price, the price levels (the aggregate orders) go before the individual orders; the larger price levels go
 /// first, the individual orders in the order of their time.
 ///
 /// Dropping the model closes it; dropping it from another thread waits for a running call of the listener, so do not

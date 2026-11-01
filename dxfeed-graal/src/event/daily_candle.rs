@@ -15,8 +15,8 @@ candle_fields! {
     }
 }
 
-/// Converts between [`Candle`](super::Candle) and [`DailyCandle`], which have the same fields: Java's `DailyCandle` is a
-/// `Candle`.
+/// Converts between [`Candle`](super::Candle) and [`DailyCandle`], which have the same fields: Java's `DailyCandle` is
+/// a `Candle`.
 macro_rules! convert {
     ($from:ident => $to:ident) => {
         impl From<super::$from> for super::$to {

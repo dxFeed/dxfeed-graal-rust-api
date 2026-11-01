@@ -6,7 +6,7 @@ use std::sync::{Arc, Mutex};
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, JavaException, Result};
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource};
 use crate::executor::Executor;
 use crate::feed::DXFeed;
@@ -101,6 +101,30 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModel<E> {
         Ok(id
             .and_then(|id| IndexedEventSource::from_id(id).ok())
             .unwrap_or_default())
+    }
+
+    /// The symbol the model subscribes to: an
+    /// [`IndexedEventSubscription`](Symbol::IndexedEventSubscription) symbol of its symbol and source
+    /// (`getIndexedEventSubscriptionSymbol`).
+    #[doc(alias = "getIndexedEventSubscriptionSymbol")]
+    pub fn get_indexed_event_subscription_symbol(&self) -> Result<Symbol> {
+        let mut symbol = std::ptr::null_mut();
+        let m = self.handle.as_ptr();
+        // SAFETY: the model is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_IndexedEventTxModel_getIndexedEventSubscriptionSymbol(t, m, &mut symbol) })?;
+        if symbol.is_null() {
+            return Err(Error::Java(JavaException::null_result()));
+        }
+        // SAFETY: the SDK wrote a live symbol struct, which is ours to release.
+        let result = unsafe { Symbol::from_sys(symbol) };
+        // SAFETY: the symbol is live and released once.
+        let released = call(|t| unsafe { sys::dxfg_v4_Symbol_release(t, symbol) });
+        crate::error_manager::report_release("IndexedEventTxModel", released);
+        result.ok_or_else(|| {
+            Error::Java(JavaException::from_message(
+                "the symbol is of a kind this crate does not know",
+            ))
+        })
     }
 
     /// The controller of the subscription of the model: it attaches the model to feeds and detaches it, and changes

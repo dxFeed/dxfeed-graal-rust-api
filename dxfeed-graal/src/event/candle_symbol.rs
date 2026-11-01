@@ -818,7 +818,8 @@ macro_rules! parsed_attribute {
             /// The key of the attribute in a candle symbol (`ATTRIBUTE_KEY`).
             pub const ATTRIBUTE_KEY: &'static str = $key;
 
-            /// The value of the attribute in `symbol`, [`DEFAULT`](Self::DEFAULT) without one (`getAttributeForSymbol`).
+            /// The value of the attribute in `symbol`, [`DEFAULT`](Self::DEFAULT) without one
+            /// (`getAttributeForSymbol`).
             ///
             /// Returns [`Error::InvalidArgument`] for a value that [`parse`](Self::parse) refuses.
             #[doc(alias = "getAttributeForSymbol")]

@@ -380,8 +380,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] [NuamOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamOrder.html)
 - [x] [MarketMaker](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/MarketMaker.html)
 - [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html)
-- [x] [OrderBase](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderBase.html): received only; Java refuses
-  to publish it
+- [x] [OrderBase](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderBase.html): received
+  only; Java refuses to publish it
 - [x] [Message](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Message.html)
 - [x] [Configuration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Configuration.html)
 - [x] [TextMessage](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextMessage.html)
@@ -392,24 +392,43 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
   endpoint and feed (`get_instance`)
 - [x] Typed and untyped subscriptions, listeners, publishing
+- [x] Subscription symbols and state: `set_symbols`, `get_symbols`, `get_decorated_symbols`, `clear`, `is_closed`,
+  event types, the aggregation period, the events batch limit, dropped events, executors and standalone
+  subscriptions attached to feeds
+- [x] The event symbol and the event time of any event, owned (`Event`) or borrowed (`EventRef` and the views)
 - [x] Observable subscriptions of publishers and change listeners of subscriptions
 - [x] Symbols: strings, candle symbols with their attributes, the wildcard, indexed event sources and time series
 - [x] Time series subscriptions, `get_time_series_promise` and `get_indexed_events_promise`
 - [x] `TimeFormat`: parsing and formatting of times like the other APIs
-- [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_event_promise` and `Promise`
+- [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_events`, `get_last_event_promise`
+  and `get_last_events_promises`
+- [x] Promises: `Promise` with `when_done` and `when_done_async`, `Promises::all_of` and `Promises::any_of`
+- [x] Endpoint properties, roles and the default instances, user and password, `AuthToken`, event types and
+  aggregation period info
+- [x] `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
 - [x] Events printed in the format of Java's `toString`
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
-- [x] Event type names: `EventType::name`, parsing with `FromStr`, `EventType::ALL`
+- [x] Event type names: `EventType::get_name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
-- [x] Instrument profiles: reading files and URLs, a collector, a live connection and option chains
-- [x] Trading schedules: days, sessions, holidays, venues and the schedule defaults
-- [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`, `IndexedEventTxModel`
+- [x] Instrument profiles: reading files, URLs and bytes, typed fields, a collector with generations, a live
+  connection and option chains
+- [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
+- [x] Candle symbols with all their attributes, `CandlePeriod` parsing, `MarketEventSymbols`, order sources
+- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE
+- [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,
+  `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
+- [x] List models: `OrderBookModel`, `IndexedEventModel`, `TimeSeriesEventModel` and their `ObservableListModel`
 - [x] On-demand historical data replay: `OnDemandService`
 - [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
+
+The API covers the dxFeed Java API 3.356 wherever SDK 3.12.0 exports it. These Java members wait for new SDK
+exports: the `DXFeedFilter` family and `configurationChanged`, `PriceLevelService.getCandles` and
+`PriceLevelCandle`, creating and failing a `Promise` from Rust, `InstrumentProfileWriter`, user data of day and
+session filters, and the property listeners of `OnDemandService`. Deprecated Java members are left out.
 
 ## Development
 

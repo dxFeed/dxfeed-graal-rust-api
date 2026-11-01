@@ -95,8 +95,8 @@ impl OnDemandService {
         self.flag(sys::dxfg_v4_OnDemandService_isReplaySupported)
     }
 
-    /// Whether the service replays, after [`replay`](Self::replay) and before [`stop_and_resume`](Self::stop_and_resume)
-    /// or [`stop_and_clear`](Self::stop_and_clear) (`isReplay`).
+    /// Whether the service replays, after [`replay`](Self::replay) and before
+    /// [`stop_and_resume`](Self::stop_and_resume) or [`stop_and_clear`](Self::stop_and_clear) (`isReplay`).
     #[doc(alias = "isReplay")]
     pub fn is_replay(&self) -> Result<bool> {
         self.flag(sys::dxfg_v4_OnDemandService_isReplay)

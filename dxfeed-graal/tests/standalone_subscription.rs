@@ -90,7 +90,7 @@ fn a_closed_subscription_is_not_attached() {
 fn a_standalone_subscription_takes_several_types() {
     let subscription = DXFeedSubscription::new_with_types(&[EventType::Quote, EventType::Trade]).unwrap();
     let mut types = subscription.get_event_types().unwrap();
-    types.sort_by_key(|event_type| event_type.name());
+    types.sort_by_key(|event_type| event_type.get_name());
     assert_eq!(types, [EventType::Quote, EventType::Trade]);
     assert!(matches!(
         DXFeedSubscription::new_with_types(&[]),

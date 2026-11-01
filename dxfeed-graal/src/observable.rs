@@ -74,8 +74,8 @@ impl<F: FnMut(&[Symbol]) + Send + 'static> ObservableSubscriptionChangeListener 
 ///
 /// The subscription lives as long as the publisher's endpoint and closes with it. As in Java, its change listeners stay
 /// until they are removed or the endpoint is closed, also when this object is dropped, so that
-/// `publisher.get_subscription::<Profile>()?.add_change_listener(listener)?` keeps the listener; a listener that holds the
-/// publisher keeps the endpoint open until it is closed. This object keeps the endpoint open too.
+/// `publisher.get_subscription::<Profile>()?.add_change_listener(listener)?` keeps the listener; a listener that holds
+/// the publisher keeps the endpoint open until it is closed. This object keeps the endpoint open too.
 pub struct ObservableSubscription {
     handle: Handle<sys::dxfg_v4_observable_subscription_t>,
     // Shared by the publisher's endpoint, which keeps the listeners until it is closed.

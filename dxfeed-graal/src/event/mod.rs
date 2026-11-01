@@ -122,8 +122,10 @@ macro_rules! event_types {
             /// Every event type.
             pub const ALL: &'static [EventType] = &[ $( EventType::$name, )* ];
 
-            /// The simple name of the Java class of the event type, such as `Quote` or `TimeAndSale`.
-            pub fn name(self) -> &'static str {
+            /// The simple name of the Java class of the event type, such as `Quote` or `TimeAndSale`
+            /// (`Class.getSimpleName`).
+            #[doc(alias = "getSimpleName")]
+            pub fn get_name(self) -> &'static str {
                 match self {
                     $( EventType::$name => stringify!($name), )*
                 }
@@ -145,7 +147,7 @@ macro_rules! event_types {
 
         impl Display for EventType {
             fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-                f.pad(self.name())
+                f.pad(self.get_name())
             }
         }
 
