@@ -18,6 +18,7 @@ order_base_fields! {
         }
         fields {
             /// The identifier of the market maker or of another aggregate of the order; `None` if unknown.
+            #[doc(alias = "getMarketMaker")]
             market_maker: string [market_maker] = None,
         }
         derived {}

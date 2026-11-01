@@ -22,14 +22,19 @@ time_sequence_values! {
             /// [`sequence`](Self::sequence) read them.
             time_sequence: i64 [time_sequence] = 0,
             /// The reference price of the auction; NaN if unknown.
+            #[doc(alias = "getRefPrice")]
             ref_price: f64 [ref_price] = f64::NAN,
             /// The size of the paired orders at the reference price; NaN if unknown.
+            #[doc(alias = "getPairedSize")]
             paired_size: f64 [paired_size] = f64::NAN,
             /// The size of the imbalance at the reference price; NaN if unknown.
+            #[doc(alias = "getImbalanceSize")]
             imbalance_size: f64 [imbalance_size] = f64::NAN,
             /// The price at which the auction would cross with the orders on the book; NaN if unknown.
+            #[doc(alias = "getNearPrice")]
             near_price: f64 [near_price] = f64::NAN,
             /// The price at which the auction would cross with the auction orders only; NaN if unknown.
+            #[doc(alias = "getFarPrice")]
             far_price: f64 [far_price] = f64::NAN,
             /// The flags of the event, packed as the SDK keeps them: the auction type in bits 3 to 5, the side of the
             /// imbalance in bits 0 to 2.

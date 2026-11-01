@@ -13,16 +13,22 @@ time_series_fields! {
         }
         fields {
             /// The 30-day implied volatility; NaN if unknown.
+            #[doc(alias = "getVolatility")]
             volatility: f64 [volatility] = f64::NAN,
             /// The front month implied volatility; NaN if unknown.
+            #[doc(alias = "getFrontVolatility")]
             front_volatility: f64 [front_volatility] = f64::NAN,
             /// The back month implied volatility; NaN if unknown.
+            #[doc(alias = "getBackVolatility")]
             back_volatility: f64 [back_volatility] = f64::NAN,
             /// The call options traded today; NaN if unknown.
+            #[doc(alias = "getCallVolume")]
             call_volume: f64 [call_volume] = f64::NAN,
             /// The put options traded today; NaN if unknown.
+            #[doc(alias = "getPutVolume")]
             put_volume: f64 [put_volume] = f64::NAN,
             /// The ratio of the put volume to the call volume over 30 days; NaN if unknown.
+            #[doc(alias = "getPutCallRatio")]
             put_call_ratio: f64 [put_call_ratio] = f64::NAN,
         }
         derived {

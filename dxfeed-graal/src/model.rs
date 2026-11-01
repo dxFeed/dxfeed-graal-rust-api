@@ -24,6 +24,7 @@
 
 use std::fmt;
 use std::marker::PhantomData;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use dxfeed_graal_sys as sys;
@@ -214,6 +215,7 @@ impl Settings {
                 listener: Mutex::new(listener),
                 _executor: self.executor,
                 feeds: Mutex::new(self.feed.into_iter().collect()),
+                closed: AtomicBool::new(false),
             }),
             Err(e) => {
                 if let Some(listener) = listener {
@@ -240,6 +242,8 @@ struct Core<K: Kind> {
     _executor: Option<Arc<Handle<sys::dxfg_v4_executor_t>>>,
     /// The feeds the model is attached to; dropped last, as they may close their endpoints.
     feeds: Mutex<Vec<DXFeed>>,
+    /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
+    closed: AtomicBool,
 }
 
 impl<K: Kind> Core<K> {
@@ -256,7 +260,7 @@ impl<K: Kind> Core<K> {
         attach_feed(&self.feeds, feed, |f| {
             // SAFETY: the model and the feed are live.
             call(|t| unsafe { K::ATTACH(t, m, f) })?;
-            Ok(true)
+            Ok(!self.closed.load(Ordering::Acquire))
         })
     }
 
@@ -278,6 +282,7 @@ impl<K: Kind> Core<K> {
     fn close(&self) -> Result<()> {
         let mut feeds = crate::lock(&self.feeds);
         self.close_model()?;
+        self.closed.store(true, Ordering::Release);
         feeds.clear();
         Ok(())
     }
@@ -386,7 +391,8 @@ macro_rules! model_methods {
             self.core.flag(<Self as HasKind>::Kind::IS_SNAPSHOT_PROCESSING)
         }
 
-        /// Attaches the model to a feed, which it keeps until it is detached (`attach`).
+        /// Attaches the model to a feed, which it keeps until it is detached (`attach`); attaching a closed model does
+        /// nothing.
         pub fn attach(&self, feed: &DXFeed) -> Result<()> {
             self.core.attach(feed)
         }

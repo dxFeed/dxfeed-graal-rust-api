@@ -107,6 +107,26 @@ pub enum DayFilter {
 }
 
 impl DayFilter {
+    /// Whether the filter accepts `day` (`accept`).
+    pub fn accept(self, day: &Day) -> Result<bool> {
+        Ok(match self {
+            DayFilter::Any => true,
+            DayFilter::Trading => day.is_trading()?,
+            DayFilter::NonTrading => !day.is_trading()?,
+            DayFilter::Holiday => day.is_holiday()?,
+            DayFilter::ShortDay => day.is_short_day()?,
+            DayFilter::Monday => day.get_day_of_week()? == 1,
+            DayFilter::Tuesday => day.get_day_of_week()? == 2,
+            DayFilter::Wednesday => day.get_day_of_week()? == 3,
+            DayFilter::Thursday => day.get_day_of_week()? == 4,
+            DayFilter::Friday => day.get_day_of_week()? == 5,
+            DayFilter::Saturday => day.get_day_of_week()? == 6,
+            DayFilter::Sunday => day.get_day_of_week()? == 7,
+            DayFilter::WeekDay => (1..=5).contains(&day.get_day_of_week()?),
+            DayFilter::WeekEnd => (6..=7).contains(&day.get_day_of_week()?),
+        })
+    }
+
     fn handle(self) -> Result<Handle<sys::dxfg_v4_day_filter_t>> {
         let filter = match self {
             DayFilter::Any => sys::DXFG_DAY_FILTER_ANY,
@@ -160,6 +180,19 @@ pub enum SessionFilter {
 }
 
 impl SessionFilter {
+    /// Whether the filter accepts `session` (`accept`).
+    pub fn accept(self, session: &Session) -> Result<bool> {
+        Ok(match self {
+            SessionFilter::Any => true,
+            SessionFilter::Trading => session.is_trading()?,
+            SessionFilter::NonTrading => !session.is_trading()?,
+            SessionFilter::NoTrading => session.get_type()? == SessionType::NoTrading,
+            SessionFilter::PreMarket => session.get_type()? == SessionType::PreMarket,
+            SessionFilter::Regular => session.get_type()? == SessionType::Regular,
+            SessionFilter::AfterMarket => session.get_type()? == SessionType::AfterMarket,
+        })
+    }
+
     fn handle(self) -> Result<Handle<sys::dxfg_v4_session_filter_t>> {
         let filter = match self {
             SessionFilter::Any => sys::DXFG_SESSION_FILTER_ANY,

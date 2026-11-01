@@ -12,25 +12,35 @@ event_type! {
     }
     fields {
         /// The flags of the event in a transaction or a snapshot.
+        #[doc(alias = "getEventFlags")]
         event_flags: event_flags [event_flags] = super::EventFlags::empty(),
         /// The index of the event: the exchange code in bits 32 to 47 and the market maker identifier in bits 0 to
         /// 31, as [`exchange_code`](Self::exchange_code) and [`market_maker`](Self::market_maker) read them.
+        #[doc(alias = "getIndex")]
         index: i64 [index] = 0,
         /// The time of the bid, in milliseconds since the Unix epoch.
+        #[doc(alias = "getBidTime")]
         bid_time: i64 [bid_time] = 0,
         /// The bid price; NaN if unknown.
+        #[doc(alias = "getBidPrice")]
         bid_price: f64 [bid_price] = f64::NAN,
         /// The bid size; NaN if unknown.
+        #[doc(alias = "getBidSize")]
         bid_size: f64 [bid_size] = f64::NAN,
         /// The number of the bid orders.
+        #[doc(alias = "getBidCount")]
         bid_count: i64 [bid_count] = 0,
         /// The time of the ask, in milliseconds since the Unix epoch.
+        #[doc(alias = "getAskTime")]
         ask_time: i64 [ask_time] = 0,
         /// The ask price; NaN if unknown.
+        #[doc(alias = "getAskPrice")]
         ask_price: f64 [ask_price] = f64::NAN,
         /// The ask size; NaN if unknown.
+        #[doc(alias = "getAskSize")]
         ask_size: f64 [ask_size] = f64::NAN,
         /// The number of the ask orders.
+        #[doc(alias = "getAskCount")]
         ask_count: i64 [ask_count] = 0,
     }
     derived {

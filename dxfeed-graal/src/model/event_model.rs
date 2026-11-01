@@ -4,6 +4,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::ptr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dxfeed_graal_sys as sys;
 
@@ -45,18 +46,19 @@ macro_rules! event_model {
                 Ok($model {
                     handle,
                     feeds: Mutex::new(Vec::new()),
+                    closed: AtomicBool::new(false),
                     _event: PhantomData,
                 })
             }
 
             /// Attaches the model to `feed`, which then delivers the events of its symbol (`attach`). The model keeps
-            /// the feed until it is detached or closed.
+            /// the feed until it is detached or closed; attaching a closed model does nothing.
             pub fn attach(&self, feed: &DXFeed) -> Result<()> {
                 let m = self.handle.as_ptr();
                 attach_feed(&self.feeds, feed, |f| {
                     // SAFETY: the model and the feed are live.
                     call(|t| unsafe { sys::$attach(t, m, f) })?;
-                    Ok(true)
+                    Ok(!self.closed.load(Ordering::Acquire))
                 })
             }
 
@@ -74,6 +76,7 @@ macro_rules! event_model {
             pub fn close(&self) -> Result<()> {
                 let mut feeds = crate::lock(&self.feeds);
                 self.close_model()?;
+                self.closed.store(true, Ordering::Release);
                 feeds.clear();
                 Ok(())
             }
@@ -233,6 +236,8 @@ pub struct IndexedEventModel<E: IndexedEvent + EventKind> {
     handle: Handle<sys::dxfg_v4_indexed_event_model_t>,
     /// The feeds the model is attached to; dropped last, as they may close their endpoints.
     feeds: Mutex<Vec<DXFeed>>,
+    /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
+    closed: AtomicBool,
     _event: PhantomData<fn() -> E>,
 }
 
@@ -283,6 +288,8 @@ pub struct TimeSeriesEventModel<E: TimeSeriesEvent + EventKind> {
     handle: Handle<sys::dxfg_v4_time_series_event_model_t>,
     /// The feeds the model is attached to; dropped last, as they may close their endpoints.
     feeds: Mutex<Vec<DXFeed>>,
+    /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
+    closed: AtomicBool,
     _event: PhantomData<fn() -> E>,
 }
 

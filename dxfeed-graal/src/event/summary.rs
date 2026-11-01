@@ -12,22 +12,31 @@ event_type! {
     }
     fields {
         /// The identifier of the day, in days since 1970-01-01.
+        #[doc(alias = "getDayId")]
         day_id: i32 [day_id] = 0,
         /// The first price of the day; NaN if unknown.
+        #[doc(alias = "getDayOpenPrice")]
         day_open_price: f64 [day_open_price] = f64::NAN,
         /// The highest price of the day; NaN if unknown.
+        #[doc(alias = "getDayHighPrice")]
         day_high_price: f64 [day_high_price] = f64::NAN,
         /// The lowest price of the day; NaN if unknown.
+        #[doc(alias = "getDayLowPrice")]
         day_low_price: f64 [day_low_price] = f64::NAN,
         /// The last price of the day; NaN if unknown.
+        #[doc(alias = "getDayClosePrice")]
         day_close_price: f64 [day_close_price] = f64::NAN,
         /// The identifier of the previous day, in days since 1970-01-01.
+        #[doc(alias = "getPrevDayId")]
         prev_day_id: i32 [prev_day_id] = 0,
         /// The last price of the previous day; NaN if unknown.
+        #[doc(alias = "getPrevDayClosePrice")]
         prev_day_close_price: f64 [prev_day_close_price] = f64::NAN,
         /// The volume of the previous day; NaN if unknown.
+        #[doc(alias = "getPrevDayVolume")]
         prev_day_volume: f64 [prev_day_volume] = f64::NAN,
         /// The open interest of the symbol.
+        #[doc(alias = "getOpenInterest")]
         open_interest: i64 [open_interest] = 0,
         /// The flags of the summary, packed as the SDK keeps them: the type of the day close price in bits 2 and 3,
         /// the type of the previous day close price in bits 0 and 1.

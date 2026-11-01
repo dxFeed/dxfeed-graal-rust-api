@@ -16,40 +16,58 @@ order_base_fields! {
         }
         fields {
             /// The identifier of the market maker or of another aggregate of the order; `None` if unknown.
+            #[doc(alias = "getMarketMaker")]
             market_maker: string [order_base.market_maker] = None,
             /// The identifier of the actor.
+            #[doc(alias = "getActorId")]
             actor_id: i32 [actor_id] = 0,
             /// The identifier of the participant.
+            #[doc(alias = "getParticipantId")]
             participant_id: i32 [participant_id] = 0,
             /// The identifier of the submitter.
+            #[doc(alias = "getSubmitterId")]
             submitter_id: i32 [submitter_id] = 0,
             /// The identifier of the submitter that the order was submitted on behalf of.
+            #[doc(alias = "getOnBehalfOfSubmitterId")]
             on_behalf_of_submitter_id: i32 [on_behalf_of_submitter_id] = 0,
             /// The identifier the client gave the order; `None` if unknown.
+            #[doc(alias = "getClientOrderId")]
             client_order_id: string [client_order_id] = None,
             /// The account of the customer; `None` if unknown.
+            #[doc(alias = "getCustomerAccount")]
             customer_account: string [customer_account] = None,
             /// The information about the customer; `None` if unknown.
+            #[doc(alias = "getCustomerInfo")]
             customer_info: string [customer_info] = None,
             /// The information about the exchange; `None` if unknown. Java's `toString` does not print it.
+            #[doc(alias = "getExchangeInfo")]
             exchange_info: string [exchange_info] = None,
             /// The data of the time in force, such as the number of days.
+            #[doc(alias = "getTimeInForceData")]
             time_in_force_data: i32 [time_in_force_data] = 0,
             /// The identifier of the order book that triggers the order.
+            #[doc(alias = "getTriggerOrderBookId")]
             trigger_order_book_id: i32 [trigger_order_book_id] = 0,
             /// The price that triggers the order; NaN if unknown.
+            #[doc(alias = "getTriggerPrice")]
             trigger_price: f64 [trigger_price] = f64::NAN,
             /// The type of the session that triggers the order.
+            #[doc(alias = "getTriggerSessionType")]
             trigger_session_type: i32 [trigger_session_type] = 0,
             /// The quantity of the order; NaN if unknown.
+            #[doc(alias = "getOrderQuantity")]
             order_quantity: f64 [order_quantity] = f64::NAN,
             /// The displayed quantity; NaN if unknown.
+            #[doc(alias = "getDisplayQuantity")]
             display_quantity: f64 [display_quantity] = f64::NAN,
             /// The quantity that refreshes the displayed one; NaN if unknown.
+            #[doc(alias = "getRefreshQuantity")]
             refresh_quantity: f64 [refresh_quantity] = f64::NAN,
             /// The quantity left to execute; NaN if unknown.
+            #[doc(alias = "getLeavesQuantity")]
             leaves_quantity: f64 [leaves_quantity] = f64::NAN,
             /// The matched quantity; NaN if unknown.
+            #[doc(alias = "getMatchedQuantity")]
             matched_quantity: f64 [matched_quantity] = f64::NAN,
             /// The Nuam flags, packed as the SDK keeps them: the time in force in bits 4 to 7, the order type in bits 0
             /// to 3.

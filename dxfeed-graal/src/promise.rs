@@ -11,7 +11,7 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, JavaException, Result};
 use crate::event::sdk_event::{take_event, take_events};
-use crate::event::{EventKind, IndexedEvent, LastingEvent};
+use crate::event::{Event, EventKind, IndexedEvent, LastingEvent, SysEvents};
 use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
@@ -77,6 +77,33 @@ impl<E: IndexedEvent + EventKind> sealed::Sealed for Vec<E> {
         let promise = promise.cast::<sys::dxfg_v4_promise_events_t>();
         // SAFETY: the promise of a list is live and the out-pointer is valid for writes.
         take_events(|t, out| unsafe { sys::dxfg_v4_Promise_List_EventType_getResult(t, promise, out) })
+    }
+}
+
+impl<E: LastingEvent + EventKind> Promise<E> {
+    /// Completes the promise with `event` unless it is done, which runs its handlers as [`when_done`](Self::when_done)
+    /// describes (`complete`).
+    pub fn complete(&self, event: &E) -> Result<()> {
+        let events = SysEvents::new(&[event.clone().into()])?;
+        let event = events.pointers()[0];
+        let p = self.as_promise();
+        // SAFETY: the promise of an event is live and the event lives in `events` during the call; the SDK only reads
+        // the event.
+        call(|t| unsafe { sys::dxfg_v4_Promise_EventType_complete(t, p, event) })
+    }
+}
+
+impl<E: IndexedEvent + EventKind> Promise<Vec<E>> {
+    /// Completes the promise with `events` unless it is done, which runs its handlers as
+    /// [`when_done`](Self::when_done) describes (`complete`).
+    pub fn complete(&self, events: &[E]) -> Result<()> {
+        let events: Vec<Event> = events.iter().cloned().map(Into::into).collect();
+        let mut events = SysEvents::new(&events)?;
+        let mut list = events.list();
+        let p = self.as_promise();
+        // SAFETY: the promise of a list is live and the list and its events live in `events` during the call; the SDK
+        // only reads them.
+        call(|t| unsafe { sys::dxfg_v4_Promise_List_EventType_complete(t, p, &mut list) })
     }
 }
 

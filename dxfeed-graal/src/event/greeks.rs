@@ -13,18 +13,25 @@ time_series_fields! {
         }
         fields {
             /// The price of the option; NaN if unknown.
+            #[doc(alias = "getPrice")]
             price: f64 [price] = f64::NAN,
             /// The Black-Scholes implied volatility of the option; NaN if unknown.
+            #[doc(alias = "getVolatility")]
             volatility: f64 [volatility] = f64::NAN,
             /// The change of the price for a change of the underlying price; NaN if unknown.
+            #[doc(alias = "getDelta")]
             delta: f64 [delta] = f64::NAN,
             /// The change of delta for a change of the underlying price; NaN if unknown.
+            #[doc(alias = "getGamma")]
             gamma: f64 [gamma] = f64::NAN,
             /// The change of the price for a change of the time to expiration; NaN if unknown.
+            #[doc(alias = "getTheta")]
             theta: f64 [theta] = f64::NAN,
             /// The change of the price for a change of the interest rate; NaN if unknown.
+            #[doc(alias = "getRho")]
             rho: f64 [rho] = f64::NAN,
             /// The change of the price for a change of the volatility; NaN if unknown.
+            #[doc(alias = "getVega")]
             vega: f64 [vega] = f64::NAN,
         }
         derived {}

@@ -14,6 +14,7 @@ order_base_fields! {
         }
         fields {
             /// The symbol of the spread; `None` if unknown.
+            #[doc(alias = "getSpreadSymbol")]
             spread_symbol: string [spread_symbol] = None,
         }
         derived {}

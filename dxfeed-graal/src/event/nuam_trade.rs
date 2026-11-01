@@ -14,12 +14,16 @@ trade_base_fields! {
         }
         fields {
             /// The time of the trading statistics, in milliseconds since the Unix epoch.
+            #[doc(alias = "getTradeStatTime")]
             trade_stat_time: i64 [trade_stat_time] = 0,
             /// The last price that changed the statistics; NaN if unknown.
+            #[doc(alias = "getLastSignificantPrice")]
             last_significant_price: f64 [last_significant_price] = f64::NAN,
             /// The last price of all the trades; NaN if unknown.
+            #[doc(alias = "getLastPriceForAll")]
             last_price_for_all: f64 [last_price_for_all] = f64::NAN,
             /// The number of trades of the day.
+            #[doc(alias = "getNumberOfTrades")]
             number_of_trades: i32 [number_of_trades] = 0,
             /// The volume-weighted average price; NaN if unknown.
             #[doc(alias = "getVWAP")]

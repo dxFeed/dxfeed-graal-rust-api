@@ -365,9 +365,11 @@ macro_rules! time_series_fields {
                 head { $($head)* }
                 fields {
                     /// The flags of the event in a transaction or a snapshot.
+                    #[doc(alias = "getEventFlags")]
                     event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
                     /// The index of the event: its time and sequence, packed as [`time`](Self::time) and
                     /// [`sequence`](Self::sequence) read them.
+                    #[doc(alias = "getIndex")]
                     index: i64 [$($p.)* index] = 0,
                     $($fields)*
                 }
@@ -449,27 +451,37 @@ macro_rules! trade_base_fields {
             fields {
                 /// The time and the sequence of the trade, packed as the SDK keeps them: seconds in bits 32 to 63,
                 /// milliseconds in bits 22 to 31 and the sequence in bits 0 to 21.
+                #[doc(alias = "getTimeSequence")]
                 time_sequence: i64 [$($p.)* time_sequence] = 0,
                 /// The microseconds and nanoseconds part of the trade time.
+                #[doc(alias = "getTimeNanoPart")]
                 time_nano_part: i32 [$($p.)* time_nano_part] = 0,
                 /// The exchange code of the trade; it must fit a Java `char`.
+                #[doc(alias = "getExchangeCode")]
                 exchange_code: char [$($p.)* exchange_code] = '\0',
                 /// The price; NaN if unknown.
+                #[doc(alias = "getPrice")]
                 price: f64 [$($p.)* price] = f64::NAN,
                 /// The change of the price from the close of the previous day; NaN if unknown.
+                #[doc(alias = "getChange")]
                 change: f64 [$($p.)* change] = f64::NAN,
                 /// The size; NaN if unknown.
+                #[doc(alias = "getSizeAsDouble")]
                 size: f64 [$($p.)* size] = f64::NAN,
                 /// The identifier of the trading day, in days since 1970-01-01.
+                #[doc(alias = "getDayId")]
                 day_id: i32 [$($p.)* day_id] = 0,
                 /// The volume traded during the day; NaN if unknown.
+                #[doc(alias = "getDayVolumeAsDouble")]
                 day_volume: f64 [$($p.)* day_volume] = f64::NAN,
                 /// The turnover during the day; NaN if unknown.
+                #[doc(alias = "getDayTurnover")]
                 day_turnover: f64 [$($p.)* day_turnover] = f64::NAN,
                 /// The flags of the trade, packed as the SDK keeps them: the tick direction in bits 1 to 3 and the
                 /// extended trading hours in bit 0.
                 flags: i32 [$($p.)* flags] = 0,
                 /// The identifier of the trade.
+                #[doc(alias = "getTradeId")]
                 trade_id: i64 [$($p.)* trade_id] = 0,
                 $($fields)*
             }
@@ -526,7 +538,7 @@ macro_rules! sale_fields {
         }
     ) => {
         sale_fields! {
-            @sale [$($p).*] index $name
+            @sale [$($p).*] index $name "getSizeAsDouble"
             time_series_fields! { [$($p).*] }
             {}
             $cb! { head { $(#[$doc])* $name, $($head)* } fields { $($fields)* } derived { $($derived)* } }
@@ -541,15 +553,18 @@ macro_rules! sale_fields {
         }
     ) => {
         sale_fields! {
-            @sale [$($p).*] time_sequence $name
+            @sale [$($p).*] time_sequence $name "getSize"
             time_sequence_values! { time_sequence }
             {
                 /// The flags of the event in a transaction or a snapshot.
+                #[doc(alias = "getEventFlags")]
                 event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
                 /// The index of the event among the events of its symbol, to correct or cancel it later.
+                #[doc(alias = "getIndex")]
                 index: i64 [$($p.)* index] = 0,
                 /// The time and the sequence of the event, packed as [`time`](Self::time) and
                 /// [`sequence`](Self::sequence) read them.
+                #[doc(alias = "getTimeSequence")]
                 time_sequence: i64 [$($p.)* time_sequence] = 0,
             }
             $cb! {
@@ -568,7 +583,7 @@ macro_rules! sale_fields {
         }
     };
     (
-        @sale [$($p:ident).*] $ts:ident $name:ident
+        @sale [$($p:ident).*] $ts:ident $name:ident $size:literal
         $group:ident! { $($group_args:tt)* }
         { $($first:tt)* }
         $cb:ident! {
@@ -659,18 +674,25 @@ macro_rules! sale_fields {
                 fields {
                     $($first)*
                     /// The microseconds and nanoseconds part of the time of the event.
+                    #[doc(alias = "getTimeNanoPart")]
                     time_nano_part: i32 [$($p.)* time_nano_part] = 0,
                     /// The exchange code of the event; it must fit a Java `char`.
+                    #[doc(alias = "getExchangeCode")]
                     exchange_code: char [$($p.)* exchange_code] = '\0',
                     /// The price; NaN if unknown.
+                    #[doc(alias = "getPrice")]
                     price: f64 [$($p.)* price] = f64::NAN,
                     /// The size; NaN if unknown.
+                    #[doc(alias = $size)]
                     size: f64 [$($p.)* size] = f64::NAN,
                     /// The bid price on the market at the time of the event; NaN if unknown.
+                    #[doc(alias = "getBidPrice")]
                     bid_price: f64 [$($p.)* bid_price] = f64::NAN,
                     /// The ask price on the market at the time of the event; NaN if unknown.
+                    #[doc(alias = "getAskPrice")]
                     ask_price: f64 [$($p.)* ask_price] = f64::NAN,
                     /// The sale conditions of the data feed, in its own format; `None` if none.
+                    #[doc(alias = "getExchangeSaleConditions")]
                     exchange_sale_conditions: string [$($p.)* exchange_sale_conditions] = None,
                     /// The flags of the event, packed as the SDK keeps them: the trade-through-exempt code in bits 8
                     /// to 15, the aggressor side in bits 5 and 6, the spread leg, extended trading hours and valid
@@ -795,10 +817,13 @@ macro_rules! time_and_sale_fields {
                 fields {
                     /// The identifier of the trade for the events of a trade (execution, correction, cancellation);
                     /// `0` if none.
+                    #[doc(alias = "getTradeId")]
                     trade_id: i64 [$($p.)* trade_id] = 0,
                     /// The buyer; `None` if unknown.
+                    #[doc(alias = "getBuyer")]
                     buyer: string [$($p.)* buyer] = None,
                     /// The seller; `None` if unknown.
+                    #[doc(alias = "getSeller")]
                     seller: string [$($p.)* seller] = None,
                     $($fields)*
                 }
@@ -881,27 +906,37 @@ macro_rules! candle_fields {
                 head { $(#[$doc])* $name, $view, $($head)* }
                 fields {
                     /// The number of the original events (trades or quotes) in the candle.
+                    #[doc(alias = "getCount")]
                     count: i64 [$($p.)* count] = 0,
                     /// The first (open) price; NaN if unknown.
+                    #[doc(alias = "getOpen")]
                     open: f64 [$($p.)* open] = f64::NAN,
                     /// The highest price; NaN if unknown.
+                    #[doc(alias = "getHigh")]
                     high: f64 [$($p.)* high] = f64::NAN,
                     /// The lowest price; NaN if unknown.
+                    #[doc(alias = "getLow")]
                     low: f64 [$($p.)* low] = f64::NAN,
                     /// The last (close) price; NaN if unknown.
+                    #[doc(alias = "getClose")]
                     close: f64 [$($p.)* close] = f64::NAN,
                     /// The total volume; NaN if unknown.
+                    #[doc(alias = "getVolumeAsDouble")]
                     volume: f64 [$($p.)* volume] = f64::NAN,
                     /// The volume-weighted average price; NaN if unknown.
                     #[doc(alias = "getVWAP")]
                     vwap: f64 [$($p.)* vwap] = f64::NAN,
                     /// The bid volume; NaN if unknown.
+                    #[doc(alias = "getBidVolumeAsDouble")]
                     bid_volume: f64 [$($p.)* bid_volume] = f64::NAN,
                     /// The ask volume; NaN if unknown.
+                    #[doc(alias = "getAskVolumeAsDouble")]
                     ask_volume: f64 [$($p.)* ask_volume] = f64::NAN,
                     /// The implied volatility; NaN if unknown.
+                    #[doc(alias = "getImpVolatility")]
                     imp_volatility: f64 [$($p.)* imp_volatility] = f64::NAN,
                     /// The open interest; NaN if unknown.
+                    #[doc(alias = "getOpenInterestAsDouble")]
                     open_interest: f64 [$($p.)* open_interest] = f64::NAN,
                     $($fields)*
                 }
@@ -1059,37 +1094,51 @@ macro_rules! order_base_fields {
             head { $(#[$doc])* $name, $($head)* }
             fields {
                 /// The flags of the event in a transaction or a snapshot.
+                #[doc(alias = "getEventFlags")]
                 event_flags: event_flags [$($p.)* event_flags] = $crate::event::EventFlags::empty(),
                 /// The index of the order among the orders of its symbol, with the source of the order in the high
                 /// bits: see [`source`](Self::source).
+                #[doc(alias = "getIndex")]
                 index: i64 [$($p.)* index] = 0,
                 /// The time and the sequence of the order, packed as [`time`](Self::time) and
                 /// [`sequence`](Self::sequence) read them.
+                #[doc(alias = "getTimeSequence")]
                 time_sequence: i64 [$($p.)* time_sequence] = 0,
                 /// The microseconds and nanoseconds part of the time of the order.
+                #[doc(alias = "getTimeNanoPart")]
                 time_nano_part: i32 [$($p.)* time_nano_part] = 0,
                 /// The time of the last action of the order, in milliseconds since the Unix epoch.
+                #[doc(alias = "getActionTime")]
                 action_time: i64 [$($p.)* action_time] = 0,
                 /// The identifier of the order; `0` if unknown.
+                #[doc(alias = "getOrderId")]
                 order_id: i64 [$($p.)* order_id] = 0,
                 /// The auxiliary identifier of the order, such as the order that it replaces; `0` if unknown.
+                #[doc(alias = "getAuxOrderId")]
                 aux_order_id: i64 [$($p.)* aux_order_id] = 0,
                 /// The price; NaN if unknown.
+                #[doc(alias = "getPrice")]
                 price: f64 [$($p.)* price] = f64::NAN,
                 /// The size; NaN if unknown.
+                #[doc(alias = "getSizeAsDouble")]
                 size: f64 [$($p.)* size] = f64::NAN,
                 /// The executed size; NaN if unknown.
+                #[doc(alias = "getExecutedSize")]
                 executed_size: f64 [$($p.)* executed_size] = f64::NAN,
                 /// The number of the individual orders at the price level.
+                #[doc(alias = "getCount")]
                 count: i64 [$($p.)* count] = 0,
                 /// The flags of the order, packed as the SDK keeps them: the action in bits 11 to 14, the exchange
                 /// code in bits 4 to 10, the side in bits 2 and 3, the scope in bits 0 and 1.
                 flags: i32 [$($p.)* flags] = 0,
                 /// The identifier of the trade of an execution; `0` if none.
+                #[doc(alias = "getTradeId")]
                 trade_id: i64 [$($p.)* trade_id] = 0,
                 /// The price of the trade of an execution; NaN if unknown.
+                #[doc(alias = "getTradePrice")]
                 trade_price: f64 [$($p.)* trade_price] = f64::NAN,
                 /// The size of the trade of an execution; NaN if unknown.
+                #[doc(alias = "getTradeSize")]
                 trade_size: f64 [$($p.)* trade_size] = f64::NAN,
                 $($fields)*
             }

@@ -14,12 +14,16 @@ order_base_fields! {
         }
         fields {
             /// The identifier of the market maker or of another aggregate of the order; `None` if unknown.
+            #[doc(alias = "getMarketMaker")]
             market_maker: string [order_base.market_maker] = None,
             /// The size of the visible part of the iceberg; NaN if unknown.
+            #[doc(alias = "getIcebergPeakSize")]
             iceberg_peak_size: f64 [iceberg_peak_size] = f64::NAN,
             /// The size of the hidden part of the iceberg; NaN if unknown.
+            #[doc(alias = "getIcebergHiddenSize")]
             iceberg_hidden_size: f64 [iceberg_hidden_size] = f64::NAN,
             /// The executed size of the iceberg; NaN if unknown.
+            #[doc(alias = "getIcebergExecutedSize")]
             iceberg_executed_size: f64 [iceberg_executed_size] = f64::NAN,
             /// The iceberg flags, packed as the SDK keeps them: the iceberg type in bits 0 and 1.
             iceberg_flags: i32 [iceberg_flags] = 0,

@@ -16,6 +16,7 @@ order_base_fields! {
         }
         fields {
             /// The identifier of the market maker or of another aggregate of the order; `None` if unknown.
+            #[doc(alias = "getMarketMaker")]
             market_maker: string [order_base.market_maker] = None,
             /// The quote access payment (QAP): the fee in cents per 100 shares for accessing the quote.
             #[doc(alias = "getQuoteAccessPayment")]

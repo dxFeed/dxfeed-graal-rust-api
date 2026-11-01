@@ -18,11 +18,25 @@ time_sequence_values! {
             /// [`sequence`](Self::sequence) read them.
             time_sequence: i64 [time_sequence] = 0,
             /// The version of the configuration.
+            #[doc(alias = "getVersion")]
             version: i32 [version] = 0,
             /// The text; `None` if none.
+            #[doc(alias = "getText")]
             text: string [text] = None,
         }
         derived {}
+    }
+}
+
+impl TextConfiguration {
+    /// A `TextConfiguration` for `symbol` with `text` and `version`, as Java's
+    /// `new TextConfiguration(symbol, text, version)`; Java's constructor without a version gives version 0.
+    pub fn with_text(symbol: impl AsRef<str>, text: impl Into<String>, version: i32) -> Self {
+        TextConfiguration {
+            text: Some(text.into()),
+            version,
+            ..TextConfiguration::new(symbol)
+        }
     }
 }
 

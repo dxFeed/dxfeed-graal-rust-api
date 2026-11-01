@@ -16,22 +16,31 @@ event_type! {
         /// to 31, the sequence in bits 0 to 21.
         time_millis_sequence: i32 [time_millis_sequence] = 0,
         /// The microseconds and nanoseconds part of the quote time.
+        #[doc(alias = "getTimeNanoPart")]
         time_nano_part: i32 [time_nano_part] = 0,
         /// The time of the last bid change, in milliseconds since the Unix epoch.
+        #[doc(alias = "getBidTime")]
         bid_time: i64 [bid_time] = 0,
         /// The exchange code of the bid; it must fit a Java `char`.
+        #[doc(alias = "getBidExchangeCode")]
         bid_exchange_code: char [bid_exchange_code] = '\0',
         /// The bid price; NaN if unknown.
+        #[doc(alias = "getBidPrice")]
         bid_price: f64 [bid_price] = f64::NAN,
         /// The bid size; NaN if unknown.
+        #[doc(alias = "getBidSizeAsDouble")]
         bid_size: f64 [bid_size] = f64::NAN,
         /// The time of the last ask change, in milliseconds since the Unix epoch.
+        #[doc(alias = "getAskTime")]
         ask_time: i64 [ask_time] = 0,
         /// The exchange code of the ask; it must fit a Java `char`.
+        #[doc(alias = "getAskExchangeCode")]
         ask_exchange_code: char [ask_exchange_code] = '\0',
         /// The ask price; NaN if unknown.
+        #[doc(alias = "getAskPrice")]
         ask_price: f64 [ask_price] = f64::NAN,
         /// The ask size; NaN if unknown.
+        #[doc(alias = "getAskSizeAsDouble")]
         ask_size: f64 [ask_size] = f64::NAN,
     }
     derived {

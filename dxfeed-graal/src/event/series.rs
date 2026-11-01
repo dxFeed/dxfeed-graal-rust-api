@@ -13,27 +13,38 @@ time_sequence_values! {
         }
         fields {
             /// The flags of the event in a transaction or a snapshot.
+            #[doc(alias = "getEventFlags")]
             event_flags: event_flags [event_flags] = super::EventFlags::empty(),
             /// The index of the series among the series of its symbol.
+            #[doc(alias = "getIndex")]
             index: i64 [index] = 0,
             /// The time and the sequence of the event, packed as [`time`](Self::time) and
             /// [`sequence`](Self::sequence) read them.
+            #[doc(alias = "getTimeSequence")]
             time_sequence: i64 [time_sequence] = 0,
             /// The day of the expiration of the series, in days since 1970-01-01.
+            #[doc(alias = "getExpiration")]
             expiration: i32 [expiration] = 0,
             /// The implied volatility of the series; NaN if unknown.
+            #[doc(alias = "getVolatility")]
             volatility: f64 [volatility] = f64::NAN,
             /// The call options of the series traded today; NaN if unknown.
+            #[doc(alias = "getCallVolume")]
             call_volume: f64 [call_volume] = f64::NAN,
             /// The put options of the series traded today; NaN if unknown.
+            #[doc(alias = "getPutVolume")]
             put_volume: f64 [put_volume] = f64::NAN,
             /// The ratio of the put volume to the call volume; NaN if unknown.
+            #[doc(alias = "getPutCallRatio")]
             put_call_ratio: f64 [put_call_ratio] = f64::NAN,
             /// The implied forward price of the underlying; NaN if unknown.
+            #[doc(alias = "getForwardPrice")]
             forward_price: f64 [forward_price] = f64::NAN,
             /// The implied simple dividend return of the underlying; NaN if unknown.
+            #[doc(alias = "getDividend")]
             dividend: f64 [dividend] = f64::NAN,
             /// The implied simple interest return of the underlying; NaN if unknown.
+            #[doc(alias = "getInterest")]
             interest: f64 [interest] = f64::NAN,
         }
         derived {

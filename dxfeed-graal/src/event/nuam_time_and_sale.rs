@@ -12,6 +12,7 @@ time_and_sale_fields! {
         }
         fields {
             /// The identifier of the match between the buyer and the seller.
+            #[doc(alias = "getMatchId")]
             match_id: i64 [match_id] = 0,
         }
         derived {}

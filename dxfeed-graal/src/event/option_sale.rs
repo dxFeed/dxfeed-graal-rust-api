@@ -13,12 +13,16 @@ sale_fields! {
         }
         fields {
             /// The price of the underlying at the time of the event; NaN if unknown.
+            #[doc(alias = "getUnderlyingPrice")]
             underlying_price: f64 [underlying_price] = f64::NAN,
             /// The Black-Scholes implied volatility of the option at the time of the event; NaN if unknown.
+            #[doc(alias = "getVolatility")]
             volatility: f64 [volatility] = f64::NAN,
             /// The delta of the option at the time of the event; NaN if unknown.
+            #[doc(alias = "getDelta")]
             delta: f64 [delta] = f64::NAN,
             /// The symbol of the option; `None` if unknown.
+            #[doc(alias = "getOptionSymbol")]
             option_symbol: string [option_symbol] = None,
         }
         derived {}

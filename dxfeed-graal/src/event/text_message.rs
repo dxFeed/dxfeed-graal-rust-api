@@ -14,11 +14,26 @@ time_sequence_values! {
         fields {
             /// The time and the sequence of the message, packed as [`time`](Self::time) and
             /// [`sequence`](Self::sequence) read them.
+            #[doc(alias = "getTimeSequence")]
             time_sequence: i64 [time_sequence] = 0,
             /// The text; `None` if none.
+            #[doc(alias = "getText")]
             text: string [text] = None,
         }
         derived {}
+    }
+}
+
+impl TextMessage {
+    /// A `TextMessage` for `symbol` with `time`, in milliseconds since the Unix epoch, and `text`, as Java's
+    /// `new TextMessage(symbol, time, text)`; Java's constructor without a time gives time 0.
+    pub fn with_text(symbol: impl AsRef<str>, time: i64, text: impl Into<String>) -> Self {
+        let mut message = TextMessage {
+            text: Some(text.into()),
+            ..TextMessage::new(symbol)
+        };
+        message.set_time(time);
+        message
     }
 }
 

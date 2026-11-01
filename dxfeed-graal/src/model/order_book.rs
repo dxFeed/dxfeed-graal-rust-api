@@ -3,11 +3,12 @@
 use std::fmt;
 use std::str::FromStr;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
-use crate::event::Order;
+use crate::event::{Order, Scope};
 use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
@@ -65,6 +66,20 @@ impl OrderBookModelFilter {
             OrderBookModelFilter::CompositeRegional => "COMPOSITE_REGIONAL",
             OrderBookModelFilter::CompositeRegionalAggregate => "COMPOSITE_REGIONAL_AGGREGATE",
             OrderBookModelFilter::All => "ALL",
+        }
+    }
+
+    /// Whether the filter accepts the orders of `scope` (`allowScope`).
+    #[doc(alias = "allowScope")]
+    pub fn allow_scope(self, scope: Scope) -> bool {
+        match self {
+            OrderBookModelFilter::Composite => scope == Scope::Composite,
+            OrderBookModelFilter::Regional => scope == Scope::Regional,
+            OrderBookModelFilter::Aggregate => scope == Scope::Aggregate,
+            OrderBookModelFilter::Order => scope == Scope::Order,
+            OrderBookModelFilter::CompositeRegional => matches!(scope, Scope::Composite | Scope::Regional),
+            OrderBookModelFilter::CompositeRegionalAggregate => scope != Scope::Order,
+            OrderBookModelFilter::All => true,
         }
     }
 
@@ -149,6 +164,8 @@ pub struct OrderBookModel {
     listeners: OrderBookListeners,
     /// The feeds the model is attached to; dropped last, as they may close their endpoints.
     feeds: Mutex<Vec<DXFeed>>,
+    /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
+    closed: AtomicBool,
 }
 
 impl OrderBookModel {
@@ -162,17 +179,18 @@ impl OrderBookModel {
             handle,
             listeners: OrderBookListeners::new("a listener of this order book model"),
             feeds: Mutex::new(Vec::new()),
+            closed: AtomicBool::new(false),
         })
     }
 
     /// Attaches the model to `feed`, which then delivers the orders of its symbol (`attach`). The model keeps the
-    /// feed until it is detached or closed.
+    /// feed until it is detached or closed; attaching a closed model does nothing.
     pub fn attach(&self, feed: &DXFeed) -> Result<()> {
         let m = self.handle.as_ptr();
         attach_feed(&self.feeds, feed, |f| {
             // SAFETY: the model and the feed are live.
             call(|t| unsafe { sys::dxfg_v4_OrderBookModel_attach(t, m, f) })?;
-            Ok(true)
+            Ok(!self.closed.load(Ordering::Acquire))
         })
     }
 
@@ -190,6 +208,7 @@ impl OrderBookModel {
     pub fn close(&self) -> Result<()> {
         let mut feeds = crate::lock(&self.feeds);
         self.close_model()?;
+        self.closed.store(true, Ordering::Release);
         feeds.clear();
         drop(feeds);
         self.remove_listeners();

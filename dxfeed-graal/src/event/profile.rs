@@ -12,34 +12,49 @@ event_type! {
     }
     fields {
         /// The description of the security.
+        #[doc(alias = "getDescription")]
         description: string [description] = None,
         /// The reason of the trading halt or of the status change.
+        #[doc(alias = "getStatusReason")]
         status_reason: string [status_reason] = None,
         /// The start of the trading halt, in milliseconds since the Unix epoch.
+        #[doc(alias = "getHaltStartTime")]
         halt_start_time: i64 [halt_start_time] = 0,
         /// The end of the trading halt, in milliseconds since the Unix epoch.
+        #[doc(alias = "getHaltEndTime")]
         halt_end_time: i64 [halt_end_time] = 0,
         /// The highest price allowed for the day; NaN if unknown.
+        #[doc(alias = "getHighLimitPrice")]
         high_limit_price: f64 [high_limit_price] = f64::NAN,
         /// The lowest price allowed for the day; NaN if unknown.
+        #[doc(alias = "getLowLimitPrice")]
         low_limit_price: f64 [low_limit_price] = f64::NAN,
         /// The highest price of the last 52 weeks; NaN if unknown.
+        #[doc(alias = "getHigh52WeekPrice")]
         high_52_week_price: f64 [high_52_week_price] = f64::NAN,
         /// The lowest price of the last 52 weeks; NaN if unknown.
+        #[doc(alias = "getLow52WeekPrice")]
         low_52_week_price: f64 [low_52_week_price] = f64::NAN,
         /// The beta of the security; NaN if unknown.
+        #[doc(alias = "getBeta")]
         beta: f64 [beta] = f64::NAN,
         /// The earnings per share; NaN if unknown.
+        #[doc(alias = "getEarningsPerShare")]
         earnings_per_share: f64 [earnings_per_share] = f64::NAN,
         /// The number of dividend payments a year; NaN if unknown.
+        #[doc(alias = "getDividendFrequency")]
         dividend_frequency: f64 [dividend_frequency] = f64::NAN,
         /// The amount of the last dividend; NaN if unknown.
+        #[doc(alias = "getExDividendAmount")]
         ex_dividend_amount: f64 [ex_dividend_amount] = f64::NAN,
         /// The day of the last dividend, in days since 1970-01-01.
+        #[doc(alias = "getExDividendDayId")]
         ex_dividend_day_id: i32 [ex_dividend_day_id] = 0,
         /// The number of shares outstanding; NaN if unknown.
+        #[doc(alias = "getShares")]
         shares: f64 [shares] = f64::NAN,
         /// The number of shares free to trade; NaN if unknown.
+        #[doc(alias = "getFreeFloat")]
         free_float: f64 [free_float] = f64::NAN,
         /// The flags of the profile, packed as the SDK keeps them: the short sale restriction in bits 2 and 3, the
         /// trading status in bits 0 and 1.

@@ -4,6 +4,7 @@ use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ffi::{CString, c_char};
 use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::ptr;
 use std::str::FromStr;
 
@@ -19,8 +20,10 @@ use crate::isolate::{self, call};
 /// number of days since January 1, 1970. A profile whose type is `REMOVED` tells that the instrument was removed
 /// (see [`is_removed`](Self::is_removed)).
 ///
-/// [`Display`](fmt::Display) gives the type and the symbol, like `toString` in Java: `STOCK AAPL`.
-#[derive(Debug, Clone, Default, PartialEq)]
+/// [`Display`](fmt::Display) gives the type and the symbol, like `toString` in Java: `STOCK AAPL`. Profiles are equal
+/// and hash as in Java's `equals` and `hashCode`: a NaN number equals NaN, `0.0` differs from `-0.0`, and a custom
+/// field with an empty value counts as missing.
+#[derive(Debug, Clone, Default)]
 pub struct InstrumentProfile {
     /// The type of the instrument, such as `STOCK`, `FUTURE`, `OPTION` or `REMOVED` (`getType`).
     #[doc(alias = "type")]
@@ -97,6 +100,198 @@ pub struct InstrumentProfile {
     /// The fields that are not standard, by name. Fields with empty values are not kept by the SDK
     /// (`getField` and `setField` with other names).
     pub custom_fields: BTreeMap<String, String>,
+}
+
+impl PartialEq for InstrumentProfile {
+    fn eq(&self, other: &Self) -> bool {
+        let InstrumentProfile {
+            instrument_type,
+            symbol,
+            description,
+            local_symbol,
+            local_description,
+            country,
+            opol,
+            exchange_data,
+            exchanges,
+            currency,
+            base_currency,
+            cfi,
+            isin,
+            sedol,
+            cusip,
+            icb,
+            sic,
+            multiplier,
+            product,
+            underlying,
+            spc,
+            additional_underlyings,
+            mmy,
+            expiration,
+            last_trade,
+            strike,
+            option_type,
+            expiration_style,
+            settlement_style,
+            price_increments,
+            trading_hours,
+            custom_fields,
+        } = self;
+        let InstrumentProfile {
+            instrument_type: other_instrument_type,
+            symbol: other_symbol,
+            description: other_description,
+            local_symbol: other_local_symbol,
+            local_description: other_local_description,
+            country: other_country,
+            opol: other_opol,
+            exchange_data: other_exchange_data,
+            exchanges: other_exchanges,
+            currency: other_currency,
+            base_currency: other_base_currency,
+            cfi: other_cfi,
+            isin: other_isin,
+            sedol: other_sedol,
+            cusip: other_cusip,
+            icb: other_icb,
+            sic: other_sic,
+            multiplier: other_multiplier,
+            product: other_product,
+            underlying: other_underlying,
+            spc: other_spc,
+            additional_underlyings: other_additional_underlyings,
+            mmy: other_mmy,
+            expiration: other_expiration,
+            last_trade: other_last_trade,
+            strike: other_strike,
+            option_type: other_option_type,
+            expiration_style: other_expiration_style,
+            settlement_style: other_settlement_style,
+            price_increments: other_price_increments,
+            trading_hours: other_trading_hours,
+            custom_fields: other_custom_fields,
+        } = other;
+        instrument_type == other_instrument_type
+            && symbol == other_symbol
+            && description == other_description
+            && local_symbol == other_local_symbol
+            && local_description == other_local_description
+            && country == other_country
+            && opol == other_opol
+            && exchange_data == other_exchange_data
+            && exchanges == other_exchanges
+            && currency == other_currency
+            && base_currency == other_base_currency
+            && cfi == other_cfi
+            && isin == other_isin
+            && sedol == other_sedol
+            && cusip == other_cusip
+            && product == other_product
+            && underlying == other_underlying
+            && additional_underlyings == other_additional_underlyings
+            && mmy == other_mmy
+            && option_type == other_option_type
+            && expiration_style == other_expiration_style
+            && settlement_style == other_settlement_style
+            && price_increments == other_price_increments
+            && trading_hours == other_trading_hours
+            && icb == other_icb
+            && sic == other_sic
+            && expiration == other_expiration
+            && last_trade == other_last_trade
+            && java_bits(*multiplier) == java_bits(*other_multiplier)
+            && java_bits(*spc) == java_bits(*other_spc)
+            && java_bits(*strike) == java_bits(*other_strike)
+            && non_empty(custom_fields).eq(non_empty(other_custom_fields))
+    }
+}
+
+impl Eq for InstrumentProfile {}
+
+impl Hash for InstrumentProfile {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        let InstrumentProfile {
+            instrument_type,
+            symbol,
+            description,
+            local_symbol,
+            local_description,
+            country,
+            opol,
+            exchange_data,
+            exchanges,
+            currency,
+            base_currency,
+            cfi,
+            isin,
+            sedol,
+            cusip,
+            icb,
+            sic,
+            multiplier,
+            product,
+            underlying,
+            spc,
+            additional_underlyings,
+            mmy,
+            expiration,
+            last_trade,
+            strike,
+            option_type,
+            expiration_style,
+            settlement_style,
+            price_increments,
+            trading_hours,
+            custom_fields,
+        } = self;
+        instrument_type.hash(state);
+        symbol.hash(state);
+        description.hash(state);
+        local_symbol.hash(state);
+        local_description.hash(state);
+        country.hash(state);
+        opol.hash(state);
+        exchange_data.hash(state);
+        exchanges.hash(state);
+        currency.hash(state);
+        base_currency.hash(state);
+        cfi.hash(state);
+        isin.hash(state);
+        sedol.hash(state);
+        cusip.hash(state);
+        product.hash(state);
+        underlying.hash(state);
+        additional_underlyings.hash(state);
+        mmy.hash(state);
+        option_type.hash(state);
+        expiration_style.hash(state);
+        settlement_style.hash(state);
+        price_increments.hash(state);
+        trading_hours.hash(state);
+        icb.hash(state);
+        sic.hash(state);
+        expiration.hash(state);
+        last_trade.hash(state);
+        java_bits(*multiplier).hash(state);
+        java_bits(*spc).hash(state);
+        java_bits(*strike).hash(state);
+        non_empty(custom_fields).for_each(|field| field.hash(state));
+    }
+}
+
+/// The bits of a number as Java's `Double.doubleToLongBits` gives them: every NaN has the same bits.
+fn java_bits(value: f64) -> u64 {
+    if value.is_nan() {
+        f64::NAN.to_bits()
+    } else {
+        value.to_bits()
+    }
+}
+
+/// The custom fields that Java keeps: those with a value.
+fn non_empty(fields: &BTreeMap<String, String>) -> impl Iterator<Item = (&String, &String)> {
+    fields.iter().filter(|(_, value)| !value.is_empty())
 }
 
 impl fmt::Display for InstrumentProfile {

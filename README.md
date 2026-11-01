@@ -402,7 +402,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] `TimeFormat`: parsing and formatting of times like the other APIs
 - [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_events`, `get_last_event_promise`
   and `get_last_events_promises`
-- [x] Promises: `Promise` with `when_done` and `when_done_async`, `Promises::all_of` and `Promises::any_of`
+- [x] Promises: `Promise` with `when_done`, `when_done_async` and `complete`, `Promises::all_of` and
+  `Promises::any_of`
 - [x] Endpoint properties, roles and the default instances, user and password, `AuthToken`, event types and
   aggregation period info
 - [x] `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
@@ -415,7 +416,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   connection and option chains
 - [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
 - [x] Candle symbols with all their attributes, `CandlePeriod` parsing, `MarketEventSymbols`, order sources
-- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE
+- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE, and the `accept`
+  of the day and session filters
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,
   `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`

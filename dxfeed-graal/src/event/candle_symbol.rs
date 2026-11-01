@@ -777,6 +777,14 @@ macro_rules! candle_enum {
 
             const VALUES: &'static [($name, &'static str, &'static str)] = &[ $( ($name::$variant, $java, $string), )* ];
 
+            /// The Java name of the value, such as `MINUTE` (`name`).
+            #[doc(alias = "name")]
+            pub fn get_name(self) -> &'static str {
+                match self {
+                    $( $name::$variant => $java, )*
+                }
+            }
+
             /// The string of the value in a candle symbol, such as `bid` (`toString`).
             pub fn as_str(self) -> &'static str {
                 match self {

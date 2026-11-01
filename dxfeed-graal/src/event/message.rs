@@ -11,9 +11,20 @@ event_type! {
     }
     fields {
         /// The attachment, as UTF-8 text; `None` if none.
+        #[doc(alias = "getAttachment")]
         attachment: attachment [attachment] = None,
     }
     derived {}
+}
+
+impl Message {
+    /// A `Message` for `symbol` with `attachment`, as Java's `new Message(symbol, attachment)`.
+    pub fn with_attachment(symbol: impl AsRef<str>, attachment: impl Into<String>) -> Self {
+        Message {
+            attachment: Some(attachment.into()),
+            ..Message::new(symbol)
+        }
+    }
 }
 
 /// The text of Java's `Message.toString`, e.g. `Message{AAPL, eventTime=0, attachment=null}`.
