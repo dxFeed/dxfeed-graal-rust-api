@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use dxfeed_graal::event::{EventFlags, Order, OrderSource, Side};
 use dxfeed_graal::model::IndexedEventTxModel;
-use dxfeed_graal::{Error, Symbol};
+use dxfeed_graal::{Error, Executor, Symbol};
 use support::Hub;
 
 /// One listener call: the indices of the orders within their source and whether they are a snapshot.
@@ -130,6 +130,45 @@ fn the_subscription_controller_changes_the_delivery() {
     assert_eq!(controller.get_events_batch_limit().unwrap(), 7);
     controller.set_aggregation_period(Duration::from_millis(250)).unwrap();
     assert_eq!(controller.get_aggregation_period().unwrap(), Duration::from_millis(250));
+}
+
+#[test]
+fn the_subscription_controller_changes_the_executor() {
+    let (model, _calls) = model(None);
+    let controller = model.get_subscription_controller().unwrap();
+    assert!(controller.get_executor().unwrap().is_none(), "the executor of the feed");
+    let pool = Executor::new_fixed_thread_pool(1, "controller-pool").unwrap();
+    controller.set_executor(Some(&pool)).unwrap();
+    let executor = controller.get_executor().unwrap();
+    assert!(executor.is_some(), "the executor that was set");
+    controller.set_executor(executor.as_ref()).unwrap();
+    assert!(controller.get_executor().unwrap().is_some());
+    controller.set_executor(None).unwrap();
+    assert!(controller.get_executor().unwrap().is_none());
+}
+
+#[test]
+fn a_thread_pool_calls_the_listener() {
+    let hub = Hub::with_default_executor();
+    let pool = Executor::new_fixed_thread_pool(2, "model-pool").unwrap();
+    let (sender, calls) = mpsc::channel();
+    let model = IndexedEventTxModel::<Order>::new_builder()
+        .with_feed(&hub.feed)
+        .with_symbol("EVENT")
+        .with_source(OrderSource::NTV)
+        .with_executor(&pool)
+        .with_listener(move |orders, _| {
+            let _ = sender.send(orders.count());
+        })
+        .build()
+        .unwrap();
+    let events: Vec<_> = snapshot().into_iter().map(Into::into).collect();
+    hub.publisher.publish_events(&events).unwrap();
+    let count = calls
+        .recv_timeout(Duration::from_secs(10))
+        .expect("a pool thread calls the listener");
+    assert_eq!(count, 2);
+    drop(model);
 }
 
 #[test]

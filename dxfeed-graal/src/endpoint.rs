@@ -9,7 +9,7 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result, c_string};
 use crate::event::EventType;
-use crate::executor::ManualExecutor;
+use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
@@ -108,7 +108,7 @@ pub struct DXEndpointBuilder {
     role: Option<Role>,
     name: Option<String>,
     properties: Vec<(String, String)>,
-    executor: Option<ManualExecutor>,
+    executor: Option<Executor>,
 }
 
 impl DXEndpointBuilder {
@@ -133,10 +133,12 @@ impl DXEndpointBuilder {
         self
     }
 
-    /// Runs the tasks of the endpoint, listener calls included, on `executor`.
+    /// Runs the tasks of the endpoint, listener calls included, on `executor` (`withExecutor`), such as a thread pool
+    /// or a [`ManualExecutor`](crate::ManualExecutor).
     ///
-    /// Shutting the SDK down waits for those tasks, so keep processing the executor until then.
-    pub fn with_executor(mut self, executor: &ManualExecutor) -> Self {
+    /// Shutting the SDK down waits for those tasks, so keep processing a manual executor until then.
+    #[doc(alias = "withExecutor")]
+    pub fn with_executor(mut self, executor: &Executor) -> Self {
         self.executor = Some(executor.clone());
         self
     }
@@ -409,7 +411,7 @@ impl DXEndpoint {
     /// is read. The listeners may still be processing its events; [`close_and_await_termination`] waits for them.
     ///
     /// Inside a listener it returns [`Error::InCallback`]: it could wait for the notification that is running. With
-    /// a [`ManualExecutor`], keep processing the executor from another thread until it returns.
+    /// a [`ManualExecutor`](crate::ManualExecutor), keep processing the executor from another thread until it returns.
     ///
     /// [`close_and_await_termination`]: Self::close_and_await_termination
     #[doc(alias = "awaitNotConnected")]
@@ -499,7 +501,7 @@ impl DXEndpoint {
     /// after [`close`](Self::close), only waits.
     ///
     /// Inside a listener it returns [`Error::InCallback`]: it would wait for the notification that is running. With a
-    /// [`ManualExecutor`], keep processing the executor from another thread until it returns.
+    /// [`ManualExecutor`](crate::ManualExecutor), keep processing the executor from another thread until it returns.
     #[doc(alias = "closeAndAwaitTermination")]
     pub fn close_and_await_termination(&self) -> Result<()> {
         if isolate::in_callback() {

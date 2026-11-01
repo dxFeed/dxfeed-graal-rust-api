@@ -77,9 +77,10 @@
 //!
 //! # Listeners
 //!
-//! A listener's closure runs on a thread of the endpoint's executor, or inside
-//! [`ManualExecutor::process_all_pending`]. The calls of one listener do not overlap. The events are valid during
-//! the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and goes to [`ErrorManager`].
+//! A listener's closure runs on a thread of the endpoint's executor, its own threads by default or an [`Executor`]
+//! thread pool, or inside [`ManualExecutor::process_all_pending`]. The calls of one listener do not overlap. The events
+//! are valid during the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and goes to
+//! [`ErrorManager`].
 //!
 //! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running
 //! calls, except inside a callback, and so does dropping the last owner of an endpoint with state listeners. So do not
@@ -137,7 +138,7 @@ pub use error_manager::{ErrorInfo, ErrorManager};
 #[doc(hidden)]
 pub use event::sdk_event::live_events;
 pub use event::{Event, EventKind, EventRef, EventType, Events, SubscriptionItem};
-pub use executor::ManualExecutor;
+pub use executor::{Executor, ManualExecutor};
 pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;

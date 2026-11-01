@@ -14,7 +14,7 @@ use dxfeed_graal::event::{
     TradeETH, Underlying,
 };
 use dxfeed_graal::{
-    DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, ManualExecutor, Role,
+    DXEndpoint, DXFeedSubscription, Error, Event, EventKind, EventRef, EventType, Executor, ManualExecutor, Role,
 };
 use support::{
     Hub, all_events, candle_symbol, collect, delivered, market_maker, order, order_base, quote, quote_with_bid,
@@ -128,6 +128,46 @@ fn feed_and_publisher_keep_the_endpoint_open() {
     publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     executor.process_all_pending().unwrap();
     assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
+}
+
+#[test]
+fn thread_pools_deliver_events() {
+    let pools = [
+        Executor::new_fixed_thread_pool(2, "fixed-pool").unwrap(),
+        Executor::new_scheduled_thread_pool(2, "scheduled-pool").unwrap(),
+    ];
+    for (i, pool) in pools.iter().enumerate() {
+        let endpoint = DXEndpoint::new_builder()
+            .with_role(Role::LocalHub)
+            .with_name(&format!("pool-hub-{i}"))
+            .with_executor(pool)
+            .build()
+            .unwrap();
+        let subscription = endpoint.get_feed().create_subscription::<Quote>().unwrap();
+        let events = collect(&subscription);
+        subscription.add_symbols(["AAPL"]).unwrap();
+        endpoint
+            .get_publisher()
+            .publish_events(&[quote("AAPL").into()])
+            .unwrap();
+        let event = events
+            .recv_timeout(Duration::from_secs(10))
+            .expect("a pool thread delivers the event");
+        assert_eq!(event, Event::Quote(delivered_quote(quote("AAPL"))));
+        endpoint.close_and_await_termination().unwrap();
+    }
+    assert!(matches!(
+        Executor::new_fixed_thread_pool(0, "none"),
+        Err(Error::Java(_))
+    ));
+    assert!(matches!(
+        Executor::new_fixed_thread_pool(1, "a\0b"),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        Executor::new_scheduled_thread_pool(usize::MAX, "many"),
+        Err(Error::InvalidArgument(_))
+    ));
 }
 
 #[test]

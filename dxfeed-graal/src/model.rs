@@ -31,7 +31,7 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::Result;
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
-use crate::executor::ManualExecutor;
+use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, call};
@@ -348,7 +348,7 @@ macro_rules! builder_methods {
 
         /// The executor that calls the listener; by default, the executor of the feed (`withExecutor`).
         #[doc(alias = "withExecutor")]
-        pub fn with_executor(mut self, executor: &ManualExecutor) -> Self {
+        pub fn with_executor(mut self, executor: &Executor) -> Self {
             self.settings.executor = Some(executor.handle.clone());
             self
         }

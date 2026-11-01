@@ -14,8 +14,9 @@ use crate::isolate::{self, Thread, call};
 /// Parses and formats times as the Java `TimeFormat` of the SDK does; times are milliseconds since the Unix epoch.
 ///
 /// [`DEFAULT`](Self::DEFAULT) uses the default time zone of the process, [`GMT`](Self::GMT) the GMT zone and
-/// [`get_instance`](Self::get_instance) a given zone. The text formats, such as `20070101-123456`, `20070101-123456.123`, `2005-12-31 21:00:00.123+03:00` or `2007-11-02Z`, are
-/// those of Java's `TimeFormat.parse`; a number is milliseconds since the epoch.
+/// [`get_instance`](Self::get_instance) a given zone. The text formats, such as `20070101-123456`,
+/// `20070101-123456.123`, `2005-12-31 21:00:00.123+03:00` or `2007-11-02Z`, are those of Java's `TimeFormat.parse`; a
+/// number is milliseconds since the epoch.
 ///
 /// ```no_run
 /// # fn main() -> dxfeed_graal::Result<()> {

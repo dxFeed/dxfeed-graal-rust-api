@@ -10,7 +10,7 @@ use dxfeed_graal_sys as sys;
 use super::time_period;
 use crate::error::{Error, Result};
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource};
-use crate::executor::ManualExecutor;
+use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
@@ -222,7 +222,7 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModelBuilder<E> {
 
     /// The executor that calls the listener; by default, the executor of the feed (`withExecutor`).
     #[doc(alias = "withExecutor")]
-    pub fn with_executor(mut self, executor: &ManualExecutor) -> Self {
+    pub fn with_executor(mut self, executor: &Executor) -> Self {
         self.executor = Some(executor.handle.clone());
         self
     }
@@ -375,6 +375,25 @@ impl SubscriptionController<'_> {
         let c = self.handle.as_ptr();
         // SAFETY: the controller is live.
         call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setEventsBatchLimit(t, c, limit) })
+    }
+
+    /// The executor that calls the listener; `None` if it is the executor of the feed (`getExecutor`).
+    #[doc(alias = "getExecutor")]
+    pub fn get_executor(&self) -> Result<Option<Executor>> {
+        let c = self.handle.as_ptr();
+        // SAFETY: the controller is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create_optional(|t, out| unsafe { sys::dxfg_v4_SubscriptionController_getExecutor(t, c, out) })?;
+        Ok(handle.map(Executor::from_handle))
+    }
+
+    /// Changes the executor that calls the listener; `None` for the executor of the feed (`setExecutor`).
+    #[doc(alias = "setExecutor")]
+    pub fn set_executor(&self, executor: Option<&Executor>) -> Result<()> {
+        let c = self.handle.as_ptr();
+        let e = executor.map_or(std::ptr::null_mut(), |executor| executor.handle.as_ptr());
+        // SAFETY: the controller and the executor are live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setExecutor(t, c, e) })
     }
 
     /// How long the model gathers the events before it calls the listener; zero if it calls it at once

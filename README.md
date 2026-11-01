@@ -213,7 +213,8 @@ set before the first endpoint is created.
 ### Threads and Listeners
 
 - All types are `Send` and `Sync`. Threads are attached to the SDK on their first call and detached when they exit.
-- A listener's closure runs on a thread of the endpoint's executor, or inside `ManualExecutor::process_all_pending`.
+- A listener's closure runs on a thread of the endpoint's executor, its own threads by default or an `Executor`
+  thread pool (`Executor::new_fixed_thread_pool`), or inside `ManualExecutor::process_all_pending`.
   The calls of one listener do not overlap. The events are valid during the call only: copy what you keep with
   `to_owned()`. A panic in a closure is caught and goes to `ErrorManager`, as the C++ API does; the listener stays
   active.
