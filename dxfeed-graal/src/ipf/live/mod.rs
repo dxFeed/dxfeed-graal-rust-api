@@ -4,6 +4,6 @@
 mod collector;
 mod connection;
 
-pub use collector::InstrumentProfileCollector;
 pub(crate) use collector::collect;
+pub use collector::{Generation, InstrumentProfileCollector};
 pub use connection::{ConnectionState, InstrumentProfileConnection};

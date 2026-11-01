@@ -4,14 +4,15 @@ use std::cmp::Ordering;
 use std::io::{Read, Write};
 use std::net::TcpListener;
 use std::path::PathBuf;
+use std::slice;
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::ipf::InstrumentProfileReader;
-use dxfeed_graal::ipf::live::{ConnectionState, InstrumentProfileCollector, InstrumentProfileConnection};
+use dxfeed_graal::ipf::live::{ConnectionState, Generation, InstrumentProfileCollector, InstrumentProfileConnection};
 use dxfeed_graal::ipf::{InstrumentProfile, InstrumentProfileField, InstrumentProfileType};
-use dxfeed_graal::{AuthToken, Error};
+use dxfeed_graal::{AuthToken, Error, Executor, ManualExecutor};
 
 fn fixture() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -95,7 +96,7 @@ fn fields_by_name() {
 #[test]
 fn the_collector_keeps_and_tells_the_updates() {
     let collector = InstrumentProfileCollector::new().unwrap();
-    collector.update_instrument_profiles(&expected()).unwrap();
+    collector.update_instrument_profiles(&expected(), None).unwrap();
     let mut view = collector.view().unwrap();
     // `.AAPL261218C200` sorts before `AAPL`.
     view.sort_by(|a, b| b.symbol.cmp(&a.symbol));
@@ -379,4 +380,101 @@ fn types_and_profiles_sort_as_in_java() {
     let mut described = profiles[0].clone();
     described.description = "other".into();
     assert_eq!(described.compare_to(&profiles[0]), Ordering::Equal);
+}
+
+/// The symbols of the profiles in the collector that are not removed, sorted.
+fn present(collector: &InstrumentProfileCollector) -> Vec<String> {
+    let mut symbols: Vec<_> = collector
+        .view()
+        .unwrap()
+        .into_iter()
+        .filter(|p| !p.is_removed())
+        .map(|p| p.symbol)
+        .collect();
+    symbols.sort();
+    symbols
+}
+
+#[test]
+fn generations_are_removed_together() {
+    let (a, b) = (Generation::new().unwrap(), Generation::new().unwrap());
+    assert_ne!(a, b);
+    assert_eq!(a, a.clone());
+
+    let collector = InstrumentProfileCollector::new().unwrap();
+    let [stock, option] = <[InstrumentProfile; 2]>::try_from(expected()).unwrap();
+    let untagged = InstrumentProfile {
+        instrument_type: "STOCK".into(),
+        symbol: "MSFT".into(),
+        ..InstrumentProfile::new()
+    };
+    collector
+        .update_instrument_profiles(slice::from_ref(&stock), Some(&a))
+        .unwrap();
+    collector
+        .update_instrument_profiles(slice::from_ref(&option), Some(&b))
+        .unwrap();
+    collector.update_instrument_profiles(&[untagged], None).unwrap();
+    let (sender, updates) = mpsc::channel();
+    collector
+        .add_update_listener(move |profiles| {
+            let _ = sender.send(profiles.to_vec());
+        })
+        .unwrap();
+    assert_eq!(updates.recv_timeout(Duration::from_secs(10)).unwrap().len(), 3);
+
+    collector.remove_generations([&a]).unwrap();
+    let removals = updates.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(removals.len(), 1);
+    assert!(
+        removals[0].is_removed() && removals[0].symbol == stock.symbol,
+        "{removals:?}"
+    );
+    assert_eq!(present(&collector), [option.symbol.as_str(), "MSFT"]);
+
+    // An equal update only takes the new tag, so the generation `b` no longer has the option.
+    collector
+        .update_instrument_profiles(slice::from_ref(&option), None)
+        .unwrap();
+    collector.remove_generations(&[b]).unwrap();
+    collector.remove_generations(&[]).unwrap();
+    assert_eq!(present(&collector), [option.symbol.as_str(), "MSFT"]);
+    assert!(updates.recv_timeout(Duration::from_millis(300)).is_err());
+}
+
+#[test]
+fn the_collector_calls_listeners_on_its_executor() {
+    let collector = InstrumentProfileCollector::new().unwrap();
+    let own = collector.get_executor().unwrap();
+    let manual = ManualExecutor::new().unwrap();
+    collector.set_executor(&manual).unwrap();
+    let (sender, updates) = mpsc::channel();
+    collector
+        .add_update_listener(move |profiles| {
+            let _ = sender.send((thread::current().id(), profiles.len()));
+        })
+        .unwrap();
+    collector.update_instrument_profiles(&expected(), None).unwrap();
+    assert!(updates.recv_timeout(Duration::from_millis(300)).is_err());
+    manual.process_all_pending().unwrap();
+    let calls: Vec<_> = updates.try_iter().collect();
+    assert!(calls.iter().any(|&(_, count)| count == 2), "{calls:?}");
+    assert!(calls.iter().all(|&(id, _)| id == thread::current().id()), "{calls:?}");
+
+    let pool = Executor::new_fixed_thread_pool(1, "ipf-listeners").unwrap();
+    collector.set_executor(&pool).unwrap();
+    let mut stock = expected().remove(0);
+    stock.description = "Apple".into();
+    collector.update_instrument_profile(&stock).unwrap();
+    let (id, count) = updates.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(count, 1);
+    assert_ne!(id, thread::current().id());
+
+    collector.set_executor(&own).unwrap();
+    stock.description = "Apple Inc.".into();
+    collector.update_instrument_profile(&stock).unwrap();
+    let (own_id, count) = updates.recv_timeout(Duration::from_secs(10)).unwrap();
+    assert_eq!(count, 1);
+    assert_ne!(own_id, thread::current().id());
+    assert_ne!(own_id, id);
 }

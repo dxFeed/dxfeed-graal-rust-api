@@ -8,11 +8,12 @@ use dxfeed_graal_sys as sys;
 use crate::error::{Error, JavaException, Result};
 use crate::isolate::{self, Thread, call};
 
-/// An SDK handle structure whose first field is the `handler` of its Java object.
+/// An SDK handle structure whose first field is the `handler` of its Java object, or that `handler` itself.
 ///
 /// # Safety
 ///
-/// `handler` must return the `handler` field of a live structure of this type.
+/// `handler` must return the `handler` field of a live structure of this type, or the structure itself for
+/// `dxfg_v4_java_object_handler`.
 pub(crate) unsafe trait SdkHandle {
     /// # Safety
     ///
@@ -82,6 +83,13 @@ unsafe impl SdkHandle for sys::dxfg_v4_promise_t {
     unsafe fn handler(this: *mut Self) -> *mut sys::dxfg_v4_java_object_handler {
         // SAFETY: the caller guarantees `this` is live.
         unsafe { &raw mut (*this).handler }
+    }
+}
+
+// SAFETY: the handle of a plain Java object is its own `handler`.
+unsafe impl SdkHandle for sys::dxfg_v4_java_object_handler {
+    unsafe fn handler(this: *mut Self) -> *mut sys::dxfg_v4_java_object_handler {
+        this
     }
 }
 

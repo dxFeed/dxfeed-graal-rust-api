@@ -1,16 +1,64 @@
 //! The collector of instrument profiles and its update listeners.
 
+use std::fmt;
+use std::hash::{Hash, Hasher};
 use std::ptr;
 use std::sync::Arc;
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, JavaException, Result};
+use crate::executor::Executor;
 use crate::handle::Handle;
 use crate::ipf::InstrumentProfile;
 use crate::isolate::{self, call};
 use crate::listener::{UpdateListener, UpdateListeners};
 use crate::subscription::ListenerId;
+
+/// A tag of a generation of profiles: [`update_instrument_profiles`] marks profiles with it, and
+/// [`remove_generations`] removes the profiles that still have it, such as those a new data set did not update again.
+///
+/// It is a new Java object, which Java's collector keeps with the profiles; a tag equals only itself and its clones.
+/// Keep a clone while its profiles may need removing: once all clones are dropped, they cannot be removed by their
+/// generation.
+///
+/// [`update_instrument_profiles`]: InstrumentProfileCollector::update_instrument_profiles
+/// [`remove_generations`]: InstrumentProfileCollector::remove_generations
+#[derive(Clone)]
+pub struct Generation {
+    handle: Arc<Handle<sys::dxfg_v4_java_object_handler>>,
+}
+
+impl Generation {
+    /// Creates a tag, different from every other one.
+    pub fn new() -> Result<Generation> {
+        // SAFETY: the out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_Object_new(t, out) })?;
+        Ok(Generation {
+            handle: Arc::new(handle),
+        })
+    }
+}
+
+impl PartialEq for Generation {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.handle, &other.handle)
+    }
+}
+
+impl Eq for Generation {}
+
+impl Hash for Generation {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Arc::as_ptr(&self.handle).hash(state);
+    }
+}
+
+impl fmt::Debug for Generation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Generation({:p})", Arc::as_ptr(&self.handle))
+    }
+}
 
 /// Collects instrument profiles and tells its listeners of the updates (`InstrumentProfileCollector`).
 ///
@@ -69,7 +117,8 @@ impl InstrumentProfileCollector {
     }
 
     /// Adds or replaces a profile, or removes its instrument if its type is
-    /// [`REMOVED`](InstrumentProfile::REMOVED) (`updateInstrumentProfile`).
+    /// [`REMOVED`](InstrumentProfile::REMOVED) (`updateInstrumentProfile`). The profile loses its [`Generation`], as
+    /// with `update_instrument_profiles(.., None)`.
     #[doc(alias = "updateInstrumentProfile")]
     pub fn update_instrument_profile(&self, profile: &InstrumentProfile) -> Result<()> {
         let mut profile = profile.to_sys()?;
@@ -78,24 +127,68 @@ impl InstrumentProfileCollector {
         call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_updateInstrumentProfile(t, c, &mut profile.data) })
     }
 
-    /// Updates several profiles at once, as [`update_instrument_profile`](Self::update_instrument_profile) does
+    /// Updates several profiles at once, as [`update_instrument_profile`](Self::update_instrument_profile) does,
+    /// and tags them with `generation` for [`remove_generations`](Self::remove_generations)
     /// (`updateInstrumentProfiles`).
+    ///
+    /// A profile that is updated again gets the new tag, `None` included; an update equal to the profile in the
+    /// collector only changes its tag and does not reach the listeners.
     #[doc(alias = "updateInstrumentProfiles")]
-    pub fn update_instrument_profiles(&self, profiles: &[InstrumentProfile]) -> Result<()> {
+    pub fn update_instrument_profiles(
+        &self,
+        profiles: &[InstrumentProfile],
+        generation: Option<&Generation>,
+    ) -> Result<()> {
         let mut profiles = profiles
             .iter()
             .map(InstrumentProfile::to_sys)
             .collect::<Result<Vec<_>>>()?;
         let mut elements: Vec<_> = profiles.iter_mut().map(|p| &raw mut p.data).collect();
         let list = sys::dxfg_v4_instrument_profile_data_list {
-            size: elements.len() as i32,
+            size: list_size(elements.len(), "profiles")?,
+            elements: elements.as_mut_ptr(),
+        };
+        let generation = generation.map_or(ptr::null_mut(), |g| g.handle.as_ptr());
+        let c = self.as_ptr();
+        // SAFETY: the collector, the list, its structures and the tag are live; the SDK only reads them.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_updateInstrumentProfiles(t, c, &list, generation) })
+    }
+
+    /// Removes the profiles tagged with one of `generations` and tells the listeners of the removals
+    /// (`removeGenerations`). The profiles without a tag stay. Its time grows with the number of the profiles in the
+    /// collector: call it sparingly.
+    #[doc(alias = "removeGenerations")]
+    pub fn remove_generations<'a>(&self, generations: impl IntoIterator<Item = &'a Generation>) -> Result<()> {
+        let mut elements: Vec<_> = generations.into_iter().map(|g| g.handle.as_ptr()).collect();
+        if elements.is_empty() {
+            return Ok(());
+        }
+        let mut list = sys::dxfg_v4_java_object_handler_list {
+            size: list_size(elements.len(), "generations")?,
             elements: elements.as_mut_ptr(),
         };
         let c = self.as_ptr();
-        // SAFETY: the collector, the list and its structures are live; the SDK only reads them.
-        call(|t| unsafe {
-            sys::dxfg_v4_InstrumentProfileCollector_updateInstrumentProfiles(t, c, &list, ptr::null_mut())
-        })
+        // SAFETY: the collector, the list and its tags are live; the SDK only reads them.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_removeGenerations(t, c, &mut list) })
+    }
+
+    /// The executor that calls the update listeners (`getExecutor`); by default a single thread of the collector.
+    #[doc(alias = "getExecutor")]
+    pub fn get_executor(&self) -> Result<Executor> {
+        let c = self.as_ptr();
+        // SAFETY: the collector is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create(|t, out| unsafe { sys::dxfg_v4_InstrumentProfileCollector_getExecutor(t, c, out) })?;
+        Ok(Executor::from_handle(handle))
+    }
+
+    /// Calls the update listeners on `executor` from now on (`setExecutor`), such as a thread pool or a
+    /// [`ManualExecutor`](crate::ManualExecutor). The collector keeps the executor.
+    #[doc(alias = "setExecutor")]
+    pub fn set_executor(&self, executor: &Executor) -> Result<()> {
+        let (c, e) = (self.as_ptr(), executor.handle.as_ptr());
+        // SAFETY: the collector and the executor are live.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_setExecutor(t, c, e) })
     }
 
     /// The profiles in the collector, with those of removed instruments for a while (`view`).
@@ -135,6 +228,11 @@ impl InstrumentProfileCollector {
             call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_removeUpdateListener(t, c, l) })
         })
     }
+}
+
+/// The size of an SDK list of `count` elements; [`Error::InvalidArgument`] if it does not fit in `i32`.
+fn list_size(count: usize, what: &str) -> Result<i32> {
+    i32::try_from(count).map_err(|_| Error::InvalidArgument(format!("too many {what}: {count}")))
 }
 
 /// Copies the profiles left in an SDK iterator.
