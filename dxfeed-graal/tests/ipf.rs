@@ -1,13 +1,17 @@
 //! Instrument profiles: reading a file, fields by name, the collector and a connection to a file; no network needed.
 
+use std::cmp::Ordering;
+use std::io::{Read, Write};
+use std::net::TcpListener;
 use std::path::PathBuf;
 use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::Error;
-use dxfeed_graal::ipf::InstrumentProfile;
 use dxfeed_graal::ipf::InstrumentProfileReader;
 use dxfeed_graal::ipf::live::{ConnectionState, InstrumentProfileCollector, InstrumentProfileConnection};
+use dxfeed_graal::ipf::{InstrumentProfile, InstrumentProfileField, InstrumentProfileType};
+use dxfeed_graal::{AuthToken, Error};
 
 fn fixture() -> String {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -167,4 +171,212 @@ fn a_connection_reads_a_file() {
     connection.close().unwrap();
     assert_eq!(next(), ConnectionState::Closed);
     assert_eq!(ConnectionState::NotConnected.to_string(), "NOT_CONNECTED");
+}
+
+fn data(name: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/data").join(name)
+}
+
+#[test]
+fn the_reader_reads_bytes() {
+    let reader = InstrumentProfileReader::new().unwrap();
+    let plain = std::fs::read(data("profiles.ipf")).unwrap();
+    assert_eq!(reader.read_from_bytes(&plain, "profiles.ipf").unwrap(), expected());
+    assert!(reader.was_complete().unwrap());
+    let gzipped = std::fs::read(data("profiles.ipf.gz")).unwrap();
+    assert_eq!(reader.read_from_bytes(&gzipped, "profiles.ipf.gz").unwrap(), expected());
+    let file = data("profiles.ipf.gz").to_string_lossy().into_owned();
+    assert_eq!(reader.read_from_file(&file).unwrap(), expected());
+    assert_eq!(reader.read_from_bytes(b"", "empty.ipf").unwrap(), vec![]);
+    assert!(!reader.was_complete().unwrap());
+    assert!(matches!(
+        reader.read_from_bytes(b"", "a\0"),
+        Err(Error::InvalidArgument(_))
+    ));
+}
+
+#[test]
+fn the_reader_sends_the_token() {
+    let tokens = [
+        AuthToken::create_bearer_token("secret-token").unwrap(),
+        AuthToken::create_basic_token("user", "pass").unwrap(),
+        AuthToken::create_custom_token("Basic", "not-base64").unwrap(),
+        AuthToken::create_custom_token("Custom", "a b").unwrap(),
+    ];
+    let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = format!("http://127.0.0.1:{}/profiles.ipf", server.local_addr().unwrap().port());
+    let serve = thread::spawn(move || {
+        let mut requests = Vec::new();
+        for _ in 0..4 {
+            let (mut stream, _) = server.accept().unwrap();
+            stream.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0];
+            while !request.ends_with(b"\r\n\r\n") {
+                stream.read_exact(&mut byte).unwrap();
+                request.push(byte[0]);
+            }
+            let body = std::fs::read(data("profiles.ipf")).unwrap();
+            let head = format!(
+                "HTTP/1.1 200 OK\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            stream.write_all(head.as_bytes()).unwrap();
+            stream.write_all(&body).unwrap();
+            requests.push(String::from_utf8(request).unwrap());
+        }
+        requests
+    });
+    let reader = InstrumentProfileReader::new().unwrap();
+    for token in &tokens {
+        assert_eq!(reader.read_from_file_with_token(&address, token).unwrap(), expected());
+    }
+    let requests = serve.join().unwrap();
+    for (token, request) in tokens.iter().zip(&requests) {
+        let header = format!("authorization: {}\r\n", token.get_http_authorization());
+        assert!(
+            request.to_ascii_lowercase().contains(&header.to_ascii_lowercase()),
+            "{request}"
+        );
+    }
+}
+
+#[test]
+fn fields_are_enumerated_as_in_java() {
+    assert_eq!(InstrumentProfileField::ALL.len(), 31);
+    let names: Vec<_> = InstrumentProfileField::ALL.iter().map(|f| f.to_string()).collect();
+    assert_eq!(names, InstrumentProfile::STANDARD_FIELDS);
+    assert_eq!(
+        InstrumentProfileField::find("LOCAL_SYMBOL"),
+        Some(InstrumentProfileField::LocalSymbol)
+    );
+    assert_eq!(InstrumentProfileField::find("local_symbol"), None);
+    assert_eq!(
+        "LAST_TRADE".parse::<InstrumentProfileField>().unwrap(),
+        InstrumentProfileField::LastTrade
+    );
+    assert!(matches!(
+        "NOPE".parse::<InstrumentProfileField>(),
+        Err(Error::InvalidArgument(_))
+    ));
+    let numeric: Vec<_> = InstrumentProfileField::ALL
+        .iter()
+        .filter(|f| f.is_numeric_field())
+        .map(|f| f.get_name())
+        .collect();
+    assert_eq!(
+        numeric,
+        ["ICB", "SIC", "MULTIPLIER", "SPC", "EXPIRATION", "LAST_TRADE", "STRIKE"]
+    );
+
+    let mut profile = expected().remove(1);
+    let strike = InstrumentProfileField::Strike;
+    assert_eq!(strike.get_field(&profile).unwrap(), "200.5");
+    assert_eq!(strike.get_numeric_field(&profile).unwrap(), 200.5);
+    strike.set_numeric_field(&mut profile, 1.5).unwrap();
+    assert_eq!(profile.get_field("STRIKE").unwrap(), "1.5");
+    InstrumentProfileField::Icb
+        .set_numeric_field(&mut profile, 3.9)
+        .unwrap();
+    assert_eq!(profile.icb, 3);
+    InstrumentProfileField::Symbol.set_field(&mut profile, "X").unwrap();
+    assert_eq!(profile.symbol, "X");
+    assert!(matches!(
+        InstrumentProfileField::Symbol.get_numeric_field(&profile),
+        Err(Error::InvalidArgument(_))
+    ));
+}
+
+#[test]
+fn numeric_and_date_fields_by_name() {
+    let mut profile = expected().remove(1);
+    profile.set_numeric_field("STRIKE", 1.5).unwrap();
+    assert_eq!(profile.get_field("STRIKE").unwrap(), "1.5");
+    assert_eq!(
+        profile.get_numeric_field("EXPIRATION").unwrap(),
+        f64::from(DECEMBER_18_2026)
+    );
+    assert_eq!(profile.get_date_field("EXPIRATION").unwrap(), DECEMBER_18_2026);
+    assert_eq!(profile.get_date_field("STRIKE").unwrap(), 1);
+    profile.set_date_field("LAST_TRADE", DECEMBER_18_2026).unwrap();
+    assert_eq!(profile.last_trade, DECEMBER_18_2026);
+    assert!(matches!(
+        profile.set_numeric_field("SYMBOL", 1.0),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        profile.get_date_field("SYMBOL"),
+        Err(Error::InvalidArgument(_))
+    ));
+
+    profile.set_numeric_field("CUSTOM_NUMBER", 2.5).unwrap();
+    assert_eq!(profile.get_field("CUSTOM_NUMBER").unwrap(), "2.5");
+    assert_eq!(profile.get_numeric_field("CUSTOM_NUMBER").unwrap(), 2.5);
+    profile.set_date_field("CUSTOM_DATE", DECEMBER_18_2026).unwrap();
+    assert_eq!(profile.get_field("CUSTOM_DATE").unwrap(), "2026-12-18");
+    assert_eq!(
+        profile.get_numeric_field("CUSTOM_DATE").unwrap(),
+        f64::from(DECEMBER_18_2026)
+    );
+    assert_eq!(profile.get_date_field("CUSTOM_DATE").unwrap(), DECEMBER_18_2026);
+    assert_eq!(profile.get_numeric_field("NOT_SET").unwrap(), 0.0);
+    assert_eq!(profile.get_date_field("NOT_SET").unwrap(), 0);
+    profile.set_numeric_field("CUSTOM_NUMBER", 0.0).unwrap();
+    assert!(!profile.custom_fields.contains_key("CUSTOM_NUMBER"));
+    profile.set_field("CUSTOM_TEXT", "abc").unwrap();
+    assert!(profile.get_numeric_field("CUSTOM_TEXT").is_err());
+
+    let day = InstrumentProfileField::parse_date("2026-10-31").unwrap();
+    assert_eq!(InstrumentProfileField::format_date(day).unwrap(), "2026-10-31");
+    assert_eq!(InstrumentProfileField::format_date(0).unwrap(), "");
+    assert_eq!(InstrumentProfileField::parse_date("").unwrap(), 0);
+    assert_eq!(InstrumentProfileField::format_number(0.5).unwrap(), "0.5");
+    assert_eq!(InstrumentProfileField::format_number(0.0).unwrap(), "");
+    assert_eq!(InstrumentProfileField::parse_number("100").unwrap(), 100.0);
+    assert!(matches!(InstrumentProfileField::parse_number("x"), Err(Error::Java(_))));
+}
+
+#[test]
+fn types_and_profiles_sort_as_in_java() {
+    assert_eq!(InstrumentProfileType::ALL.len(), 17);
+    assert_eq!(
+        InstrumentProfileType::find("MUTUAL_FUND"),
+        Some(InstrumentProfileType::MutualFund)
+    );
+    assert_eq!(InstrumentProfileType::Removed.to_string(), InstrumentProfile::REMOVED);
+    assert_eq!(
+        "ETF".parse::<InstrumentProfileType>().unwrap(),
+        InstrumentProfileType::Etf
+    );
+    assert!(matches!(
+        "etf".parse::<InstrumentProfileType>(),
+        Err(Error::InvalidArgument(_))
+    ));
+    let compare = InstrumentProfileType::compare_types;
+    assert_eq!(compare("STOCK", "OPTION"), Ordering::Less);
+    assert_eq!(compare("ZZZ", "REMOVED"), Ordering::Greater);
+    assert_eq!(compare("AAA", "BBB"), Ordering::Less);
+    assert_eq!(compare("FOREX", "FOREX"), Ordering::Equal);
+
+    let profile = |instrument_type: &str, symbol: &str, underlying: &str, strike: f64| InstrumentProfile {
+        instrument_type: instrument_type.into(),
+        symbol: symbol.into(),
+        underlying: underlying.into(),
+        strike,
+        ..InstrumentProfile::new()
+    };
+    let mut profiles = [
+        profile("CUSTOM", "C", "", 0.0),
+        profile("OPTION", "O2", "AAPL", 200.0),
+        profile("OPTION", "O3", "MSFT", 100.0),
+        profile("OPTION", "O1", "AAPL", 100.0),
+        profile("STOCK", "B", "", 0.0),
+        profile("STOCK", "A", "", 0.0),
+    ];
+    profiles.sort_by(InstrumentProfile::compare_to);
+    let symbols: Vec<_> = profiles.iter().map(|p| p.symbol.as_str()).collect();
+    assert_eq!(symbols, ["A", "B", "O1", "O2", "O3", "C"]);
+    let mut described = profiles[0].clone();
+    described.description = "other".into();
+    assert_eq!(described.compare_to(&profiles[0]), Ordering::Equal);
 }

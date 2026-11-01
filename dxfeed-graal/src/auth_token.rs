@@ -162,6 +162,33 @@ impl AuthToken {
         &self.value
     }
 
+    /// A new SDK token equal to this one, for the functions of the SDK that take a token. It is made the way this
+    /// one was, so a custom `Basic` token whose value is not a user name and a password is accepted too.
+    pub(crate) fn to_sdk(&self) -> Result<Handle<sys::dxfg_v4_auth_token_t>> {
+        if let (Self::BASIC_SCHEME, Some(user)) = (self.scheme.as_str(), &self.user) {
+            let user = c_string(user, "the user")?;
+            let password = c_string(self.password.as_deref().unwrap_or(""), "the password")?;
+            return Handle::create(|t, out| {
+                // SAFETY: the strings are NUL-terminated and the out-pointer is valid for writes.
+                unsafe {
+                    sys::dxfg_v4_AuthToken_createBasicTokenWithUserAndPassword(t, user.as_ptr(), password.as_ptr(), out)
+                }
+            });
+        }
+        let value = c_string(&self.value, "the value")?;
+        if self.scheme == Self::BEARER_SCHEME {
+            // SAFETY: the string is NUL-terminated and the out-pointer is valid for writes.
+            return Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_AuthToken_createBearerToken(t, value.as_ptr(), out)
+            });
+        }
+        let scheme = c_string(&self.scheme, "the scheme")?;
+        Handle::create(|t, out| {
+            // SAFETY: the strings are NUL-terminated and the out-pointer is valid for writes.
+            unsafe { sys::dxfg_v4_AuthToken_createCustomToken(t, scheme.as_ptr(), value.as_ptr(), out) }
+        })
+    }
+
     /// Makes a token with `f` and copies its strings; the SDK token is released.
     fn create(f: impl FnOnce(Thread, *mut *mut sys::dxfg_v4_auth_token_t) -> i32) -> Result<AuthToken> {
         let handle = Handle::create(f)?;

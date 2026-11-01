@@ -6,5 +6,5 @@ pub mod option;
 pub(crate) mod profile;
 mod reader;
 
-pub use profile::InstrumentProfile;
+pub use profile::{InstrumentProfile, InstrumentProfileField, InstrumentProfileType};
 pub use reader::InstrumentProfileReader;

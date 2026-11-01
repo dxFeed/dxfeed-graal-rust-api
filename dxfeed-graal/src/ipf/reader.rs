@@ -5,6 +5,7 @@ use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
+use crate::AuthToken;
 use crate::error::{Error, JavaException, Result, c_string};
 use crate::handle::Handle;
 use crate::ipf::InstrumentProfile;
@@ -15,7 +16,9 @@ use crate::isolate::call;
 ///
 /// The address is a file path, a URL such as `https://tools.dxfeed.com/ipf` or `<host>:<port>`; zip and gzip data
 /// is unpacked. Credentials can be a part of the URL, `https://user:password@host/path`, or are given to
-/// [`read_from_file_with_credentials`](Self::read_from_file_with_credentials).
+/// [`read_from_file_with_credentials`](Self::read_from_file_with_credentials) or
+/// [`read_from_file_with_token`](Self::read_from_file_with_token). [`read_from_bytes`](Self::read_from_bytes) reads
+/// data that is already in memory.
 ///
 /// ```no_run
 /// use dxfeed_graal::ipf::InstrumentProfileReader;
@@ -110,6 +113,39 @@ impl InstrumentProfileReader {
                     out,
                 )
             }
+        })
+    }
+
+    /// Reads the profiles from an address with an authorization token, which takes precedence over the credentials
+    /// in the URL (`readFromFile(String, AuthToken)`).
+    #[doc(alias = "readFromFile")]
+    pub fn read_from_file_with_token(&self, address: &str, token: &AuthToken) -> Result<Vec<InstrumentProfile>> {
+        let address = c_string(address, "the address")?;
+        let token = token.to_sdk()?;
+        let (r, token) = (self.handle.as_ptr(), token.as_ptr());
+        self.read(|t, out| {
+            // SAFETY: the reader, the address and the token are live; the out-pointer is valid for writes.
+            unsafe { sys::dxfg_v4_InstrumentProfileReader_readFromFileWithToken(t, r, address.as_ptr(), token, out) }
+        })
+    }
+
+    /// Reads the profiles from data in memory, as a file at `address` would give them: zip and gzip data is
+    /// unpacked; `address` only names the data in the warning about incomplete data (`read(InputStream, String)`).
+    ///
+    /// It updates [`was_complete`](Self::was_complete), not [`get_last_modified`](Self::get_last_modified).
+    #[doc(alias = "read")]
+    pub fn read_from_bytes(&self, bytes: &[u8], address: &str) -> Result<Vec<InstrumentProfile>> {
+        let address = c_string(address, "the address")?;
+        let size = i32::try_from(bytes.len())
+            .map_err(|_| Error::InvalidArgument(format!("{} bytes do not fit in a Java array", bytes.len())))?;
+        let stream = Handle::create(|t, out| {
+            // SAFETY: `bytes` has `size` bytes, which the SDK copies; the out-pointer is valid for writes.
+            unsafe { sys::dxfg_v4_ByteArrayInputStream_new(t, bytes.as_ptr().cast(), size, out) }
+        })?;
+        let (r, stream) = (self.handle.as_ptr(), stream.as_ptr());
+        self.read(|t, out| {
+            // SAFETY: the reader, the stream and the address are live; the out-pointer is valid for writes.
+            unsafe { sys::dxfg_v4_InstrumentProfileReader_readWithAddress(t, r, stream, address.as_ptr(), out) }
         })
     }
 

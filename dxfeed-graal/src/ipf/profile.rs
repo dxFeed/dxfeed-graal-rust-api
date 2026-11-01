@@ -1,9 +1,11 @@
 //! The instrument profile and its conversion to and from the SDK structure.
 
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ffi::{CString, c_char};
 use std::fmt;
 use std::ptr;
+use std::str::FromStr;
 
 use dxfeed_graal_sys as sys;
 
@@ -103,27 +105,100 @@ impl fmt::Display for InstrumentProfile {
     }
 }
 
-/// The table of the standard fields: their names in the Instrument Profile Format, the fields of the profile and of
-/// the SDK structure, and their kind. It gives the access by name and the conversion to and from the SDK.
+/// The table of the standard fields: their variants of [`InstrumentProfileField`], their names in the Instrument
+/// Profile Format, the fields of the profile and of the SDK structure, and their kind. It gives the access by name and
+/// the conversion to and from the SDK.
 macro_rules! standard_fields {
-    ($($name:literal => $field:ident / $sys:ident: $kind:ident),* $(,)?) => {
+    ($($variant:ident $name:literal => $field:ident / $sys:ident: $kind:ident),* $(,)?) => {
+        /// A standard field of an instrument profile (`InstrumentProfileField`).
+        ///
+        /// [`Display`](fmt::Display) and [`FromStr`] use the name of the field in the Instrument Profile Format, the
+        /// name of the Java constant: `LOCAL_SYMBOL`. The other fields of a profile are custom fields.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum InstrumentProfileField {
+            $(
+                #[doc = concat!("`", $name, "`: [`InstrumentProfile::", stringify!($field), "`].")]
+                $variant,
+            )*
+        }
+
+        impl InstrumentProfileField {
+            /// Every field, in the order of the Instrument Profile Format and of Java's
+            /// `InstrumentProfileField.values()`.
+            #[doc(alias = "values")]
+            pub const ALL: &'static [InstrumentProfileField] = &[$(InstrumentProfileField::$variant),*];
+
+            /// The field with the name `name`, or `None` for a custom field (`find`).
+            pub fn find(name: &str) -> Option<InstrumentProfileField> {
+                match name {
+                    $($name => Some(InstrumentProfileField::$variant),)*
+                    _ => None,
+                }
+            }
+
+            /// The name of the field in the Instrument Profile Format, such as `LOCAL_SYMBOL` (`name`).
+            #[doc(alias = "name")]
+            pub const fn get_name(self) -> &'static str {
+                match self {
+                    $(InstrumentProfileField::$variant => $name,)*
+                }
+            }
+
+            /// Whether the field is a number or a date, which [`get_numeric_field`](Self::get_numeric_field) reads
+            /// (`isNumericField`).
+            #[doc(alias = "isNumericField")]
+            pub const fn is_numeric_field(self) -> bool {
+                match self {
+                    $(InstrumentProfileField::$variant => standard_fields!(@numeric $kind),)*
+                }
+            }
+
+            /// The value of the field of `profile` as text, formatted as in the Instrument Profile Format; empty if it
+            /// is not set (`getField`).
+            #[doc(alias = "getField")]
+            pub fn get_field(self, profile: &InstrumentProfile) -> Result<String> {
+                match self {
+                    $(InstrumentProfileField::$variant => standard_fields!(@get $kind, profile.$field),)*
+                }
+            }
+
+            /// Sets the field of `profile` from text, parsed as in the Instrument Profile Format; an empty value clears
+            /// it (`setField`).
+            ///
+            /// Returns an error if the value of a numeric or date field cannot be parsed.
+            #[doc(alias = "setField")]
+            pub fn set_field(self, profile: &mut InstrumentProfile, value: &str) -> Result<()> {
+                match self {
+                    $(InstrumentProfileField::$variant => standard_fields!(@set $kind, profile.$field, value),)*
+                }
+            }
+
+            /// The value of a numeric field of `profile`; a date is its day id (`getNumericField`).
+            ///
+            /// Returns [`Error::InvalidArgument`] for a text field.
+            #[doc(alias = "getNumericField")]
+            pub fn get_numeric_field(self, profile: &InstrumentProfile) -> Result<f64> {
+                match self {
+                    $(InstrumentProfileField::$variant => standard_fields!(@get_numeric $kind, self, profile.$field),)*
+                }
+            }
+
+            /// Sets a numeric field of `profile`; an integer or a date field takes the value cast to an integer, as in
+            /// Java (`setNumericField`).
+            ///
+            /// Returns [`Error::InvalidArgument`] for a text field.
+            #[doc(alias = "setNumericField")]
+            pub fn set_numeric_field(self, profile: &mut InstrumentProfile, value: f64) -> Result<()> {
+                match self {
+                    $(InstrumentProfileField::$variant =>
+                        standard_fields!(@set_numeric $kind, self, profile.$field, value),)*
+                }
+            }
+        }
+
         impl InstrumentProfile {
             /// The names of the standard fields, in the order of the Instrument Profile Format.
             pub const STANDARD_FIELDS: &[&str] = &[$($name),*];
-
-            fn standard_field(&self, name: &str) -> Option<Result<String>> {
-                match name {
-                    $($name => Some(standard_fields!(@get $kind, self.$field)),)*
-                    _ => None,
-                }
-            }
-
-            fn set_standard_field(&mut self, name: &str, value: &str) -> Option<Result<()>> {
-                match name {
-                    $($name => Some(standard_fields!(@set $kind, self.$field, value)),)*
-                    _ => None,
-                }
-            }
 
             /// Copies a profile from an SDK structure.
             ///
@@ -153,15 +228,23 @@ macro_rules! standard_fields {
             }
         }
     };
+    (@numeric text) => { false };
+    (@numeric $kind:ident) => { true };
     (@get text, $v:expr) => { Ok($v.clone()) };
-    (@get int, $v:expr) => { format_number(f64::from($v)) };
-    (@get number, $v:expr) => { format_number($v) };
-    (@get date, $v:expr) => { format_date($v) };
+    (@get int, $v:expr) => { InstrumentProfileField::format_number(f64::from($v)) };
+    (@get number, $v:expr) => { InstrumentProfileField::format_number($v) };
+    (@get date, $v:expr) => { InstrumentProfileField::format_date($v) };
     (@set text, $v:expr, $value:ident) => {{ $v = $value.to_owned(); Ok(()) }};
     // Java casts the parsed number to an int as well.
-    (@set int, $v:expr, $value:ident) => { parse_number($value).map(|n| $v = n as i32) };
-    (@set number, $v:expr, $value:ident) => { parse_number($value).map(|n| $v = n) };
-    (@set date, $v:expr, $value:ident) => { parse_date($value).map(|d| $v = d) };
+    (@set int, $v:expr, $value:ident) => { InstrumentProfileField::parse_number($value).map(|n| $v = n as i32) };
+    (@set number, $v:expr, $value:ident) => { InstrumentProfileField::parse_number($value).map(|n| $v = n) };
+    (@set date, $v:expr, $value:ident) => { InstrumentProfileField::parse_date($value).map(|d| $v = d) };
+    (@get_numeric text, $f:ident, $v:expr) => { Err(textual($f)) };
+    (@get_numeric number, $f:ident, $v:expr) => { Ok($v) };
+    (@get_numeric $kind:ident, $f:ident, $v:expr) => { Ok(f64::from($v)) };
+    (@set_numeric text, $f:ident, $v:expr, $value:ident) => { Err(textual($f)) };
+    (@set_numeric number, $f:ident, $v:expr, $value:ident) => {{ $v = $value; Ok(()) }};
+    (@set_numeric $kind:ident, $f:ident, $v:expr, $value:ident) => {{ $v = $value as i32; Ok(()) }};
     // SAFETY: the strings of a live structure are NUL-terminated or NULL.
     (@from text, $v:expr) => { unsafe { isolate::string($v) }.into_owned() };
     (@from $kind:ident, $v:expr) => { $v };
@@ -170,37 +253,230 @@ macro_rules! standard_fields {
 }
 
 standard_fields! {
-    "TYPE" => instrument_type / type_: text,
-    "SYMBOL" => symbol / symbol: text,
-    "DESCRIPTION" => description / description: text,
-    "LOCAL_SYMBOL" => local_symbol / local_symbol: text,
-    "LOCAL_DESCRIPTION" => local_description / local_description: text,
-    "COUNTRY" => country / country: text,
-    "OPOL" => opol / opol: text,
-    "EXCHANGE_DATA" => exchange_data / exchange_data: text,
-    "EXCHANGES" => exchanges / exchanges: text,
-    "CURRENCY" => currency / currency: text,
-    "BASE_CURRENCY" => base_currency / base_currency: text,
-    "CFI" => cfi / cfi: text,
-    "ISIN" => isin / isin: text,
-    "SEDOL" => sedol / sedol: text,
-    "CUSIP" => cusip / cusip: text,
-    "ICB" => icb / icb: int,
-    "SIC" => sic / sic: int,
-    "MULTIPLIER" => multiplier / multiplier: number,
-    "PRODUCT" => product / product: text,
-    "UNDERLYING" => underlying / underlying: text,
-    "SPC" => spc / spc: number,
-    "ADDITIONAL_UNDERLYINGS" => additional_underlyings / additional_underlyings: text,
-    "MMY" => mmy / mmy: text,
-    "EXPIRATION" => expiration / expiration: date,
-    "LAST_TRADE" => last_trade / last_trade: date,
-    "STRIKE" => strike / strike: number,
-    "OPTION_TYPE" => option_type / option_type: text,
-    "EXPIRATION_STYLE" => expiration_style / expiration_style: text,
-    "SETTLEMENT_STYLE" => settlement_style / settlement_style: text,
-    "PRICE_INCREMENTS" => price_increments / price_increments: text,
-    "TRADING_HOURS" => trading_hours / trading_hours: text,
+    Type "TYPE" => instrument_type / type_: text,
+    Symbol "SYMBOL" => symbol / symbol: text,
+    Description "DESCRIPTION" => description / description: text,
+    LocalSymbol "LOCAL_SYMBOL" => local_symbol / local_symbol: text,
+    LocalDescription "LOCAL_DESCRIPTION" => local_description / local_description: text,
+    Country "COUNTRY" => country / country: text,
+    Opol "OPOL" => opol / opol: text,
+    ExchangeData "EXCHANGE_DATA" => exchange_data / exchange_data: text,
+    Exchanges "EXCHANGES" => exchanges / exchanges: text,
+    Currency "CURRENCY" => currency / currency: text,
+    BaseCurrency "BASE_CURRENCY" => base_currency / base_currency: text,
+    Cfi "CFI" => cfi / cfi: text,
+    Isin "ISIN" => isin / isin: text,
+    Sedol "SEDOL" => sedol / sedol: text,
+    Cusip "CUSIP" => cusip / cusip: text,
+    Icb "ICB" => icb / icb: int,
+    Sic "SIC" => sic / sic: int,
+    Multiplier "MULTIPLIER" => multiplier / multiplier: number,
+    Product "PRODUCT" => product / product: text,
+    Underlying "UNDERLYING" => underlying / underlying: text,
+    Spc "SPC" => spc / spc: number,
+    AdditionalUnderlyings "ADDITIONAL_UNDERLYINGS" => additional_underlyings / additional_underlyings: text,
+    Mmy "MMY" => mmy / mmy: text,
+    Expiration "EXPIRATION" => expiration / expiration: date,
+    LastTrade "LAST_TRADE" => last_trade / last_trade: date,
+    Strike "STRIKE" => strike / strike: number,
+    OptionType "OPTION_TYPE" => option_type / option_type: text,
+    ExpirationStyle "EXPIRATION_STYLE" => expiration_style / expiration_style: text,
+    SettlementStyle "SETTLEMENT_STYLE" => settlement_style / settlement_style: text,
+    PriceIncrements "PRICE_INCREMENTS" => price_increments / price_increments: text,
+    TradingHours "TRADING_HOURS" => trading_hours / trading_hours: text,
+}
+
+/// The error of a numeric access to a text field, as Java's `IllegalArgumentException`.
+fn textual(field: InstrumentProfileField) -> Error {
+    Error::InvalidArgument(format!("textual field {field}"))
+}
+
+impl InstrumentProfileField {
+    /// Formats a number as the Instrument Profile Format writes it: `100`, `0.5`, and zero as an empty string
+    /// (`formatNumber`).
+    #[doc(alias = "formatNumber")]
+    pub fn format_number(number: f64) -> Result<String> {
+        let mut text = ptr::null_mut();
+        // SAFETY: the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_formatNumber(t, number, &mut text) })?;
+        // SAFETY: the SDK wrote a NUL-terminated string or NULL.
+        Ok(unsafe { take_string(text) })
+    }
+
+    /// Parses a number as the Instrument Profile Format reads it; an empty string is zero (`parseNumber`).
+    ///
+    /// Returns [`Error::Java`] for text that is not a number and [`Error::InvalidArgument`] for a NUL byte.
+    #[doc(alias = "parseNumber")]
+    pub fn parse_number(text: &str) -> Result<f64> {
+        let text = c_string(text, "the number")?;
+        let mut number = 0.0;
+        // SAFETY: the string is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_parseNumber(t, text.as_ptr(), &mut number) })?;
+        Ok(number)
+    }
+
+    /// Formats a day id, the number of days since January 1, 1970, as `yyyy-MM-dd`, and zero as an empty string
+    /// (`formatDate`).
+    #[doc(alias = "formatDate")]
+    pub fn format_date(day_id: i32) -> Result<String> {
+        let mut text = ptr::null_mut();
+        // SAFETY: the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_formatDate(t, day_id, &mut text) })?;
+        // SAFETY: the SDK wrote a NUL-terminated string or NULL.
+        Ok(unsafe { take_string(text) })
+    }
+
+    /// Parses a `yyyy-MM-dd` date into a day id; an empty string is zero (`parseDate`).
+    ///
+    /// Returns [`Error::Java`] for text that is not a date and [`Error::InvalidArgument`] for a NUL byte.
+    #[doc(alias = "parseDate")]
+    pub fn parse_date(text: &str) -> Result<i32> {
+        let text = c_string(text, "the date")?;
+        let mut date = 0;
+        // SAFETY: the string is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_parseDate(t, text.as_ptr(), &mut date) })?;
+        Ok(date)
+    }
+}
+
+impl fmt::Display for InstrumentProfileField {
+    /// Writes the name of the field, such as `LOCAL_SYMBOL`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.get_name())
+    }
+}
+
+impl FromStr for InstrumentProfileField {
+    type Err = Error;
+
+    /// Parses the name of a field, as Java's `valueOf(String)` does; the case matters.
+    ///
+    /// Returns [`Error::InvalidArgument`] for any other string.
+    fn from_str(name: &str) -> Result<Self> {
+        Self::find(name).ok_or_else(|| Error::InvalidArgument(format!("unknown InstrumentProfileField {name:?}")))
+    }
+}
+
+/// The table of the types of instruments: their variants of [`InstrumentProfileType`] and their names.
+macro_rules! profile_types {
+    ($($(#[$doc:meta])* $variant:ident $name:literal),* $(,)?) => {
+        /// A standard type of an instrument (`InstrumentProfileType`); the type of a profile is the text of its
+        /// [`instrument_type`](InstrumentProfile::instrument_type), which may be another one.
+        ///
+        /// [`Display`](fmt::Display) and [`FromStr`] use the name of the Java constant: `MUTUAL_FUND`. The order of
+        /// the values is the order of Java's constants.
+        #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+        pub enum InstrumentProfileType {
+            $($(#[$doc])* $variant,)*
+        }
+
+        impl InstrumentProfileType {
+            /// Every type, in the order of Java's `InstrumentProfileType.values()`.
+            #[doc(alias = "values")]
+            pub const ALL: &'static [InstrumentProfileType] = &[$(InstrumentProfileType::$variant),*];
+
+            /// The type with the name `name`, or `None` for another name (`find`).
+            pub fn find(name: &str) -> Option<InstrumentProfileType> {
+                match name {
+                    $($name => Some(InstrumentProfileType::$variant),)*
+                    _ => None,
+                }
+            }
+
+            /// The name of the type, such as `MUTUAL_FUND` (`name`).
+            #[doc(alias = "name")]
+            pub const fn get_name(self) -> &'static str {
+                match self {
+                    $(InstrumentProfileType::$variant => $name,)*
+                }
+            }
+        }
+    };
+}
+
+profile_types! {
+    /// Currencies (`CURRENCY`).
+    Currency "CURRENCY",
+    /// Currency pairs (`FOREX`).
+    Forex "FOREX",
+    /// Bonds (`BOND`).
+    Bond "BOND",
+    /// Indices (`INDEX`).
+    Index "INDEX",
+    /// Stocks (`STOCK`).
+    Stock "STOCK",
+    /// Exchange-traded funds (`ETF`).
+    Etf "ETF",
+    /// Mutual funds (`MUTUAL_FUND`).
+    MutualFund "MUTUAL_FUND",
+    /// Money market funds (`MONEY_MARKET_FUND`).
+    MoneyMarketFund "MONEY_MARKET_FUND",
+    /// The products of futures and options on futures (`PRODUCT`).
+    Product "PRODUCT",
+    /// Futures (`FUTURE`).
+    Future "FUTURE",
+    /// Options (`OPTION`).
+    Option "OPTION",
+    /// Warrants (`WARRANT`).
+    Warrant "WARRANT",
+    /// Certificates (`CERTIFICATE`).
+    Certificate "CERTIFICATE",
+    /// Contracts for difference (`CFD`).
+    Cfd "CFD",
+    /// Spreads (`SPREAD`).
+    Spread "SPREAD",
+    /// Other instruments (`OTHER`).
+    Other "OTHER",
+    /// A removed instrument (`REMOVED`): see [`InstrumentProfile::is_removed`].
+    Removed "REMOVED",
+}
+
+impl InstrumentProfileType {
+    /// Compares two types by name as Java's `compareTypes` does: the standard types in the order of [`ALL`](Self::ALL),
+    /// then the other names in alphabetical order. The order serves files and displays, not business logic.
+    #[doc(alias = "compareTypes")]
+    pub fn compare_types(type1: &str, type2: &str) -> Ordering {
+        match (Self::find(type1), Self::find(type2)) {
+            (Some(t1), Some(t2)) => t1.cmp(&t2),
+            (Some(_), None) => Ordering::Less,
+            (None, Some(_)) => Ordering::Greater,
+            (None, None) => java_compare(type1, type2),
+        }
+    }
+}
+
+impl fmt::Display for InstrumentProfileType {
+    /// Writes the name of the type, such as `MUTUAL_FUND`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.get_name())
+    }
+}
+
+impl FromStr for InstrumentProfileType {
+    type Err = Error;
+
+    /// Parses the name of a type, as Java's `valueOf(String)` does; the case matters.
+    ///
+    /// Returns [`Error::InvalidArgument`] for any other string.
+    fn from_str(name: &str) -> Result<Self> {
+        Self::find(name).ok_or_else(|| Error::InvalidArgument(format!("unknown InstrumentProfileType {name:?}")))
+    }
+}
+
+/// Whether a custom value is taken for a date, `yyyy-MM-dd`: 10 UTF-16 units with `-` at 4 and 7, as in Java.
+fn looks_like_date(value: &str) -> bool {
+    let units: Vec<u16> = value.encode_utf16().collect();
+    units.len() == 10 && units[4] == u16::from(b'-') && units[7] == u16::from(b'-')
+}
+
+/// Compares strings as Java's `String.compareTo` does: by UTF-16 code units.
+fn java_compare(a: &str, b: &str) -> Ordering {
+    a.encode_utf16().cmp(b.encode_utf16())
+}
+
+/// Compares numbers as Java's `a > b ? 1 : a < b ? -1 : 0` does: NaN is equal to everything.
+fn java_compare_numbers<T: PartialOrd>(a: T, b: T) -> Ordering {
+    a.partial_cmp(&b).unwrap_or(Ordering::Equal)
 }
 
 impl InstrumentProfile {
@@ -223,8 +499,10 @@ impl InstrumentProfile {
     /// Numbers and dates are formatted as in the format: `100`, `0.5`, `2026-12-18`, and zero as an empty string.
     #[doc(alias = "getField")]
     pub fn get_field(&self, name: &str) -> Result<String> {
-        self.standard_field(name)
-            .unwrap_or_else(|| Ok(self.custom_fields.get(name).cloned().unwrap_or_default()))
+        match InstrumentProfileField::find(name) {
+            Some(field) => field.get_field(self),
+            None => Ok(self.custom_fields.get(name).cloned().unwrap_or_default()),
+        }
     }
 
     /// Sets a field by its name in the Instrument Profile Format, standard or custom, from text (`setField`).
@@ -233,15 +511,97 @@ impl InstrumentProfile {
     /// value of a numeric or date field cannot be parsed.
     #[doc(alias = "setField")]
     pub fn set_field(&mut self, name: &str, value: &str) -> Result<()> {
-        if let Some(set) = self.set_standard_field(name, value) {
-            return set;
+        match InstrumentProfileField::find(name) {
+            Some(field) => field.set_field(self, value),
+            None => {
+                self.set_custom_field(name, value);
+                Ok(())
+            }
         }
+    }
+
+    /// The value of a numeric field by its name, standard or custom; a date is its day id (`getNumericField`).
+    ///
+    /// A custom field that is not set is zero, and one of the form `yyyy-MM-dd` is read as a date, as in Java.
+    /// Returns [`Error::InvalidArgument`] for a standard text field and an error if a custom value is not a number.
+    #[doc(alias = "getNumericField")]
+    pub fn get_numeric_field(&self, name: &str) -> Result<f64> {
+        if let Some(field) = InstrumentProfileField::find(name) {
+            return field.get_numeric_field(self);
+        }
+        match self.custom_fields.get(name).map(String::as_str) {
+            None | Some("") => Ok(0.0),
+            Some(value) if looks_like_date(value) => InstrumentProfileField::parse_date(value).map(f64::from),
+            Some(value) => InstrumentProfileField::parse_number(value),
+        }
+    }
+
+    /// Sets a numeric field by its name, standard or custom (`setNumericField`). A custom field gets the number
+    /// formatted as in the format, so zero clears it.
+    ///
+    /// Returns [`Error::InvalidArgument`] for a standard text field.
+    #[doc(alias = "setNumericField")]
+    pub fn set_numeric_field(&mut self, name: &str, value: f64) -> Result<()> {
+        match InstrumentProfileField::find(name) {
+            Some(field) => field.set_numeric_field(self, value),
+            None => {
+                let value = InstrumentProfileField::format_number(value)?;
+                self.set_custom_field(name, &value);
+                Ok(())
+            }
+        }
+    }
+
+    /// The day id of a date field by its name, standard or custom; zero if it is not set (`getDateField`).
+    ///
+    /// A standard numeric field gives its value cast to an integer, as in Java. Returns [`Error::InvalidArgument`]
+    /// for a standard text field and an error if a custom value is not a date.
+    #[doc(alias = "getDateField")]
+    pub fn get_date_field(&self, name: &str) -> Result<i32> {
+        if let Some(field) = InstrumentProfileField::find(name) {
+            return field.get_numeric_field(self).map(|value| value as i32);
+        }
+        match self.custom_fields.get(name).map(String::as_str) {
+            None | Some("") => Ok(0),
+            Some(value) => InstrumentProfileField::parse_date(value),
+        }
+    }
+
+    /// Sets a date field by its name, standard or custom, to a day id (`setDateField`). A custom field gets the date
+    /// formatted as `yyyy-MM-dd`, so zero clears it.
+    ///
+    /// Returns [`Error::InvalidArgument`] for a standard text field.
+    #[doc(alias = "setDateField")]
+    pub fn set_date_field(&mut self, name: &str, day_id: i32) -> Result<()> {
+        match InstrumentProfileField::find(name) {
+            Some(field) => field.set_numeric_field(self, f64::from(day_id)),
+            None => {
+                let value = InstrumentProfileField::format_date(day_id)?;
+                self.set_custom_field(name, &value);
+                Ok(())
+            }
+        }
+    }
+
+    /// Compares two profiles as Java's `compareTo` does: by the type ([`InstrumentProfileType::compare_types`]), the
+    /// product, the underlying, the last trade day, the strike and the symbol. Profiles that differ in other fields
+    /// compare as equal, so it is not [`Ord`]; sort with `profiles.sort_by(InstrumentProfile::compare_to)`.
+    #[doc(alias = "compareTo")]
+    pub fn compare_to(&self, other: &Self) -> Ordering {
+        InstrumentProfileType::compare_types(&self.instrument_type, &other.instrument_type)
+            .then_with(|| java_compare(&self.product, &other.product))
+            .then_with(|| java_compare(&self.underlying, &other.underlying))
+            .then_with(|| java_compare_numbers(self.last_trade, other.last_trade))
+            .then_with(|| java_compare_numbers(self.strike, other.strike))
+            .then_with(|| java_compare(&self.symbol, &other.symbol))
+    }
+
+    fn set_custom_field(&mut self, name: &str, value: &str) {
         if value.is_empty() {
             self.custom_fields.remove(name);
         } else {
             self.custom_fields.insert(name.to_owned(), value.to_owned());
         }
-        Ok(())
     }
 }
 
@@ -345,36 +705,4 @@ pub(crate) unsafe fn take_string(s: *const c_char) -> String {
         );
     }
     copy
-}
-
-fn format_number(number: f64) -> Result<String> {
-    let mut text = ptr::null_mut();
-    // SAFETY: the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_formatNumber(t, number, &mut text) })?;
-    // SAFETY: the SDK wrote a NUL-terminated string or NULL.
-    Ok(unsafe { take_string(text) })
-}
-
-fn format_date(date: i32) -> Result<String> {
-    let mut text = ptr::null_mut();
-    // SAFETY: the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_formatDate(t, date, &mut text) })?;
-    // SAFETY: the SDK wrote a NUL-terminated string or NULL.
-    Ok(unsafe { take_string(text) })
-}
-
-fn parse_number(text: &str) -> Result<f64> {
-    let text = c_string(text, "the number")?;
-    let mut number = 0.0;
-    // SAFETY: the string is live and the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_parseNumber(t, text.as_ptr(), &mut number) })?;
-    Ok(number)
-}
-
-fn parse_date(text: &str) -> Result<i32> {
-    let text = c_string(text, "the date")?;
-    let mut date = 0;
-    // SAFETY: the string is live and the out-pointer is valid for writes.
-    call(|t| unsafe { sys::dxfg_v4_InstrumentProfileField_parseDate(t, text.as_ptr(), &mut date) })?;
-    Ok(date)
 }
