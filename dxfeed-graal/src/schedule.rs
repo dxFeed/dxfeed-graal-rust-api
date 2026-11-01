@@ -27,6 +27,7 @@ use crate::handle::Handle;
 use crate::ipf::InstrumentProfile;
 use crate::ipf::profile::take_string;
 use crate::isolate::{self, call};
+use crate::time_zone::TimeZone;
 
 /// The type of a session (`SessionType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,6 +129,17 @@ impl DayFilter {
     }
 }
 
+impl fmt::Display for DayFilter {
+    /// The text of Java's `toString`, such as `DayFilter(0, null, null, true)` for
+    /// [`Trading`](DayFilter::Trading).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.handle().and_then(|handle| handle.to_java_string()) {
+            Ok(text) => f.write_str(&text),
+            Err(error) => write!(f, "DayFilter(<{error}>)"),
+        }
+    }
+}
+
 /// A predefined filter of sessions for the searches of [`Day`], [`Session`] and [`Schedule`] (`SessionFilter`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SessionFilter {
@@ -160,6 +172,17 @@ impl SessionFilter {
         };
         // SAFETY: the out-pointer is valid for writes.
         Handle::create(|t, out| unsafe { sys::dxfg_v4_SessionFilter_getInstance(t, filter, out) })
+    }
+}
+
+impl fmt::Display for SessionFilter {
+    /// The text of Java's `toString`, such as `SessionFilter(null, true)` for
+    /// [`Trading`](SessionFilter::Trading).
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.handle().and_then(|handle| handle.to_java_string()) {
+            Ok(text) => f.write_str(&text),
+            Err(error) => write!(f, "SessionFilter(<{error}>)"),
+        }
     }
 }
 
@@ -251,15 +274,25 @@ pub struct Schedule {
 impl fmt::Debug for Schedule {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let mut debug = f.debug_struct("Schedule");
-        match self.name() {
+        match self.get_name() {
             Ok(name) => debug.field("name", &name),
             Err(_) => debug.field("name", &format_args!("<error>")),
         };
-        match self.definition() {
+        match self.get_definition() {
             Ok(definition) => debug.field("definition", &definition),
             Err(_) => debug.field("definition", &format_args!("<error>")),
         };
         debug.finish()
+    }
+}
+
+impl fmt::Display for Schedule {
+    /// The text of Java's `toString`, `Schedule{<definition>}`.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.handle.to_java_string() {
+            Ok(text) => f.write_str(&text),
+            Err(error) => write!(f, "Schedule(<{error}>)"),
+        }
     }
 }
 
@@ -303,6 +336,19 @@ impl Schedule {
             sys::dxfg_v4_Schedule_getInstanceByDefinition(t, definition.as_ptr(), out)
         })?;
         Ok(Schedule { handle })
+    }
+
+    /// The schedule of the UTC time zone: five trading days a week without holidays, each a single regular session
+    /// from midnight to midnight (`UTC`).
+    #[doc(alias = "UTC")]
+    pub fn utc() -> Result<Self> {
+        Schedule::get_instance_by_definition("UTC(tz=UTC;td=12345;de=+0000;0=0000+0000)")
+    }
+
+    /// The schedule of the New York Stock Exchange, `XNYS()` of the defaults (`NYSE`).
+    #[doc(alias = "NYSE")]
+    pub fn nyse() -> Result<Self> {
+        Schedule::get_instance_by_definition("XNYS()")
     }
 
     /// The trading venues of a profile, the names of the schedules in its trading hours (`getTradingVenues`).
@@ -421,25 +467,25 @@ impl Schedule {
     string_getter!(
         /// The name of the schedule, such as `US ETH` (`getName`).
         #[doc(alias = "getName")]
-        name: dxfg_v4_Schedule_getName
+        get_name: dxfg_v4_Schedule_getName
     );
 
-    string_getter!(
-        /// The display name of the time zone of the schedule, such as `Eastern Standard Time` (`getTimeZone`).
-        #[doc(alias = "getTimeZone")]
-        time_zone: dxfg_v4_Schedule_getTimeZone
-    );
-
-    string_getter!(
-        /// The identifier of the time zone of the schedule, such as `America/New_York` (`getTimeZone().getID()`).
-        time_zone_id: dxfg_v4_Schedule_getTimeZone_getID
-    );
+    /// The time zone of the schedule, such as `America/New_York` (`getTimeZone`).
+    #[doc(alias = "getTimeZone")]
+    pub fn get_time_zone(&self) -> Result<TimeZone> {
+        let h = self.handle.as_ptr();
+        // SAFETY: the handle is live and the out-pointer is valid for writes.
+        let id = isolate::out_string("Schedule", |t, out| unsafe {
+            sys::dxfg_v4_Schedule_getTimeZone_getID(t, h, out.cast())
+        })?;
+        TimeZone::get_time_zone(&id)
+    }
 
     string_getter!(
         /// The definition of the schedule, the text between the parentheses of the trading hours
         /// (`getDefinition`).
         #[doc(alias = "getDefinition")]
-        definition: dxfg_v4_Schedule_getDefinition
+        get_definition: dxfg_v4_Schedule_getDefinition
     );
 }
 
@@ -482,37 +528,37 @@ impl Day {
     getter!(
         /// The day id, the days since 1970-01-01 (`getDayId`).
         #[doc(alias = "getDayId")]
-        day_id: dxfg_v4_Day_getDayId -> i32 = 0
+        get_day_id: dxfg_v4_Day_getDayId -> i32 = 0
     );
 
     getter!(
         /// The `yyyymmdd` number of the day, such as `20261218` (`getYearMonthDay`).
         #[doc(alias = "getYearMonthDay")]
-        year_month_day: dxfg_v4_Day_getYearMonthDay -> i32 = 0
+        get_year_month_day: dxfg_v4_Day_getYearMonthDay -> i32 = 0
     );
 
     getter!(
         /// The year (`getYear`).
         #[doc(alias = "getYear")]
-        year: dxfg_v4_Day_getYear -> i32 = 0
+        get_year: dxfg_v4_Day_getYear -> i32 = 0
     );
 
     getter!(
         /// The month of the year, 1 for January (`getMonthOfYear`).
         #[doc(alias = "getMonthOfYear")]
-        month_of_year: dxfg_v4_Day_getMonthOfYear -> i32 = 0
+        get_month_of_year: dxfg_v4_Day_getMonthOfYear -> i32 = 0
     );
 
     getter!(
         /// The day of the month, from 1 (`getDayOfMonth`).
         #[doc(alias = "getDayOfMonth")]
-        day_of_month: dxfg_v4_Day_getDayOfMonth -> i32 = 0
+        get_day_of_month: dxfg_v4_Day_getDayOfMonth -> i32 = 0
     );
 
     getter!(
         /// The day of the week, 1 for Monday to 7 for Sunday (`getDayOfWeek`).
         #[doc(alias = "getDayOfWeek")]
-        day_of_week: dxfg_v4_Day_getDayOfWeek -> i32 = 0
+        get_day_of_week: dxfg_v4_Day_getDayOfWeek -> i32 = 0
     );
 
     getter!(
@@ -536,19 +582,19 @@ impl Day {
     getter!(
         /// The start of the day, inclusive (`getStartTime`).
         #[doc(alias = "getStartTime")]
-        start_time: dxfg_v4_Day_getStartTime -> i64 = 0
+        get_start_time: dxfg_v4_Day_getStartTime -> i64 = 0
     );
 
     getter!(
         /// The end of the day, exclusive (`getEndTime`).
         #[doc(alias = "getEndTime")]
-        end_time: dxfg_v4_Day_getEndTime -> i64 = 0
+        get_end_time: dxfg_v4_Day_getEndTime -> i64 = 0
     );
 
     getter!(
         /// The time when the daily data is reset, such as the volume of the day (`getResetTime`).
         #[doc(alias = "getResetTime")]
-        reset_time: dxfg_v4_Day_getResetTime -> i64 = 0
+        get_reset_time: dxfg_v4_Day_getResetTime -> i64 = 0
     );
 
     /// Whether the day contains a time (`containsTime`).
@@ -775,13 +821,13 @@ impl Session {
     getter!(
         /// The start of the session, inclusive (`getStartTime`).
         #[doc(alias = "getStartTime")]
-        start_time: dxfg_v4_Session_getStartTime -> i64 = 0
+        get_start_time: dxfg_v4_Session_getStartTime -> i64 = 0
     );
 
     getter!(
         /// The end of the session, exclusive (`getEndTime`).
         #[doc(alias = "getEndTime")]
-        end_time: dxfg_v4_Session_getEndTime -> i64 = 0
+        get_end_time: dxfg_v4_Session_getEndTime -> i64 = 0
     );
 
     /// Whether the session contains a time (`containsTime`).

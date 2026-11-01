@@ -59,8 +59,8 @@ impl fmt::Display for ConnectionState {
 /// (`InstrumentProfileConnection`).
 ///
 /// A service with live updates sends the changes as they come; a file is read again every
-/// [`get_update_period`](Self::get_update_period) if it changed. Dropping the connection removes its state listeners and
-/// closes it.
+/// [`get_update_period`](Self::get_update_period) if it changed. Dropping the connection removes its state listeners
+/// and closes it.
 ///
 /// ```no_run
 /// use std::time::Duration;
@@ -83,6 +83,16 @@ pub struct InstrumentProfileConnection {
 impl fmt::Debug for InstrumentProfileConnection {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("InstrumentProfileConnection").finish_non_exhaustive()
+    }
+}
+
+impl fmt::Display for InstrumentProfileConnection {
+    /// The text of Java's `toString`, `IPC:<address>` with the user and password of the address hidden.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.handle.to_java_string() {
+            Ok(text) => f.write_str(&text),
+            Err(error) => write!(f, "IPC(<{error}>)"),
+        }
     }
 }
 

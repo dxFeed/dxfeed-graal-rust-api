@@ -93,7 +93,7 @@ fn print_next_5_holidays(profile: &InstrumentProfile, time: i64) -> dxfeed_graal
                     None => break,
                 }
 
-                output += &format!(" {}", day.year_month_day()?);
+                output += &format!(" {}", day.get_year_month_day()?);
             }
         }
     }

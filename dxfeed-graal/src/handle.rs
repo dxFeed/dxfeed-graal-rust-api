@@ -166,6 +166,15 @@ impl<T: SdkHandle> Handle<T> {
         Self::create(|t, out| unsafe { sys::dxfg_v4_JavaObjectHandler_clone(t, T::handler(raw), out.cast()) })
     }
 
+    /// The text of Java's `toString` of the object (`Object_toString`).
+    pub(crate) fn to_java_string(&self) -> Result<String> {
+        let h = self.as_ptr();
+        // SAFETY: the handle is live and the out-pointer is valid for writes.
+        isolate::out_string("Object", |t, out| unsafe {
+            sys::dxfg_v4_Object_toString(t, T::handler(h), out)
+        })
+    }
+
     /// Releases the handle now and reports whether the SDK released it.
     pub(crate) fn release(self) -> Result<()> {
         let this = std::mem::ManuallyDrop::new(self);

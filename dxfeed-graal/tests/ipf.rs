@@ -141,6 +141,9 @@ fn a_connection_reads_a_file() {
     let collector = InstrumentProfileCollector::new().unwrap();
     let connection = InstrumentProfileConnection::create_connection(&fixture(), &collector).unwrap();
     assert_eq!(connection.get_address().unwrap(), fixture());
+    assert_eq!(connection.to_string(), format!("IPC:{}", fixture()));
+    let secured = InstrumentProfileConnection::create_connection("http://user:secret@localhost/x.ipf", &collector);
+    assert_eq!(secured.unwrap().to_string(), "IPC:http://****@localhost/x.ipf");
     assert_eq!(connection.get_state().unwrap(), ConnectionState::NotConnected);
     connection.set_update_period(Duration::from_secs(30)).unwrap();
     assert_eq!(connection.get_update_period().unwrap(), Duration::from_secs(30));

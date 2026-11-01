@@ -27,19 +27,20 @@ fn minutes(hours: i64, minutes: i64) -> i64 {
 #[test]
 fn a_trading_day_and_its_sessions() {
     let schedule = schedule();
-    assert_eq!(schedule.name().unwrap(), "Test");
-    assert_eq!(schedule.time_zone_id().unwrap(), "America/New_York");
-    assert_eq!(schedule.definition().unwrap(), DEFINITION);
+    assert_eq!(schedule.get_name().unwrap(), "Test");
+    assert_eq!(schedule.get_time_zone().unwrap().get_id(), "America/New_York");
+    assert_eq!(schedule.get_definition().unwrap(), DEFINITION);
+    assert_eq!(schedule.to_string(), format!("Schedule{{{DEFINITION}}}"));
 
     let day = schedule.get_day_by_year_month_day(20261028).unwrap();
-    assert_eq!(day.day_id().unwrap(), 20754);
-    assert_eq!(day.year_month_day().unwrap(), 20261028);
+    assert_eq!(day.get_day_id().unwrap(), 20754);
+    assert_eq!(day.get_year_month_day().unwrap(), 20261028);
     assert_eq!(
         (
-            day.year().unwrap(),
-            day.month_of_year().unwrap(),
-            day.day_of_month().unwrap(),
-            day.day_of_week().unwrap()
+            day.get_year().unwrap(),
+            day.get_month_of_year().unwrap(),
+            day.get_day_of_month().unwrap(),
+            day.get_day_of_week().unwrap()
         ),
         (2026, 10, 28, 3)
     );
@@ -47,9 +48,9 @@ fn a_trading_day_and_its_sessions() {
     assert!(!day.is_holiday().unwrap());
     assert!(!day.is_short_day().unwrap());
     let midnight = OCTOBER_28_2026 + 4 * HOUR;
-    assert_eq!(day.start_time().unwrap(), midnight);
-    assert_eq!(day.end_time().unwrap(), midnight + 24 * HOUR);
-    assert_eq!(day.reset_time().unwrap(), midnight);
+    assert_eq!(day.get_start_time().unwrap(), midnight);
+    assert_eq!(day.get_end_time().unwrap(), midnight + 24 * HOUR);
+    assert_eq!(day.get_reset_time().unwrap(), midnight);
     assert!(day.contains_time(midnight).unwrap());
     assert!(!day.contains_time(midnight + 24 * HOUR).unwrap());
     assert!(day.to_string().starts_with("Day(20261028, true, "), "{day}");
@@ -61,8 +62,8 @@ fn a_trading_day_and_its_sessions() {
         .map(|s| {
             (
                 s.get_type().unwrap(),
-                s.start_time().unwrap() - midnight,
-                s.end_time().unwrap() - midnight,
+                s.get_start_time().unwrap() - midnight,
+                s.get_end_time().unwrap() - midnight,
             )
         })
         .collect();
@@ -108,15 +109,15 @@ fn days_and_sessions_are_found_across_the_weekend() {
         saturday
             .get_next_day(DayFilter::Trading)
             .unwrap()
-            .year_month_day()
+            .get_year_month_day()
             .unwrap(),
         20261102
     );
     let friday = saturday.find_prev_day(DayFilter::Trading).unwrap().unwrap();
-    assert_eq!(friday.year_month_day().unwrap(), 20261030);
+    assert_eq!(friday.get_year_month_day().unwrap(), 20261030);
     assert_eq!(saturday.get_prev_day(DayFilter::Friday).unwrap(), friday);
     let sunday = saturday.find_next_day(DayFilter::WeekEnd).unwrap().unwrap();
-    assert_eq!(sunday.year_month_day().unwrap(), 20261101);
+    assert_eq!(sunday.get_year_month_day().unwrap(), 20261101);
     assert!(saturday.find_next_day(DayFilter::Holiday).unwrap().is_none());
 
     // Friday's after-market session is followed by Monday's pre-market one, at 04:00 New York time, UTC-5 by then.
@@ -125,7 +126,10 @@ fn days_and_sessions_are_found_across_the_weekend() {
     assert_eq!(after_market.get_type().unwrap(), SessionType::AfterMarket);
     let next = after_market.get_next_session(SessionFilter::Trading).unwrap();
     assert_eq!(next.get_type().unwrap(), SessionType::PreMarket);
-    assert_eq!(next.start_time().unwrap(), OCTOBER_28_2026 + 5 * 24 * HOUR + 9 * HOUR);
+    assert_eq!(
+        next.get_start_time().unwrap(),
+        OCTOBER_28_2026 + 5 * 24 * HOUR + 9 * HOUR
+    );
     assert_eq!(
         next.find_prev_session(SessionFilter::AfterMarket).unwrap().unwrap(),
         after_market
@@ -136,7 +140,7 @@ fn days_and_sessions_are_found_across_the_weekend() {
     );
 
     // Saturday noon is nearer to Friday's after-market session than to Monday's pre-market one.
-    let saturday_noon = saturday.start_time().unwrap() + 12 * HOUR;
+    let saturday_noon = saturday.get_start_time().unwrap() + 12 * HOUR;
     let nearest = schedule
         .get_nearest_session_by_time(saturday_noon, SessionFilter::Trading)
         .unwrap();
@@ -162,8 +166,8 @@ fn each_filter_finds_its_days_and_sessions() {
     ];
     for (filter, day_of_week) in weekdays {
         let day = sunday.get_next_day(filter).unwrap();
-        assert_eq!(day.day_of_week().unwrap(), day_of_week, "{filter:?}");
-        assert_eq!(day.year_month_day().unwrap(), 20261101 + day_of_week, "{filter:?}");
+        assert_eq!(day.get_day_of_week().unwrap(), day_of_week, "{filter:?}");
+        assert_eq!(day.get_year_month_day().unwrap(), 20261101 + day_of_week, "{filter:?}");
     }
     let saturday = schedule.get_day_by_year_month_day(20261031).unwrap();
     assert_eq!(saturday.get_next_day(DayFilter::Sunday).unwrap(), sunday);
@@ -173,7 +177,7 @@ fn each_filter_finds_its_days_and_sessions() {
         saturday
             .get_prev_day(DayFilter::WeekDay)
             .unwrap()
-            .day_of_week()
+            .get_day_of_week()
             .unwrap(),
         5
     );
@@ -229,12 +233,12 @@ fn the_defaults_give_the_venues_and_holidays_of_profiles() {
     };
     assert_eq!(Schedule::get_trading_venues(&profile).unwrap(), ["RustVenue"]);
     let schedule = Schedule::get_instance(&profile).unwrap();
-    assert_eq!(schedule.name().unwrap(), "Rust Venue");
+    assert_eq!(schedule.get_name().unwrap(), "Rust Venue");
     let holiday = schedule.get_day_by_year_month_day(20261028).unwrap();
     assert!(holiday.is_holiday().unwrap());
     assert!(!holiday.is_trading().unwrap());
     let next_holiday = holiday.get_next_day(DayFilter::Holiday).unwrap();
-    assert_eq!(next_holiday.year_month_day().unwrap(), 20261225);
+    assert_eq!(next_holiday.get_year_month_day().unwrap(), 20261225);
 
     let by_venue = Schedule::get_instance_with_venue(&profile, "RustVenue").unwrap();
     assert_eq!(by_venue.get_day_by_id(20754).unwrap(), holiday);
