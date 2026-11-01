@@ -128,6 +128,8 @@ mod subscription;
 mod symbol;
 pub mod system;
 mod time_format;
+mod time_period;
+mod time_zone;
 
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, Result};
@@ -145,6 +147,8 @@ pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
 pub use symbol::Symbol;
 pub use time_format::TimeFormat;
+pub use time_period::{TimePeriod, TimePeriodInfo};
+pub use time_zone::TimeZone;
 
 /// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {

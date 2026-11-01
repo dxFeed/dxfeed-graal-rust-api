@@ -1,17 +1,20 @@
 //! Times parsed and formatted as the other dxFeed APIs do it (`TimeFormat`).
 
+use std::collections::{HashMap, HashSet};
 use std::ptr;
 use std::sync::{Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
+use crate::TimeZone;
 use crate::error::{Error, JavaException, Result, c_string};
+use crate::handle::Handle;
 use crate::isolate::{self, Thread, call};
 
 /// Parses and formats times as the Java `TimeFormat` of the SDK does; times are milliseconds since the Unix epoch.
 ///
-/// [`DEFAULT`](Self::DEFAULT) uses the default time zone of the process, [`GMT`](Self::GMT) the GMT zone. The text
-/// formats, such as `20070101-123456`, `20070101-123456.123`, `2005-12-31 21:00:00.123+03:00` or `2007-11-02Z`, are
+/// [`DEFAULT`](Self::DEFAULT) uses the default time zone of the process, [`GMT`](Self::GMT) the GMT zone and
+/// [`get_instance`](Self::get_instance) a given zone. The text formats, such as `20070101-123456`, `20070101-123456.123`, `2005-12-31 21:00:00.123+03:00` or `2007-11-02Z`, are
 /// those of Java's `TimeFormat.parse`; a number is milliseconds since the epoch.
 ///
 /// ```no_run
@@ -25,6 +28,8 @@ use crate::isolate::{self, Thread, call};
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TimeFormat {
+    /// The identifier of the time zone of a format of [`get_instance`](Self::get_instance).
+    zone: Option<&'static str>,
     gmt: bool,
     millis: bool,
     time_zone: bool,
@@ -34,6 +39,7 @@ pub struct TimeFormat {
 impl TimeFormat {
     /// The format of the default time zone (`TimeFormat.DEFAULT`).
     pub const DEFAULT: TimeFormat = TimeFormat {
+        zone: None,
         gmt: false,
         millis: false,
         time_zone: false,
@@ -45,6 +51,39 @@ impl TimeFormat {
         gmt: true,
         ..TimeFormat::DEFAULT
     };
+
+    /// The format of the time zone `zone` (`getInstance`).
+    ///
+    /// The format refers to the zone by its identifier, as a [`TimeZone`] cannot change; every zone of this crate has
+    /// an identifier that Java finds again.
+    #[doc(alias = "getInstance")]
+    pub fn get_instance(zone: &TimeZone) -> TimeFormat {
+        static IDS: Mutex<Option<HashSet<&'static str>>> = Mutex::new(None);
+        let mut ids = crate::lock(&IDS);
+        let ids = ids.get_or_insert_with(HashSet::new);
+        // The identifiers are kept for the process, as the formats made from them are; there are few distinct zones.
+        let id = match ids.get(zone.get_id()) {
+            Some(id) => *id,
+            None => {
+                let id: &'static str = Box::leak(zone.get_id().into());
+                ids.insert(id);
+                id
+            }
+        };
+        TimeFormat {
+            zone: Some(id),
+            ..TimeFormat::DEFAULT
+        }
+    }
+
+    /// The time zone of the format (`getTimeZone`).
+    #[doc(alias = "getTimeZone")]
+    pub fn get_time_zone(self) -> Result<TimeZone> {
+        let format = self.sdk()?;
+        // SAFETY: the time format is live and the out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_TimeFormat_getTimeZone(t, format, out) })?;
+        TimeZone::from_handle(handle)
+    }
 
     /// This format with milliseconds in the formatted text (`withMillis`).
     #[doc(alias = "withMillis")]
@@ -83,25 +122,21 @@ impl TimeFormat {
     /// Formats milliseconds since the Unix epoch (`format`).
     pub fn format(self, millis: i64) -> Result<String> {
         let format = self.sdk()?;
-        let mut text = ptr::null();
         // SAFETY: the time format is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_TimeFormat_format(t, format, millis, &mut text) })?;
-        if text.is_null() {
-            return Err(Error::Java(JavaException::null_result()));
-        }
-        // SAFETY: the SDK wrote a NUL-terminated string that is released right after copying.
-        let copy = unsafe { isolate::string(text) }.into_owned();
-        // SAFETY: `text` came from dxfg_v4_TimeFormat_format and is released once.
-        crate::error_manager::report_release("TimeFormat", call(|t| unsafe { sys::dxfg_v4_String_release(t, text) }));
-        Ok(copy)
+        isolate::out_string("TimeFormat", |t, text| unsafe {
+            sys::dxfg_v4_TimeFormat_format(t, format, millis, text)
+        })
     }
 
     /// The SDK format, created on first use and kept for the process, as are the formats it is derived from.
     fn sdk(self) -> Result<*mut sys::dxfg_v4_time_format_t> {
         static FORMATS: [OnceLock<SdkFormat>; 16] = [const { OnceLock::new() }; 16];
         static INIT: Mutex<()> = Mutex::new(());
+        static ZONED: Mutex<Option<HashMap<TimeFormat, SdkFormat>>> = Mutex::new(None);
         let cell = &FORMATS[self.index()];
-        if let Some(format) = cell.get() {
+        if self.zone.is_none()
+            && let Some(format) = cell.get()
+        {
             return Ok(format.0);
         }
         // The format is derived from the one without its last option, created first and outside the lock.
@@ -132,24 +167,40 @@ impl TimeFormat {
             Some((parent, _)) => parent.sdk()?,
             None => ptr::null_mut(),
         };
-        let format = crate::get_or_try_init(cell, &INIT, || {
+        let create = || {
+            let zone = match (derive, self.zone) {
+                (None, Some(id)) => Some(TimeZone::get_time_zone(id)?),
+                _ => None,
+            };
             let mut format = ptr::null_mut();
-            call(|t| match derive {
+            call(|t| match (derive, &zone) {
                 // SAFETY: the parent format is live and the out-pointer is valid for writes.
-                Some((_, f)) => unsafe { f(t, parent, &mut format) },
+                (Some((_, f)), _) => unsafe { f(t, parent, &mut format) },
+                // SAFETY: the time zone is live and the out-pointer is valid for writes.
+                (None, Some(zone)) => unsafe { sys::dxfg_v4_TimeFormat_getInstance(t, zone.as_ptr(), &mut format) },
                 // SAFETY: the out-pointer is valid for writes.
-                None if self.gmt => unsafe { sys::dxfg_v4_TimeFormat_GMT(t, &mut format) },
+                (None, None) if self.gmt => unsafe { sys::dxfg_v4_TimeFormat_GMT(t, &mut format) },
                 // SAFETY: the out-pointer is valid for writes.
-                None => unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut format) },
+                (None, None) => unsafe { sys::dxfg_v4_TimeFormat_DEFAULT(t, &mut format) },
             })?;
             if format.is_null() {
                 return Err(Error::Java(JavaException::null_result()));
             }
             Ok(SdkFormat(format))
-        })?;
-        Ok(format.0)
+        };
+        if self.zone.is_none() {
+            return Ok(crate::get_or_try_init(cell, &INIT, create)?.0);
+        }
+        let mut zoned = crate::lock(&ZONED);
+        let zoned = zoned.get_or_insert_with(HashMap::new);
+        if let Some(format) = zoned.get(&self) {
+            return Ok(format.0);
+        }
+        let format = create()?;
+        Ok(zoned.entry(self).or_insert(format).0)
     }
 
+    /// The index in the formats of the zones that need no identifier.
     fn index(self) -> usize {
         usize::from(self.gmt)
             | usize::from(self.millis) << 1

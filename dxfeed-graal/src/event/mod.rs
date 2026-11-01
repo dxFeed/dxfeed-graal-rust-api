@@ -14,7 +14,7 @@ mod candle;
 mod candle_symbol;
 mod configuration;
 mod daily_candle;
-mod format;
+pub(crate) mod format;
 pub(crate) use format::{JavaDouble, year_month_day};
 mod greeks;
 #[doc(alias = "MarketEventSymbols")]

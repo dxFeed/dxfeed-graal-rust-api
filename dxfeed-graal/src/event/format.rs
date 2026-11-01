@@ -44,7 +44,7 @@ impl Display for JavaDouble {
 ///
 /// They are the shortest digits that read back as `a`, as Rust and Java 19+ choose them, with Java's rule that a value
 /// whose shortest form has one digit uses the closest two-digit form (`5e-324` is `4.9E-324`).
-fn java_digits(a: f64) -> (String, i32) {
+pub(crate) fn java_digits(a: f64) -> (String, i32) {
     let split = |s: &str| {
         let (mantissa, exponent) = s.split_once('e').expect("exponent notation");
         let digits: String = mantissa.chars().filter(|c| *c != '.').collect();

@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, Result};
+use crate::error::Result;
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
 use crate::executor::ManualExecutor;
 use crate::feed::DXFeed;
@@ -225,10 +225,7 @@ fn with<B: SdkHandle, A>(builder: Handle<B>, set: With<B, A>, value: A) -> Resul
 
 /// The Java `TimePeriod` of a duration, in whole milliseconds.
 fn time_period(period: Duration) -> Result<Handle<sys::dxfg_v4_time_period_t>> {
-    let millis = i64::try_from(period.as_millis())
-        .map_err(|_| Error::InvalidArgument(format!("the period {period:?} is too long")))?;
-    // SAFETY: the out-pointer is valid for writes.
-    Handle::create(|t, out| unsafe { sys::dxfg_v4_TimePeriod_valueOf(t, millis, out) })
+    crate::TimePeriod::try_from(period)?.to_sdk()
 }
 
 /// What both kinds of models do, around the SDK model.
