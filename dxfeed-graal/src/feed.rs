@@ -1,5 +1,6 @@
 //! The feed of an endpoint.
 
+use std::ptr;
 use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
@@ -7,12 +8,12 @@ use dxfeed_graal_sys as sys;
 use crate::endpoint::{DXEndpoint, EndpointState};
 use crate::error::{Error, JavaException, Result};
 use crate::event::SubscriptionItem;
-use crate::event::sdk_event::{SdkSymbol, needs_candle_symbol, take_event};
+use crate::event::sdk_event::{needs_candle_symbol, take_event, take_events};
 use crate::event::{
     Event, EventKind, EventType, IndexedEvent, IndexedEventSource, LastingEvent, SysEvents, TimeSeriesEvent,
 };
 use crate::handle::Handle;
-use crate::isolate::call;
+use crate::isolate::{self, call};
 use crate::promise::Promise;
 use crate::subscription::{ClassList, DXFeedSubscription, DXFeedTimeSeriesSubscription};
 use crate::subscription_controller::{attach_feed, detach_feed};
@@ -300,9 +301,12 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getLastEventIfSubscribed")]
-    pub fn get_last_event_if_subscribed<E: LastingEvent + EventKind>(&self, symbol: &str) -> Result<Option<E>> {
-        let mut sdk_symbol = SdkSymbol::new::<E>(symbol)?;
-        let symbol = sdk_symbol.as_mut_ptr();
+    pub fn get_last_event_if_subscribed<E: LastingEvent + EventKind>(
+        &self,
+        symbol: impl Into<Symbol>,
+    ) -> Result<Option<E>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the symbol are live; the SDK only reads the symbol. The out-pointer is valid for writes.
         take_event(|t, out| unsafe {
@@ -346,9 +350,9 @@ impl DXFeed {
     /// # }
     /// ```
     #[doc(alias = "getLastEventPromise")]
-    pub fn get_last_event_promise<E: LastingEvent + EventKind>(&self, symbol: &str) -> Result<Promise<E>> {
-        let mut sdk_symbol = SdkSymbol::new::<E>(symbol)?;
-        let symbol = sdk_symbol.as_mut_ptr();
+    pub fn get_last_event_promise<E: LastingEvent + EventKind>(&self, symbol: impl Into<Symbol>) -> Result<Promise<E>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the symbol are live; the SDK only reads the symbol. The out-pointer is valid for writes.
         let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
@@ -396,5 +400,150 @@ impl DXFeed {
         // SAFETY: the feed and the event are live; the SDK only reads the event. The out-pointer is valid for writes.
         take_event(|t, out| unsafe { sys::dxfg_v4_DXFeed_getLastEvent(t, feed, event, out) })?
             .ok_or_else(|| Error::Java(JavaException::null_result()))
+    }
+
+    /// Returns new events with the last values of the types and symbols of `events`, in their order, as
+    /// [`get_last_event`](Self::get_last_event) does for one (`DXFeed.getLastEvents`).
+    ///
+    /// Java fills the given events; this method leaves them and returns the filled copies.
+    ///
+    /// Fails with [`Error::InvalidArgument`] when a string of an event holds a NUL byte or an exchange code does not
+    /// fit a Java `char`.
+    #[doc(alias = "getLastEvents")]
+    pub fn get_last_events<E: LastingEvent + EventKind>(&self, events: &[E]) -> Result<Vec<E>> {
+        if events.is_empty() {
+            return Ok(Vec::new());
+        }
+        let events: Vec<Event> = events.iter().cloned().map(Into::into).collect();
+        let mut sys_events = SysEvents::new(&events)?;
+        let list = sys_events.list();
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed, the list and its events are live; the SDK only reads them. The out-pointer is valid for
+        // writes.
+        let last = take_events(|t, out| unsafe { sys::dxfg_v4_DXFeed_getLastEvents(t, feed, &list, out) })?;
+        last.ok_or_else(|| Error::Java(JavaException::null_result()))
+    }
+
+    /// Requests the last events of type `E` for `symbols` from the uplink and returns their promises, in the order of
+    /// `symbols` (`DXFeed.getLastEventsPromises`).
+    ///
+    /// It is much faster than one [`get_last_event_promise`](Self::get_last_event_promise) per symbol; wait for all
+    /// of them with [`Promises::all_of`](crate::Promises::all_of). Each promise keeps the endpoint open while it lives.
+    #[doc(alias = "getLastEventsPromises")]
+    pub fn get_last_events_promises<E: LastingEvent + EventKind>(
+        &self,
+        symbols: impl IntoIterator<Item: Into<Symbol>>,
+    ) -> Result<Vec<Promise<E>>> {
+        let mut arena = SymbolArena::new();
+        let symbols = arena.list(symbols, needs_candle_symbol(E::TYPE))?;
+        let feed = self.state.feed.as_ptr();
+        let mut list: *mut sys::dxfg_v4_promise_list = ptr::null_mut();
+        // SAFETY: the feed and the symbols are live; the SDK only reads the symbols. The out-pointer is valid for
+        // writes.
+        call(|t| unsafe { sys::dxfg_v4_DXFeed_getLastEventsPromises(t, feed, E::TYPE.to_sys(), symbols, &mut list) })?;
+        let list = PromiseList(list);
+        list.handles()?
+            .into_iter()
+            .map(|handle| Ok(Promise::new(handle, self.clone())))
+            .collect()
+    }
+
+    /// Returns the indexed events of type `E` for `symbol` from `source` in the local cache of the feed, ordered by
+    /// index (`DXFeed.getIndexedEventsIfSubscribed`).
+    ///
+    /// The call is not remote. The cache has the events only while a subscription of this feed is subscribed to them,
+    /// and the list is not a consistent snapshot: use
+    /// [`get_indexed_events_promise`](Self::get_indexed_events_promise) for one. The list is empty without such a
+    /// subscription, where Java returns `null`, and before the events arrive.
+    ///
+    /// Fails with [`Error::InvalidArgument`] when `source` is neither [`IndexedEventSource::DEFAULT`] nor an order
+    /// source of Java, such as one made by [`IndexedEventSource::new`] with an id that Java does not know.
+    #[doc(alias = "getIndexedEventsIfSubscribed")]
+    pub fn get_indexed_events_if_subscribed<E: IndexedEvent + EventKind>(
+        &self,
+        symbol: impl Into<Symbol>,
+        source: IndexedEventSource,
+    ) -> Result<Vec<E>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
+        // The SDK finds the source by the name of its `OrderSource`, as `OrderSource.valueOf` does.
+        let name = source
+            .order_source_name()
+            .ok_or_else(|| Error::InvalidArgument(format!("{source} is not a source of indexed events of Java")))?;
+        let source = arena.string(&name, "the source")?;
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed, the symbol and the source are live; the SDK only reads them. The out-pointer is valid for
+        // writes.
+        let events = take_events(|t, out| unsafe {
+            sys::dxfg_v4_DXFeed_getIndexedEventsIfSubscribed(t, feed, E::TYPE.to_sys(), symbol, source, out)
+        })?;
+        Ok(events.unwrap_or_default())
+    }
+
+    /// Returns the time-series events of type `E` for `symbol` from `from_time` to `to_time`, both inclusive, in the
+    /// local cache of the feed, ordered by time (`DXFeed.getTimeSeriesIfSubscribed`).
+    ///
+    /// The call is not remote. The cache has the events only while a subscription of this feed is subscribed to them
+    /// from a time on, and the list is not a consistent snapshot: use
+    /// [`get_time_series_promise`](Self::get_time_series_promise) for one. The list is empty without such a
+    /// subscription, where Java returns `null`, and before the events arrive. A
+    /// [`Symbol::TimeSeriesSubscription`] symbol fails with [`Error::Java`].
+    #[doc(alias = "getTimeSeriesIfSubscribed")]
+    pub fn get_time_series_if_subscribed<E: TimeSeriesEvent + EventKind>(
+        &self,
+        symbol: impl Into<Symbol>,
+        from_time: i64,
+        to_time: i64,
+    ) -> Result<Vec<E>> {
+        let mut arena = SymbolArena::new();
+        let symbol = arena.symbol(&symbol.into(), needs_candle_symbol(E::TYPE))?;
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed and the symbol are live; the SDK only reads the symbol. The out-pointer is valid for writes.
+        let events = take_events(|t, out| unsafe {
+            sys::dxfg_v4_DXFeed_getTimeSeriesIfSubscribed(t, feed, E::TYPE.to_sys(), symbol, from_time, to_time, out)
+        })?;
+        Ok(events.unwrap_or_default())
+    }
+}
+
+/// A list of promises the SDK returned, released with its handles on `Drop`.
+struct PromiseList(*mut sys::dxfg_v4_promise_list);
+
+impl PromiseList {
+    /// New handles of the promises of the list.
+    fn handles(&self) -> Result<Vec<Handle<sys::dxfg_v4_promise_t>>> {
+        // SAFETY: the list is NULL or live while `self` lives.
+        let Some(list) = (unsafe { self.0.as_ref() }) else {
+            return Ok(Vec::new());
+        };
+        let len = usize::try_from(list.list.size).unwrap_or(0);
+        if len == 0 || list.list.elements.is_null() {
+            return Ok(Vec::new());
+        }
+        // SAFETY: the array holds `size` live handles.
+        let elements = unsafe { std::slice::from_raw_parts(list.list.elements, len) };
+        elements
+            .iter()
+            .map(|&element| {
+                if element.is_null() {
+                    return Err(Error::Java(JavaException::null_result()));
+                }
+                // SAFETY: the element is a live handle of a promise, which stays with the list.
+                unsafe { Handle::clone_raw(element.cast::<sys::dxfg_v4_promise_t>()) }
+            })
+            .collect()
+    }
+}
+
+impl Drop for PromiseList {
+    fn drop(&mut self) {
+        let list = self.0;
+        if !list.is_null() && !isolate::exiting() {
+            // SAFETY: the list came from the SDK and is released once.
+            crate::error_manager::report_release(
+                "Promise",
+                call(|t| unsafe { sys::dxfg_v4_promise_list_release(t, list) }),
+            );
+        }
     }
 }

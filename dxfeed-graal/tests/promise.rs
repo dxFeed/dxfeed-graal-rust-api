@@ -164,6 +164,21 @@ fn listener_cannot_block_on_a_promise() {
     assert!(cancelled.unwrap());
 }
 
+/// The promises of several symbols are released with the list the SDK returns them in.
+#[test]
+fn last_events_promises_release_their_handles() {
+    let _serial = serial();
+    let start = live_handles();
+    let hub = Hub::new();
+    let with_hub = live_handles();
+    let promises = hub.feed.get_last_events_promises::<Quote>(["AAPL", "IBM"]).unwrap();
+    assert_eq!(live_handles(), with_hub + 2);
+    drop(promises);
+    assert_eq!(live_handles(), with_hub);
+    drop(hub);
+    assert_eq!(live_handles(), start);
+}
+
 /// The promise keeps the endpoint open while it lives, and dropping it releases its handle.
 #[test]
 fn dropping_a_promise_releases_it() {

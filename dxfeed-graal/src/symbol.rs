@@ -1,5 +1,6 @@
 //! The symbols of subscriptions (`WildcardSymbol`, `IndexedEventSubscriptionSymbol`, `TimeSeriesSubscriptionSymbol`).
 
+use std::borrow::Cow;
 use std::ffi::{CString, c_char};
 use std::fmt::{self, Display, Formatter};
 
@@ -34,7 +35,7 @@ use crate::isolate;
 /// # Ok(())
 /// # }
 /// ```
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Symbol {
     /// A string symbol, such as `AAPL`.
     String(String),
@@ -60,6 +61,10 @@ pub enum Symbol {
 }
 
 impl Symbol {
+    /// The prefix of the symbols reserved for wildcards (`WildcardSymbol.RESERVED_PREFIX`): `*`.
+    #[doc(alias = "RESERVED_PREFIX")]
+    pub const WILDCARD_RESERVED_PREFIX: &'static str = "*";
+
     /// The indexed events of `symbol` from `source` (`new IndexedEventSubscriptionSymbol(symbol, source)`).
     pub fn indexed(symbol: impl Into<Symbol>, source: IndexedEventSource) -> Symbol {
         Symbol::IndexedEventSubscription {
@@ -74,6 +79,37 @@ impl Symbol {
         Symbol::TimeSeriesSubscription {
             symbol: Box::new(symbol.into()),
             from_time,
+        }
+    }
+
+    /// The symbol of the events: the wrapped symbol of an indexed or a time-series subscription symbol, this symbol
+    /// for the other kinds (`IndexedEventSubscriptionSymbol.getEventSymbol`,
+    /// `TimeSeriesSubscriptionSymbol.getEventSymbol`).
+    #[doc(alias = "getEventSymbol")]
+    pub fn get_event_symbol(&self) -> &Symbol {
+        match self {
+            Symbol::IndexedEventSubscription { symbol, .. } | Symbol::TimeSeriesSubscription { symbol, .. } => symbol,
+            _ => self,
+        }
+    }
+
+    /// The source of an indexed event subscription symbol, `None` for the other kinds
+    /// (`IndexedEventSubscriptionSymbol.getSource`).
+    #[doc(alias = "getSource")]
+    pub fn get_source(&self) -> Option<IndexedEventSource> {
+        match self {
+            Symbol::IndexedEventSubscription { source, .. } => Some(*source),
+            _ => None,
+        }
+    }
+
+    /// The time of the first event of a time-series subscription symbol, in milliseconds since the Unix epoch;
+    /// `None` for the other kinds (`TimeSeriesSubscriptionSymbol.getFromTime`).
+    #[doc(alias = "getFromTime")]
+    pub fn get_from_time(&self) -> Option<i64> {
+        match self {
+            Symbol::TimeSeriesSubscription { from_time, .. } => Some(*from_time),
+            _ => None,
         }
     }
 }
@@ -118,6 +154,18 @@ impl From<String> for Symbol {
 impl From<&String> for Symbol {
     fn from(symbol: &String) -> Self {
         Symbol::String(symbol.clone())
+    }
+}
+
+impl From<Cow<'_, str>> for Symbol {
+    fn from(symbol: Cow<'_, str>) -> Self {
+        Symbol::String(symbol.into_owned())
+    }
+}
+
+impl From<&Cow<'_, str>> for Symbol {
+    fn from(symbol: &Cow<'_, str>) -> Self {
+        Symbol::String(symbol.as_ref().to_owned())
     }
 }
 
@@ -230,14 +278,16 @@ impl SymbolArena {
         }
     }
 
-    /// The SDK list of `symbols`.
+    /// The SDK list of `symbols`; with `candle`, the string symbols are passed as candle symbols, see
+    /// [`symbol`](Self::symbol).
     pub(crate) fn list(
         &mut self,
         symbols: impl IntoIterator<Item: Into<Symbol>>,
+        candle: bool,
     ) -> Result<*mut sys::dxfg_symbol_list> {
         let mut pointers = symbols
             .into_iter()
-            .map(|symbol| self.symbol(&symbol.into(), false))
+            .map(|symbol| self.symbol(&symbol.into(), candle))
             .collect::<Result<Vec<_>>>()?;
         let list = sys::dxfg_symbol_list {
             size: pointers.len() as i32,

@@ -135,10 +135,19 @@ impl<T: SdkHandle> Handle<T> {
 
     /// Another handle of the same Java object, released apart from this one (`JavaObjectHandler_clone`).
     pub(crate) fn try_clone(&self) -> Result<Self> {
-        let this = self.as_ptr();
-        // SAFETY: the handle is live and the out-pointer is valid for writes. A typed handle consists of the handler
-        // only, so the clone is a handle of the same type.
-        Self::create(|t, out| unsafe { sys::dxfg_v4_JavaObjectHandler_clone(t, T::handler(this), out.cast()) })
+        // SAFETY: the handle is live.
+        unsafe { Self::clone_raw(self.as_ptr()) }
+    }
+
+    /// A new handle of the Java object of the SDK handle `raw`, which stays with its owner.
+    ///
+    /// # Safety
+    ///
+    /// `raw` must be a live handle of type `T`.
+    pub(crate) unsafe fn clone_raw(raw: *mut T) -> Result<Self> {
+        // SAFETY: the caller guarantees that the handle is live, and the out-pointer is valid for writes. A typed
+        // handle consists of the handler only, so the clone is a handle of the same type.
+        Self::create(|t, out| unsafe { sys::dxfg_v4_JavaObjectHandler_clone(t, T::handler(raw), out.cast()) })
     }
 
     /// Releases the handle now and reports whether the SDK released it.

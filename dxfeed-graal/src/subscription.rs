@@ -174,7 +174,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     #[doc(alias = "addSymbols")]
     pub fn add_symbols(&self, symbols: impl IntoIterator<Item: Into<Symbol>>) -> Result<()> {
         let mut arena = SymbolArena::new();
-        let list = arena.list(symbols)?;
+        let list = arena.list(symbols, false)?;
         let s = self.handle.as_ptr();
         // SAFETY: the subscription and the list are live; the SDK only reads the list.
         call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_addSymbols(t, s, list) })
@@ -184,7 +184,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     #[doc(alias = "removeSymbols")]
     pub fn remove_symbols(&self, symbols: impl IntoIterator<Item: Into<Symbol>>) -> Result<()> {
         let mut arena = SymbolArena::new();
-        let list = arena.list(symbols)?;
+        let list = arena.list(symbols, false)?;
         let s = self.handle.as_ptr();
         // SAFETY: the subscription and the list are live; the SDK only reads the list.
         call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeSymbols(t, s, list) })
@@ -195,7 +195,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     #[doc(alias = "setSymbols")]
     pub fn set_symbols(&self, symbols: impl IntoIterator<Item: Into<Symbol>>) -> Result<()> {
         let mut arena = SymbolArena::new();
-        let list = arena.list(symbols)?;
+        let list = arena.list(symbols, false)?;
         let s = self.handle.as_ptr();
         // SAFETY: the subscription and the list are live; the SDK only reads the list.
         call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_setSymbols(t, s, list) })
