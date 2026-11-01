@@ -4,8 +4,8 @@
 mod support;
 
 use std::sync::mpsc::{self, Receiver};
-use std::time::Duration;
 
+use dxfeed_graal::TimePeriod;
 use dxfeed_graal::event::{EventFlags, IndexedEventSource, Order, OrderSource, Side, TimeAndSale};
 use dxfeed_graal::model::{IndexedTxModel, SortOrder, TimeSeriesTxModel};
 use support::Hub;
@@ -133,7 +133,7 @@ fn sources_and_feeds_can_change() {
     let mut sources = model.get_sources().unwrap();
     sources.sort_by_key(|source| source.get_id());
     assert_eq!(sources, [OrderSource::NTV, OrderSource::ntv]);
-    model.set_aggregation_period(Duration::from_millis(0)).unwrap();
+    model.set_aggregation_period(TimePeriod::ZERO).unwrap();
 
     model.detach(&hub.feed).unwrap();
     publish(&hub, vec![order(1, EventFlags::empty())]);

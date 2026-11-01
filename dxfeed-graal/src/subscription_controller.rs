@@ -1,0 +1,128 @@
+//! The controller of a subscription: the feeds it is attached to and how it delivers the events.
+
+use std::fmt;
+use std::ptr;
+use std::sync::Mutex;
+
+use dxfeed_graal_sys as sys;
+
+use crate::error::Result;
+use crate::executor::Executor;
+use crate::feed::DXFeed;
+use crate::handle::Handle;
+use crate::isolate::call;
+use crate::subscription::{check_aggregation_period, check_events_batch_limit};
+use crate::time_period::TimePeriod;
+
+/// The controller of a subscription (`SubscriptionController`): it attaches the subscription to feeds and detaches it,
+/// and changes how the events are delivered.
+///
+/// It comes from [`DXFeedSubscription::get_subscription_controller`] or from a model, such as
+/// [`IndexedEventTxModel::get_subscription_controller`], and borrows it.
+///
+/// [`DXFeedSubscription::get_subscription_controller`]: crate::DXFeedSubscription::get_subscription_controller
+/// [`IndexedEventTxModel::get_subscription_controller`]: crate::model::IndexedEventTxModel::get_subscription_controller
+pub struct SubscriptionController<'a> {
+    handle: Handle<sys::dxfg_v4_subscription_controller_t>,
+    /// The feeds of the subscription or model, which keeps the feeds it is attached to.
+    feeds: &'a Mutex<Vec<DXFeed>>,
+}
+
+impl<'a> SubscriptionController<'a> {
+    pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_controller_t>, feeds: &'a Mutex<Vec<DXFeed>>) -> Self {
+        SubscriptionController { handle, feeds }
+    }
+
+    /// Attaches the subscription to the feed; attaching it again does nothing (`attach`).
+    pub fn attach(&self, feed: &DXFeed) -> Result<()> {
+        // The lock keeps the SDK call and the kept feeds in step with a concurrent `detach`.
+        let mut feeds = crate::lock(self.feeds);
+        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
+        // SAFETY: the controller and the feed are live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_attach(t, c, f) })?;
+        if !feeds.iter().any(|kept| kept.same_as(feed)) {
+            feeds.push(feed.clone());
+        }
+        Ok(())
+    }
+
+    /// Detaches the subscription from the feed (`detach`).
+    pub fn detach(&self, feed: &DXFeed) -> Result<()> {
+        let mut feeds = crate::lock(self.feeds);
+        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
+        // SAFETY: the controller and the feed are live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_detach(t, c, f) })?;
+        feeds.retain(|kept| !kept.same_as(feed));
+        Ok(())
+    }
+
+    /// The most events of one call of a listener (`getEventsBatchLimit`), see
+    /// [`DXFeedSubscription::get_events_batch_limit`](crate::DXFeedSubscription::get_events_batch_limit).
+    #[doc(alias = "getEventsBatchLimit")]
+    pub fn get_events_batch_limit(&self) -> Result<i32> {
+        let mut limit = 0;
+        let c = self.handle.as_ptr();
+        // SAFETY: the controller is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_getEventsBatchLimit(t, c, &mut limit) })?;
+        Ok(limit)
+    }
+
+    /// Changes the most events of one call of a listener (`setEventsBatchLimit`); returns
+    /// [`Error::InvalidArgument`](crate::Error::InvalidArgument) for a negative limit.
+    #[doc(alias = "setEventsBatchLimit")]
+    pub fn set_events_batch_limit(&self, limit: i32) -> Result<()> {
+        check_events_batch_limit(limit)?;
+        let c = self.handle.as_ptr();
+        // SAFETY: the controller is live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setEventsBatchLimit(t, c, limit) })
+    }
+
+    /// The executor that calls the listeners; `None` if it is the executor of the feed (`getExecutor`).
+    #[doc(alias = "getExecutor")]
+    pub fn get_executor(&self) -> Result<Option<Executor>> {
+        let c = self.handle.as_ptr();
+        // SAFETY: the controller is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create_optional(|t, out| unsafe { sys::dxfg_v4_SubscriptionController_getExecutor(t, c, out) })?;
+        Ok(handle.map(Executor::from_handle))
+    }
+
+    /// Changes the executor that calls the listeners; `None` for the executor of the feed (`setExecutor`).
+    #[doc(alias = "setExecutor")]
+    pub fn set_executor(&self, executor: Option<&Executor>) -> Result<()> {
+        let c = self.handle.as_ptr();
+        let e = executor.map_or(ptr::null_mut(), |executor| executor.handle.as_ptr());
+        // SAFETY: the controller and the executor are live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setExecutor(t, c, e) })
+    }
+
+    /// How long the events are gathered before the listeners are called; `None` if no period was set
+    /// (`getAggregationPeriod`).
+    #[doc(alias = "getAggregationPeriod")]
+    pub fn get_aggregation_period(&self) -> Result<Option<TimePeriod>> {
+        let c = self.handle.as_ptr();
+        // SAFETY: the controller is live and the out-pointer is valid for writes.
+        let period = Handle::create_optional(|t, out| unsafe {
+            sys::dxfg_v4_SubscriptionController_getAggregationPeriod(t, c, out)
+        })?;
+        period.as_ref().map(TimePeriod::from_sdk).transpose()
+    }
+
+    /// Changes the aggregation period; `None` clears it (`setAggregationPeriod`), see
+    /// [`DXFeedSubscription::set_aggregation_period`](crate::DXFeedSubscription::set_aggregation_period).
+    #[doc(alias = "setAggregationPeriod")]
+    pub fn set_aggregation_period(&self, period: Option<TimePeriod>) -> Result<()> {
+        check_aggregation_period(period)?;
+        let period = period.map(TimePeriod::to_sdk).transpose()?;
+        let c = self.handle.as_ptr();
+        let p = period.as_ref().map_or(ptr::null_mut(), Handle::as_ptr);
+        // SAFETY: the controller and the period, if any, are live.
+        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setAggregationPeriod(t, c, p) })
+    }
+}
+
+impl fmt::Debug for SubscriptionController<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SubscriptionController").finish_non_exhaustive()
+    }
+}

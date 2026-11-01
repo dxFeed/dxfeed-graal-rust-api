@@ -12,7 +12,7 @@ use crate::isolate::{Thread, call};
 /// An executor of Java that runs the tasks of an endpoint, listener calls included (`java.util.concurrent.Executor`).
 ///
 /// Pass it to [`DXEndpointBuilder::with_executor`](crate::DXEndpointBuilder::with_executor), to the builders of the
-/// models, or to a [`SubscriptionController`](crate::model::SubscriptionController). A thread pool comes from
+/// models, or to a [`SubscriptionController`](crate::SubscriptionController). A thread pool comes from
 /// [`new_fixed_thread_pool`](Self::new_fixed_thread_pool) or
 /// [`new_scheduled_thread_pool`](Self::new_scheduled_thread_pool); a [`ManualExecutor`] is also an executor. Clones
 /// share one executor.

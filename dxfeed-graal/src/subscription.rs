@@ -10,12 +10,15 @@ use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
 use crate::event::{Event, EventKind, EventType, Events, SubscriptionItem, TimeSeriesEvent};
+use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::{ChangeListener, ChangeListeners, EventListener};
 use crate::observable::{Observable, ObservableSubscriptionChangeListener, event_types};
+use crate::subscription_controller::SubscriptionController;
 use crate::symbol::{Symbol, SymbolArena};
+use crate::time_period::{TimePeriod, TimePeriodInfo};
 
 /// Identifies a listener added by [`DXFeedSubscription::add_event_listener`], an `add_change_listener` method or
 /// [`DXEndpoint::add_state_listener`](crate::DXEndpoint::add_state_listener).
@@ -37,13 +40,14 @@ impl ListenerId {
 ///
 /// Dropping it removes and releases its event and change listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its
-/// listeners, so do not hold a lock their closures take while dropping it. It keeps its feed's endpoint open.
+/// listeners, so do not hold a lock their closures take while dropping it. It keeps the endpoints of the feeds it is
+/// attached to open.
 pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, EventListener)>>,
     change_listeners: ChangeListeners,
-    // Dropped last: it may close the endpoint.
-    _feed: DXFeed,
+    /// The feeds it is attached to; dropped last, as they may close their endpoints.
+    feeds: Mutex<Vec<DXFeed>>,
     _item: PhantomData<fn() -> E>,
 }
 
@@ -53,7 +57,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
             handle,
             listeners: Mutex::new(Vec::new()),
             change_listeners: ChangeListeners::new("a change listener of this subscription"),
-            _feed: feed,
+            feeds: Mutex::new(vec![feed]),
             _item: PhantomData,
         }
     }
@@ -210,12 +214,15 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         Ok(contains != 0)
     }
 
-    /// Closes the subscription: it detaches from the feed and its listeners get no new events, except possibly one
-    /// batch already under way. Closing again does nothing.
+    /// Closes the subscription: it detaches from the feeds and lets go of them, and its listeners get no new events,
+    /// except possibly one batch already under way. Closing again does nothing.
     pub fn close(&self) -> Result<()> {
+        let mut feeds = crate::lock(&self.feeds);
         let s = self.handle.as_ptr();
         // SAFETY: the subscription is live.
-        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })?;
+        feeds.clear();
+        Ok(())
     }
 
     /// The symbols of a list that `f` gets from the SDK, which is released after reading.
@@ -235,6 +242,110 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         Ok(symbols)
     }
 
+    /// The controller of the subscription (`getSubscriptionController`): it attaches the subscription to feeds and
+    /// detaches it, and changes how the events are delivered. Experimental in Java.
+    #[doc(alias = "getSubscriptionController")]
+    pub fn get_subscription_controller(&self) -> Result<SubscriptionController<'_>> {
+        let s = self.handle.as_ptr();
+        // SAFETY: the subscription is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeedSubscription_getSubscriptionController(t, s, out) })?;
+        Ok(SubscriptionController::new(handle, &self.feeds))
+    }
+
+    /// The executor that calls the listeners; `None` if it is the executor of the feed (`getExecutor`).
+    #[doc(alias = "getExecutor")]
+    pub fn get_executor(&self) -> Result<Option<Executor>> {
+        let s = self.handle.as_ptr();
+        // SAFETY: the subscription is live and the out-pointer is valid for writes.
+        let handle =
+            Handle::create_optional(|t, out| unsafe { sys::dxfg_v4_DXFeedSubscription_getExecutor(t, s, out) })?;
+        Ok(handle.map(Executor::from_handle))
+    }
+
+    /// Changes the executor that calls the listeners; `None` for the executor of the feed (`setExecutor`).
+    #[doc(alias = "setExecutor")]
+    pub fn set_executor(&self, executor: Option<&Executor>) -> Result<()> {
+        let s = self.handle.as_ptr();
+        let e = executor.map_or(ptr::null_mut(), |executor| executor.handle.as_ptr());
+        // SAFETY: the subscription and the executor are live.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_setExecutor(t, s, e) })
+    }
+
+    /// The aggregation period that was applied to the events delivered to the listeners: the larger of this period
+    /// and the aggregation period of the endpoint (`getAggregationPeriodInfo`). It is
+    /// [`TimePeriodInfo::UNKNOWN`] until the first events arrive.
+    #[doc(alias = "getAggregationPeriodInfo")]
+    pub fn get_aggregation_period_info(&self) -> Result<TimePeriodInfo> {
+        let (s, mut min, mut max) = (self.handle.as_ptr(), 0, 0);
+        // SAFETY: the subscription is live and the out-pointers are valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_getAggregationPeriodInfo(t, s, &mut min, &mut max) })?;
+        if min < 0 || max < 0 {
+            return Ok(TimePeriodInfo::UNKNOWN);
+        }
+        TimePeriodInfo::value_of(min, max)
+    }
+
+    /// How long the events are gathered before the listeners are called; `None` if no period was set
+    /// (`getAggregationPeriod`).
+    #[doc(alias = "getAggregationPeriod")]
+    pub fn get_aggregation_period(&self) -> Result<Option<TimePeriod>> {
+        let s = self.handle.as_ptr();
+        // SAFETY: the subscription is live and the out-pointer is valid for writes.
+        let period = Handle::create_optional(|t, out| unsafe {
+            sys::dxfg_v4_DXFeedSubscription_getAggregationPeriod(t, s, out)
+        })?;
+        period.as_ref().map(TimePeriod::from_sdk).transpose()
+    }
+
+    /// Changes the aggregation period; `None` clears it (`setAggregationPeriod`). The new period takes effect after
+    /// the current one elapses; the effective period is the larger of this period and the aggregation period of the
+    /// endpoint.
+    ///
+    /// Returns [`Error::InvalidArgument`] for a period longer than
+    /// [`AGGREGATION_PERIOD_MAX_VALUE`](DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE) and [`Error::Java`] for a
+    /// negative one.
+    #[doc(alias = "setAggregationPeriod")]
+    pub fn set_aggregation_period(&self, period: Option<TimePeriod>) -> Result<()> {
+        check_aggregation_period(period)?;
+        let period = period.map(TimePeriod::to_sdk).transpose()?;
+        let s = self.handle.as_ptr();
+        let p = period.as_ref().map_or(ptr::null_mut(), Handle::as_ptr);
+        // SAFETY: the subscription and the period, if any, are live.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_setAggregationPeriod(t, s, p) })
+    }
+
+    /// The most events of one call of a listener (`getEventsBatchLimit`):
+    /// [`OPTIMAL_BATCH_LIMIT`](DXFeedSubscription::OPTIMAL_BATCH_LIMIT), the default, lets the SDK choose and
+    /// [`MAX_BATCH_LIMIT`](DXFeedSubscription::MAX_BATCH_LIMIT) means no limit. The limit is not strict.
+    #[doc(alias = "getEventsBatchLimit")]
+    pub fn get_events_batch_limit(&self) -> Result<i32> {
+        let (s, mut limit) = (self.handle.as_ptr(), 0);
+        // SAFETY: the subscription is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_getEventsBatchLimit(t, s, &mut limit) })?;
+        Ok(limit)
+    }
+
+    /// Changes the most events of one call of a listener (`setEventsBatchLimit`); returns
+    /// [`Error::InvalidArgument`] for a negative limit.
+    #[doc(alias = "setEventsBatchLimit")]
+    pub fn set_events_batch_limit(&self, limit: i32) -> Result<()> {
+        check_events_batch_limit(limit)?;
+        let s = self.handle.as_ptr();
+        // SAFETY: the subscription is live.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_setEventsBatchLimit(t, s, limit) })
+    }
+
+    /// How many events were dropped because of a buffer overflow since the subscription was created
+    /// (`getTotalDroppedEvents`). Experimental in Java.
+    #[doc(alias = "getTotalDroppedEvents")]
+    pub fn get_total_dropped_events(&self) -> Result<i64> {
+        let (s, mut dropped) = (self.handle.as_ptr(), 0);
+        // SAFETY: the subscription is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_getTotalDroppedEvents(t, s, &mut dropped) })?;
+        Ok(dropped)
+    }
+
     fn lock(&self) -> MutexGuard<'_, Vec<(ListenerId, EventListener)>> {
         crate::lock(&self.listeners)
     }
@@ -251,6 +362,38 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         let removed = call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_removeEventListener(t, s, l) });
         listener.release();
         removed
+    }
+}
+
+impl DXFeedSubscription {
+    /// The longest aggregation period, 24 hours (`AGGREGATION_PERIOD_MAX_VALUE`).
+    pub const AGGREGATION_PERIOD_MAX_VALUE: TimePeriod = TimePeriod::value_of_millis(24 * 3600 * 1000);
+
+    /// The events batch limit that lets the SDK choose (`OPTIMAL_BATCH_LIMIT`).
+    pub const OPTIMAL_BATCH_LIMIT: i32 = 0;
+
+    /// The events batch limit that means no limit (`MAX_BATCH_LIMIT`).
+    pub const MAX_BATCH_LIMIT: i32 = i32::MAX;
+}
+
+/// Checks an events batch limit as Java does: it must not be negative.
+pub(crate) fn check_events_batch_limit(limit: i32) -> Result<()> {
+    if limit < 0 {
+        return Err(Error::InvalidArgument(format!(
+            "the events batch limit must not be negative, got: {limit}"
+        )));
+    }
+    Ok(())
+}
+
+/// Checks an aggregation period as Java does: it must not exceed
+/// [`DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE`].
+pub(crate) fn check_aggregation_period(period: Option<TimePeriod>) -> Result<()> {
+    match period {
+        Some(period) if period > DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE => Err(Error::InvalidArgument(
+            format!("Aggregation period is too large: {period}"),
+        )),
+        _ => Ok(()),
     }
 }
 

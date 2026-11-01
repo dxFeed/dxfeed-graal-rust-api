@@ -3,11 +3,9 @@
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
-use super::time_period;
 use crate::error::{Error, Result};
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource};
 use crate::executor::Executor;
@@ -15,7 +13,10 @@ use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 use crate::listener::{EventTxClosure, EventTxListener};
+use crate::subscription::{check_aggregation_period, check_events_batch_limit};
+use crate::subscription_controller::SubscriptionController;
 use crate::symbol::{Symbol, SymbolArena};
+use crate::time_period::TimePeriod;
 
 /// A model of the events of one symbol and one source that passes them to its listener in whole transactions and
 /// snapshots (`IndexedEventTxModel`). Build it with [`IndexedEventTxModel::new_builder`]; it needs a symbol.
@@ -110,10 +111,7 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModel<E> {
         // SAFETY: the model is live and the out-pointer is valid for writes.
         let handle =
             Handle::create(|t, out| unsafe { sys::dxfg_v4_IndexedEventTxModel_getSubscriptionController(t, m, out) })?;
-        Ok(SubscriptionController {
-            handle,
-            feeds: &self.feeds,
-        })
+        Ok(SubscriptionController::new(handle, &self.feeds))
     }
 
     /// Whether the model is closed (`isClosed`).
@@ -170,7 +168,7 @@ pub struct IndexedEventTxModelBuilder<E: IndexedEvent + EventKind> {
     symbol: Option<Symbol>,
     source: Option<IndexedEventSource>,
     events_batch_limit: Option<i32>,
-    aggregation_period: Option<Duration>,
+    aggregation_period: Option<TimePeriod>,
     executor: Option<Arc<Handle<sys::dxfg_v4_executor_t>>>,
     listener: Option<Box<EventTxClosure>>,
     _event: PhantomData<fn() -> E>,
@@ -212,10 +210,10 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModelBuilder<E> {
         self
     }
 
-    /// How long the model gathers the events before it calls the listener, in whole milliseconds
-    /// (`withAggregationPeriod`).
+    /// How long the model gathers the events before it calls the listener (`withAggregationPeriod`); at most
+    /// [`DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE`](crate::DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE).
     #[doc(alias = "withAggregationPeriod")]
-    pub fn with_aggregation_period(mut self, period: Duration) -> Self {
+    pub fn with_aggregation_period(mut self, period: TimePeriod) -> Self {
         self.aggregation_period = Some(period);
         self
     }
@@ -275,11 +273,13 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModelBuilder<E> {
         // SAFETY: the builder is live and the source lives in the arena during the call.
         call(|t| unsafe { sys::dxfg_v4_IndexedEventTxModel_Builder_withSource(t, b, source) })?;
         if let Some(limit) = self.events_batch_limit {
+            check_events_batch_limit(limit)?;
             // SAFETY: the builder is live.
             call(|t| unsafe { sys::dxfg_v4_IndexedEventTxModel_Builder_withEventsBatchLimit(t, b, limit) })?;
         }
         if let Some(period) = self.aggregation_period {
-            let period = time_period(period)?;
+            check_aggregation_period(Some(period))?;
+            let period = period.to_sdk()?;
             let p = period.as_ptr();
             // SAFETY: the builder and the period are live.
             call(|t| unsafe { sys::dxfg_v4_IndexedEventTxModel_Builder_withAggregationPeriod(t, b, p) })?;
@@ -325,108 +325,5 @@ impl<E: IndexedEvent + EventKind> fmt::Debug for IndexedEventTxModelBuilder<E> {
             .field("symbol", &self.symbol)
             .field("source", &self.source)
             .finish_non_exhaustive()
-    }
-}
-
-/// The controller of the subscription of an [`IndexedEventTxModel`] (`SubscriptionController`): it attaches the model
-/// to feeds and detaches it, and changes how the events are delivered.
-pub struct SubscriptionController<'a> {
-    handle: Handle<sys::dxfg_v4_subscription_controller_t>,
-    /// The feeds of the model, which keeps the feeds it is attached to.
-    feeds: &'a Mutex<Vec<DXFeed>>,
-}
-
-impl SubscriptionController<'_> {
-    /// Attaches the model to the feed; attaching it again does nothing (`attach`).
-    pub fn attach(&self, feed: &DXFeed) -> Result<()> {
-        let mut feeds = crate::lock(self.feeds);
-        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
-        // SAFETY: the controller and the feed are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_attach(t, c, f) })?;
-        if !feeds.iter().any(|kept| kept.same_as(feed)) {
-            feeds.push(feed.clone());
-        }
-        Ok(())
-    }
-
-    /// Detaches the model from the feed (`detach`).
-    pub fn detach(&self, feed: &DXFeed) -> Result<()> {
-        let mut feeds = crate::lock(self.feeds);
-        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
-        // SAFETY: the controller and the feed are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_detach(t, c, f) })?;
-        feeds.retain(|kept| !kept.same_as(feed));
-        Ok(())
-    }
-
-    /// The most events of one call of the listener (`getEventsBatchLimit`).
-    #[doc(alias = "getEventsBatchLimit")]
-    pub fn get_events_batch_limit(&self) -> Result<i32> {
-        let mut limit = 0;
-        let c = self.handle.as_ptr();
-        // SAFETY: the controller is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_getEventsBatchLimit(t, c, &mut limit) })?;
-        Ok(limit)
-    }
-
-    /// Changes the most events of one call of the listener (`setEventsBatchLimit`).
-    #[doc(alias = "setEventsBatchLimit")]
-    pub fn set_events_batch_limit(&self, limit: i32) -> Result<()> {
-        let c = self.handle.as_ptr();
-        // SAFETY: the controller is live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setEventsBatchLimit(t, c, limit) })
-    }
-
-    /// The executor that calls the listener; `None` if it is the executor of the feed (`getExecutor`).
-    #[doc(alias = "getExecutor")]
-    pub fn get_executor(&self) -> Result<Option<Executor>> {
-        let c = self.handle.as_ptr();
-        // SAFETY: the controller is live and the out-pointer is valid for writes.
-        let handle =
-            Handle::create_optional(|t, out| unsafe { sys::dxfg_v4_SubscriptionController_getExecutor(t, c, out) })?;
-        Ok(handle.map(Executor::from_handle))
-    }
-
-    /// Changes the executor that calls the listener; `None` for the executor of the feed (`setExecutor`).
-    #[doc(alias = "setExecutor")]
-    pub fn set_executor(&self, executor: Option<&Executor>) -> Result<()> {
-        let c = self.handle.as_ptr();
-        let e = executor.map_or(std::ptr::null_mut(), |executor| executor.handle.as_ptr());
-        // SAFETY: the controller and the executor are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setExecutor(t, c, e) })
-    }
-
-    /// How long the model gathers the events before it calls the listener; zero if it calls it at once
-    /// (`getAggregationPeriod`).
-    #[doc(alias = "getAggregationPeriod")]
-    pub fn get_aggregation_period(&self) -> Result<Duration> {
-        let c = self.handle.as_ptr();
-        // SAFETY: the controller is live and the out-pointer is valid for writes; Java has no period by default.
-        let period = Handle::create_optional(|t, out| unsafe {
-            sys::dxfg_v4_SubscriptionController_getAggregationPeriod(t, c, out)
-        })?;
-        let Some(period) = period else {
-            return Ok(Duration::ZERO);
-        };
-        let mut millis = 0;
-        let p = period.as_ptr();
-        // SAFETY: the period is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_TimePeriod_getTime(t, p, &mut millis) })?;
-        Ok(Duration::from_millis(u64::try_from(millis).unwrap_or(0)))
-    }
-
-    /// Changes the aggregation period, in whole milliseconds (`setAggregationPeriod`).
-    #[doc(alias = "setAggregationPeriod")]
-    pub fn set_aggregation_period(&self, period: Duration) -> Result<()> {
-        let period = time_period(period)?;
-        let (c, p) = (self.handle.as_ptr(), period.as_ptr());
-        // SAFETY: the controller and the period are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setAggregationPeriod(t, c, p) })
-    }
-}
-
-impl fmt::Debug for SubscriptionController<'_> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("SubscriptionController").finish_non_exhaustive()
     }
 }

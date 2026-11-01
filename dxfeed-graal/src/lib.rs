@@ -126,6 +126,7 @@ mod promise;
 mod publisher;
 pub mod schedule;
 mod subscription;
+mod subscription_controller;
 mod symbol;
 pub mod system;
 mod time_format;
@@ -146,6 +147,7 @@ pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionC
 pub use promise::{Promise, PromiseResult};
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
+pub use subscription_controller::SubscriptionController;
 pub use symbol::Symbol;
 pub use time_format::TimeFormat;
 pub use time_period::{TimePeriod, TimePeriodInfo};

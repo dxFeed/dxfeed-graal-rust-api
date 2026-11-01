@@ -25,7 +25,6 @@
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
@@ -36,12 +35,14 @@ use crate::feed::DXFeed;
 use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, call};
 use crate::listener::{TxClosure, TxListener};
+use crate::subscription::check_aggregation_period;
 use crate::symbol::{Symbol, SymbolArena};
+use crate::time_period::TimePeriod;
 
 mod indexed_event;
 mod market_depth;
 
-pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder, SubscriptionController};
+pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder};
 pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
 
 type Thread = *mut sys::graal_isolatethread_t;
@@ -153,7 +154,7 @@ struct Settings {
     snapshot_processing: Option<bool>,
     feed: Option<DXFeed>,
     symbol: Option<Symbol>,
-    aggregation_period: Option<Duration>,
+    aggregation_period: Option<TimePeriod>,
     executor: Option<Arc<Handle<sys::dxfg_v4_executor_t>>>,
     listener: Option<Box<TxClosure>>,
 }
@@ -182,7 +183,8 @@ impl Settings {
             builder = with(builder, K::WITH_SYMBOL, symbol)?;
         }
         if let Some(period) = self.aggregation_period {
-            let period = time_period(period)?;
+            check_aggregation_period(Some(period))?;
+            let period = period.to_sdk()?;
             builder = with(builder, K::WITH_AGGREGATION_PERIOD, period.as_ptr())?;
         }
         if let Some(executor) = &self.executor {
@@ -221,11 +223,6 @@ fn with<B: SdkHandle, A>(builder: Handle<B>, set: With<B, A>, value: A) -> Resul
     let b = builder.as_ptr();
     // SAFETY: the builder is live, the value is live during the call and the out-pointer is valid for writes.
     Handle::create(|t, out| unsafe { set(t, b, value, out) })
-}
-
-/// The Java `TimePeriod` of a duration, in whole milliseconds.
-fn time_period(period: Duration) -> Result<Handle<sys::dxfg_v4_time_period_t>> {
-    crate::TimePeriod::try_from(period)?.to_sdk()
 }
 
 /// What both kinds of models do, around the SDK model.
@@ -268,8 +265,9 @@ impl<K: Kind> Core<K> {
         Ok(())
     }
 
-    fn set_aggregation_period(&self, period: Duration) -> Result<()> {
-        let period = time_period(period)?;
+    fn set_aggregation_period(&self, period: TimePeriod) -> Result<()> {
+        check_aggregation_period(Some(period))?;
+        let period = period.to_sdk()?;
         let (m, p) = (self.handle.as_ptr(), period.as_ptr());
         // SAFETY: the model and the period are live.
         call(|t| unsafe { K::SET_AGGREGATION_PERIOD(t, m, p) })
@@ -338,10 +336,10 @@ macro_rules! builder_methods {
             self
         }
 
-        /// The period over which the events are aggregated, in whole milliseconds; zero, the default, for none
-        /// (`withAggregationPeriod`).
+        /// The period over which the events are aggregated; zero, the default, for none (`withAggregationPeriod`).
+        /// At most [`AGGREGATION_PERIOD_MAX_VALUE`](crate::DXFeedSubscription::AGGREGATION_PERIOD_MAX_VALUE).
         #[doc(alias = "withAggregationPeriod")]
-        pub fn with_aggregation_period(mut self, period: Duration) -> Self {
+        pub fn with_aggregation_period(mut self, period: TimePeriod) -> Self {
             self.settings.aggregation_period = Some(period);
             self
         }
@@ -397,9 +395,9 @@ macro_rules! model_methods {
             self.core.detach(feed)
         }
 
-        /// Changes the period over which the events are aggregated, in whole milliseconds (`setAggregationPeriod`).
+        /// Changes the period over which the events are aggregated (`setAggregationPeriod`).
         #[doc(alias = "setAggregationPeriod")]
-        pub fn set_aggregation_period(&self, period: Duration) -> Result<()> {
+        pub fn set_aggregation_period(&self, period: TimePeriod) -> Result<()> {
             self.core.set_aggregation_period(period)
         }
 

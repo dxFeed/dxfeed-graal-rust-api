@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use dxfeed_graal::event::{EventFlags, Order, OrderSource, Side};
 use dxfeed_graal::model::IndexedEventTxModel;
-use dxfeed_graal::{Error, Executor, Symbol};
+use dxfeed_graal::{Error, Executor, Symbol, TimePeriod};
 use support::Hub;
 
 /// One listener call: the indices of the orders within their source and whether they are a snapshot.
@@ -128,8 +128,18 @@ fn the_subscription_controller_changes_the_delivery() {
     let controller = model.get_subscription_controller().unwrap();
     controller.set_events_batch_limit(7).unwrap();
     assert_eq!(controller.get_events_batch_limit().unwrap(), 7);
-    controller.set_aggregation_period(Duration::from_millis(250)).unwrap();
-    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::from_millis(250));
+    controller.set_events_batch_limit(-1).unwrap_err();
+    assert_eq!(controller.get_events_batch_limit().unwrap(), 7);
+    let period = TimePeriod::value_of_millis(250);
+    controller.set_aggregation_period(Some(period)).unwrap();
+    assert_eq!(controller.get_aggregation_period().unwrap(), Some(period));
+    let too_long = TimePeriod::value_of_millis(24 * 3600 * 1000 + 1);
+    assert!(matches!(
+        controller.set_aggregation_period(Some(too_long)),
+        Err(Error::InvalidArgument(_))
+    ));
+    controller.set_aggregation_period(None).unwrap();
+    assert_eq!(controller.get_aggregation_period().unwrap(), None);
 }
 
 #[test]
@@ -176,14 +186,17 @@ fn the_builder_sets_the_delivery() {
     let model = IndexedEventTxModel::<Order>::new_builder()
         .with_symbol("EVENT")
         .with_events_batch_limit(3)
-        .with_aggregation_period(Duration::from_millis(100))
+        .with_aggregation_period(TimePeriod::value_of_millis(100))
         .with_listener(|_, _| {})
         .build()
         .unwrap();
     assert_eq!(model.get_source().unwrap(), OrderSource::DEFAULT);
     let controller = model.get_subscription_controller().unwrap();
     assert_eq!(controller.get_events_batch_limit().unwrap(), 3);
-    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::from_millis(100));
+    assert_eq!(
+        controller.get_aggregation_period().unwrap(),
+        Some(TimePeriod::value_of_millis(100))
+    );
 }
 
 #[test]
@@ -211,10 +224,10 @@ fn an_indexed_symbol_sets_the_source() {
 }
 
 #[test]
-fn the_aggregation_period_is_zero_by_default() {
+fn the_aggregation_period_is_unset_by_default() {
     let (model, _calls) = model(None);
     let controller = model.get_subscription_controller().unwrap();
-    assert_eq!(controller.get_aggregation_period().unwrap(), Duration::ZERO);
+    assert_eq!(controller.get_aggregation_period().unwrap(), None);
 }
 
 #[test]
