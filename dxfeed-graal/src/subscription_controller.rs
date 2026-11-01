@@ -26,34 +26,46 @@ pub struct SubscriptionController<'a> {
     handle: Handle<sys::dxfg_v4_subscription_controller_t>,
     /// The feeds of the subscription or model, which keeps the feeds it is attached to.
     feeds: &'a Mutex<Vec<DXFeed>>,
+    /// The subscription, if the controller is that of a subscription: a closed one keeps no feed.
+    subscription: Option<&'a Handle<sys::dxfg_v4_subscription_t>>,
 }
 
 impl<'a> SubscriptionController<'a> {
-    pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_controller_t>, feeds: &'a Mutex<Vec<DXFeed>>) -> Self {
-        SubscriptionController { handle, feeds }
+    pub(crate) fn new(
+        handle: Handle<sys::dxfg_v4_subscription_controller_t>,
+        feeds: &'a Mutex<Vec<DXFeed>>,
+        subscription: Option<&'a Handle<sys::dxfg_v4_subscription_t>>,
+    ) -> Self {
+        SubscriptionController {
+            handle,
+            feeds,
+            subscription,
+        }
     }
 
-    /// Attaches the subscription to the feed; attaching it again does nothing (`attach`).
+    /// Attaches the subscription to the feed; attaching it again, or a closed subscription, does nothing (`attach`).
     pub fn attach(&self, feed: &DXFeed) -> Result<()> {
-        // The lock keeps the SDK call and the kept feeds in step with a concurrent `detach`.
-        let mut feeds = crate::lock(self.feeds);
-        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
-        // SAFETY: the controller and the feed are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_attach(t, c, f) })?;
-        if !feeds.iter().any(|kept| kept.same_as(feed)) {
-            feeds.push(feed.clone());
-        }
-        Ok(())
+        let c = self.handle.as_ptr();
+        attach_feed(self.feeds, feed, |f| {
+            // SAFETY: the controller and the feed are live.
+            call(|t| unsafe { sys::dxfg_v4_SubscriptionController_attach(t, c, f) })?;
+            let Some(subscription) = self.subscription else {
+                return Ok(true);
+            };
+            let (s, mut closed) = (subscription.as_ptr(), 0);
+            // SAFETY: the subscription is live and the out-pointer is valid for writes.
+            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_isClosed(t, s, &mut closed) })?;
+            Ok(closed == 0)
+        })
     }
 
     /// Detaches the subscription from the feed (`detach`).
     pub fn detach(&self, feed: &DXFeed) -> Result<()> {
-        let mut feeds = crate::lock(self.feeds);
-        let (c, f) = (self.handle.as_ptr(), feed.as_ptr());
-        // SAFETY: the controller and the feed are live.
-        call(|t| unsafe { sys::dxfg_v4_SubscriptionController_detach(t, c, f) })?;
-        feeds.retain(|kept| !kept.same_as(feed));
-        Ok(())
+        let c = self.handle.as_ptr();
+        detach_feed(self.feeds, feed, |f| {
+            // SAFETY: the controller and the feed are live.
+            call(|t| unsafe { sys::dxfg_v4_SubscriptionController_detach(t, c, f) })
+        })
     }
 
     /// The most events of one call of a listener (`getEventsBatchLimit`), see
@@ -119,6 +131,32 @@ impl<'a> SubscriptionController<'a> {
         // SAFETY: the controller and the period, if any, are live.
         call(|t| unsafe { sys::dxfg_v4_SubscriptionController_setAggregationPeriod(t, c, p) })
     }
+}
+
+/// Attaches a subscription or model to `feed` with `sdk`, which returns whether to keep the feed, and keeps it in
+/// `feeds`. The lock keeps the SDK call and the kept feeds in step with a concurrent detach.
+pub(crate) fn attach_feed(
+    feeds: &Mutex<Vec<DXFeed>>,
+    feed: &DXFeed,
+    sdk: impl FnOnce(*mut sys::dxfg_v4_feed_t) -> Result<bool>,
+) -> Result<()> {
+    let mut kept = crate::lock(feeds);
+    if sdk(feed.as_ptr())? && !kept.iter().any(|kept| kept.same_as(feed)) {
+        kept.push(feed.clone());
+    }
+    Ok(())
+}
+
+/// Detaches a subscription or model from `feed` with `sdk` and lets go of the feed in `feeds`.
+pub(crate) fn detach_feed(
+    feeds: &Mutex<Vec<DXFeed>>,
+    feed: &DXFeed,
+    sdk: impl FnOnce(*mut sys::dxfg_v4_feed_t) -> Result<()>,
+) -> Result<()> {
+    let mut kept = crate::lock(feeds);
+    sdk(feed.as_ptr())?;
+    kept.retain(|kept| !kept.same_as(feed));
+    Ok(())
 }
 
 impl fmt::Debug for SubscriptionController<'_> {

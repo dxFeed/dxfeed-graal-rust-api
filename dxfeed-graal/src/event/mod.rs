@@ -129,6 +129,13 @@ macro_rules! event_types {
                 }
             }
 
+            /// Whether the type is a [`TimeSeriesEvent`].
+            pub(crate) fn is_time_series(self) -> bool {
+                match self {
+                    $( EventType::$name => if_trait!(TimeSeriesEvent [$($trait_)*] { true } { false }), )*
+                }
+            }
+
             pub(crate) fn to_sys(self) -> sys::dxfg_event_clazz_t {
                 match self {
                     $( EventType::$name => <$name as Table>::CLASS, )*

@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use dxfeed_graal::event::{Order, Quote, TimeAndSale};
 use dxfeed_graal::model::{IndexedTxModel, TimeSeriesTxModel};
 use dxfeed_graal::schedule::Schedule;
-use dxfeed_graal::{DXEndpoint, Role, live_handles};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Role, live_handles};
 
 thread_local! {
     static KEPT: RefCell<Option<DXEndpoint>> = const { RefCell::new(None) };
@@ -55,6 +55,19 @@ fn handles_are_released() {
         assert_eq!(live_handles(), before + 2 + 5);
         let _first = sessions[0].get_day().unwrap();
         assert_eq!(live_handles(), before + 2 + 5 + 1);
+    }
+    assert_eq!(live_handles(), before);
+
+    // A standalone subscription owns one handle, attached or not; a detached one keeps no endpoint.
+    {
+        let subscription = DXFeedSubscription::<Quote>::new().unwrap();
+        assert_eq!(live_handles(), before + 1);
+        let feed = DXEndpoint::create_with_role(Role::LocalHub).unwrap().get_feed();
+        subscription.attach(&feed).unwrap();
+        subscription.detach(&feed).unwrap();
+        drop(feed);
+        assert_eq!(live_handles(), before + 1);
+        drop(subscription);
     }
     assert_eq!(live_handles(), before);
 

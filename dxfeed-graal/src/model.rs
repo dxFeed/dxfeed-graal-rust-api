@@ -36,6 +36,7 @@ use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, call};
 use crate::listener::{TxClosure, TxListener};
 use crate::subscription::check_aggregation_period;
+use crate::subscription_controller::{attach_feed, detach_feed};
 use crate::symbol::{Symbol, SymbolArena};
 use crate::time_period::TimePeriod;
 
@@ -245,24 +246,18 @@ impl<K: Kind> Core<K> {
     }
 
     fn attach(&self, feed: &DXFeed) -> Result<()> {
-        // The lock keeps the SDK call and the kept feeds in step with a concurrent `detach`.
-        let mut feeds = crate::lock(&self.feeds);
-        let (m, f) = (self.handle.as_ptr(), feed.as_ptr());
-        // SAFETY: the model and the feed are live.
-        call(|t| unsafe { K::ATTACH(t, m, f) })?;
-        if !feeds.iter().any(|kept| kept.same_as(feed)) {
-            feeds.push(feed.clone());
-        }
-        Ok(())
+        let m = self.handle.as_ptr();
+        attach_feed(&self.feeds, feed, |f| {
+            // SAFETY: the model and the feed are live.
+            call(|t| unsafe { K::ATTACH(t, m, f) })?;
+            Ok(true)
+        })
     }
 
     fn detach(&self, feed: &DXFeed) -> Result<()> {
-        let mut feeds = crate::lock(&self.feeds);
-        let (m, f) = (self.handle.as_ptr(), feed.as_ptr());
+        let m = self.handle.as_ptr();
         // SAFETY: the model and the feed are live.
-        call(|t| unsafe { K::DETACH(t, m, f) })?;
-        feeds.retain(|kept| !kept.same_as(feed));
-        Ok(())
+        detach_feed(&self.feeds, feed, |f| call(|t| unsafe { K::DETACH(t, m, f) }))
     }
 
     fn set_aggregation_period(&self, period: TimePeriod) -> Result<()> {

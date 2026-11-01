@@ -3,13 +3,13 @@
 use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
 use std::sync::{Mutex, MutexGuard};
 
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
-use crate::event::{Event, EventKind, EventType, Events, SubscriptionItem, TimeSeriesEvent};
+use crate::event::{Event, EventKind, EventType, Events, SubscriptionItem};
 use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
@@ -36,7 +36,9 @@ impl ListenerId {
 /// A subscription of a [`DXFeed`] to events for some symbols (`DXFeedSubscription`).
 ///
 /// `E` is what its listeners receive: an event type such as [`Quote`](crate::event::Quote) for a subscription created
-/// with [`DXFeed::create_subscription`], [`Event`] for one created with [`DXFeed::create_subscription_with_types`].
+/// with [`DXFeed::create_subscription`] or [`new`](Self::new), [`Event`] for one created with
+/// [`DXFeed::create_subscription_with_types`] or [`new_with_types`](DXFeedSubscription::new_with_types). One created
+/// without a feed receives events once it is [attached](Self::attach) to one.
 ///
 /// Dropping it removes and releases its event and change listeners, then closes it. A listener's closure is not called after the
 /// listener is released; dropping the subscription from another thread therefore waits for running calls of its
@@ -51,15 +53,60 @@ pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     _item: PhantomData<fn() -> E>,
 }
 
+impl<E: EventKind> DXFeedSubscription<E> {
+    /// Creates a subscription to events of type `E` that is attached to no feed (`new DXFeedSubscription(Class)`):
+    /// attach it with [`attach`](Self::attach) or [`DXFeed::attach_subscription`].
+    pub fn new() -> Result<Self> {
+        // SAFETY: the out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeedSubscription_new(t, E::TYPE.to_sys(), out) })?;
+        Ok(DXFeedSubscription::from_sdk(handle, Vec::new()))
+    }
+}
+
+impl DXFeedSubscription<Event> {
+    /// Creates a subscription to events of `types` that is attached to no feed; its listeners receive
+    /// [`EventRef`](crate::EventRef) (`new DXFeedSubscription(Class...)`).
+    ///
+    /// Returns [`Error::InvalidArgument`] if `types` is empty.
+    pub fn new_with_types(types: &[EventType]) -> Result<Self> {
+        let mut classes = ClassList::new(types)?;
+        let list = classes.as_sys();
+        // SAFETY: the list is live and the SDK only reads it; the out-pointer is valid for writes.
+        let handle =
+            Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeedSubscription_newWithEventTypes(t, list, out) })?;
+        Ok(DXFeedSubscription::from_sdk(handle, Vec::new()))
+    }
+}
+
 impl<E: SubscriptionItem> DXFeedSubscription<E> {
-    pub(crate) fn new(handle: Handle<sys::dxfg_v4_subscription_t>, feed: DXFeed) -> Self {
+    pub(crate) fn from_sdk(handle: Handle<sys::dxfg_v4_subscription_t>, feeds: Vec<DXFeed>) -> Self {
         DXFeedSubscription {
             handle,
             listeners: Mutex::new(Vec::new()),
             change_listeners: ChangeListeners::new("a change listener of this subscription"),
-            feeds: Mutex::new(vec![feed]),
+            feeds: Mutex::new(feeds),
             _item: PhantomData,
         }
+    }
+
+    pub(crate) fn as_ptr(&self) -> *mut sys::dxfg_v4_subscription_t {
+        self.handle.as_ptr()
+    }
+
+    /// The feeds it is attached to.
+    pub(crate) fn feeds(&self) -> &Mutex<Vec<DXFeed>> {
+        &self.feeds
+    }
+
+    /// Attaches the subscription to `feed`, as [`DXFeed::attach_subscription`] does (`attach`). A subscription can be
+    /// attached to several feeds; its listeners cannot tell which feed an event came from.
+    pub fn attach(&self, feed: &DXFeed) -> Result<()> {
+        feed.attach_subscription(self)
+    }
+
+    /// Detaches the subscription from `feed`, as [`DXFeed::detach_subscription`] does (`detach`).
+    pub fn detach(&self, feed: &DXFeed) -> Result<()> {
+        feed.detach_subscription(self)
     }
 
     /// Adds a listener; `f` is called with each batch of received events, on a thread of the endpoint's executor.
@@ -250,7 +297,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         // SAFETY: the subscription is live and the out-pointer is valid for writes.
         let handle =
             Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeedSubscription_getSubscriptionController(t, s, out) })?;
-        Ok(SubscriptionController::new(handle, &self.feeds))
+        Ok(SubscriptionController::new(handle, &self.feeds, Some(&self.handle)))
     }
 
     /// The executor that calls the listeners; `None` if it is the executor of the feed (`getExecutor`).
@@ -376,6 +423,43 @@ impl DXFeedSubscription {
     pub const MAX_BATCH_LIMIT: i32 = i32::MAX;
 }
 
+/// An SDK list of the classes of event types, which the SDK only reads.
+pub(crate) struct ClassList {
+    _classes: Vec<sys::dxfg_event_clazz_t>,
+    pointers: Vec<*mut sys::dxfg_event_clazz_t>,
+    list: sys::dxfg_v4_event_clazz_list,
+}
+
+impl ClassList {
+    /// The list of `types`; returns [`Error::InvalidArgument`] if `types` is empty.
+    pub(crate) fn new(types: &[EventType]) -> Result<Self> {
+        if types.is_empty() {
+            return Err(Error::InvalidArgument(
+                "a subscription needs at least one event type".into(),
+            ));
+        }
+        let mut classes: Vec<sys::dxfg_event_clazz_t> = types.iter().map(|t| t.to_sys()).collect();
+        let pointers: Vec<*mut sys::dxfg_event_clazz_t> = classes.iter_mut().map(|c| c as *mut _).collect();
+        Ok(ClassList {
+            _classes: classes,
+            pointers,
+            list: sys::dxfg_v4_event_clazz_list {
+                size: 0,
+                elements: ptr::null_mut(),
+            },
+        })
+    }
+
+    /// The SDK list, valid while `self` lives and is not used again.
+    pub(crate) fn as_sys(&mut self) -> *mut sys::dxfg_v4_event_clazz_list {
+        self.list = sys::dxfg_v4_event_clazz_list {
+            size: self.pointers.len() as i32,
+            elements: self.pointers.as_mut_ptr(),
+        };
+        &mut self.list
+    }
+}
+
 /// Checks an events batch limit as Java does: it must not be negative.
 pub(crate) fn check_events_batch_limit(limit: i32) -> Result<()> {
     if limit < 0 {
@@ -439,36 +523,62 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
 }
 
 /// A subscription to the time-series events of type `E` from a time on (`DXFeedTimeSeriesSubscription`), created with
-/// [`DXFeed::create_time_series_subscription`].
+/// [`DXFeed::create_time_series_subscription`] or, for several event types and [`Event`],
+/// [`DXFeed::create_time_series_subscription_with_types`].
 ///
 /// It is a [`DXFeedSubscription`], whose methods it has through `Deref`, that wraps each symbol it adds in a
 /// [`Symbol::TimeSeriesSubscription`] from the time of [`set_from_time`](Self::set_from_time).
-pub struct DXFeedTimeSeriesSubscription<E: TimeSeriesEvent + EventKind> {
+pub struct DXFeedTimeSeriesSubscription<E: SubscriptionItem = Event> {
     subscription: DXFeedSubscription<E>,
+    /// The time of the last `set_from_time`, read without a lock: change listeners may read it while it is set.
+    from_time: AtomicI64,
+    /// Serializes `set_from_time`, which keeps `from_time` in step with the SDK.
+    setting: Mutex<()>,
 }
 
-impl<E: TimeSeriesEvent + EventKind> DXFeedTimeSeriesSubscription<E> {
+impl<E: SubscriptionItem> DXFeedTimeSeriesSubscription<E> {
     pub(crate) fn new(subscription: DXFeedSubscription<E>) -> Self {
-        DXFeedTimeSeriesSubscription { subscription }
+        DXFeedTimeSeriesSubscription {
+            subscription,
+            from_time: AtomicI64::new(i64::MAX),
+            setting: Mutex::new(()),
+        }
+    }
+
+    /// The time, in milliseconds since the Unix epoch, of the first events (`getFromTime`): that of the last
+    /// [`set_from_time`](Self::set_from_time), or `i64::MAX` before it, when no events come.
+    ///
+    /// The SDK has no such getter, so this is the time this value was given.
+    #[doc(alias = "getFromTime")]
+    pub fn get_from_time(&self) -> i64 {
+        self.from_time.load(Ordering::Acquire)
     }
 
     /// Sets the time, in milliseconds since the Unix epoch, of the first events of all its symbols, those added before
     /// and after (`setFromTime`).
+    ///
+    /// As in Java, the change listeners see the new time; they must not call this method of the same subscription.
     #[doc(alias = "setFromTime")]
     pub fn set_from_time(&self, from_time: i64) -> Result<()> {
+        let _setting = crate::lock(&self.setting);
+        let previous = self.from_time.swap(from_time, Ordering::AcqRel);
         let s = self
             .subscription
             .handle
             .as_ptr()
             .cast::<sys::dxfg_v4_time_series_subscription_t>();
         // SAFETY: the subscription was created as a time-series subscription and is live.
-        call(|t| unsafe { sys::dxfg_v4_DXFeedTimeSeriesSubscription_setFromTime(t, s, from_time) })
+        let result = call(|t| unsafe { sys::dxfg_v4_DXFeedTimeSeriesSubscription_setFromTime(t, s, from_time) });
+        if result.is_err() {
+            self.from_time.store(previous, Ordering::Release);
+        }
+        result
     }
 }
 
-impl<E: TimeSeriesEvent + EventKind> crate::observable::sealed::Sealed for DXFeedTimeSeriesSubscription<E> {}
+impl<E: SubscriptionItem> crate::observable::sealed::Sealed for DXFeedTimeSeriesSubscription<E> {}
 
-impl<E: TimeSeriesEvent + EventKind> Observable for DXFeedTimeSeriesSubscription<E> {
+impl<E: SubscriptionItem> Observable for DXFeedTimeSeriesSubscription<E> {
     fn is_closed(&self) -> Result<bool> {
         self.subscription.is_closed()
     }
@@ -490,7 +600,7 @@ impl<E: TimeSeriesEvent + EventKind> Observable for DXFeedTimeSeriesSubscription
     }
 }
 
-impl<E: TimeSeriesEvent + EventKind> Deref for DXFeedTimeSeriesSubscription<E> {
+impl<E: SubscriptionItem> Deref for DXFeedTimeSeriesSubscription<E> {
     type Target = DXFeedSubscription<E>;
 
     fn deref(&self) -> &DXFeedSubscription<E> {

@@ -111,7 +111,7 @@ impl<E: IndexedEvent + EventKind> IndexedEventTxModel<E> {
         // SAFETY: the model is live and the out-pointer is valid for writes.
         let handle =
             Handle::create(|t, out| unsafe { sys::dxfg_v4_IndexedEventTxModel_getSubscriptionController(t, m, out) })?;
-        Ok(SubscriptionController::new(handle, &self.feeds))
+        Ok(SubscriptionController::new(handle, &self.feeds, None))
     }
 
     /// Whether the model is closed (`isClosed`).

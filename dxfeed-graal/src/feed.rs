@@ -6,13 +6,16 @@ use dxfeed_graal_sys as sys;
 
 use crate::endpoint::{DXEndpoint, EndpointState};
 use crate::error::{Error, JavaException, Result};
+use crate::event::SubscriptionItem;
 use crate::event::sdk_event::{SdkSymbol, needs_candle_symbol, take_event};
 use crate::event::{
     Event, EventKind, EventType, IndexedEvent, IndexedEventSource, LastingEvent, SysEvents, TimeSeriesEvent,
 };
 use crate::handle::Handle;
+use crate::isolate::call;
 use crate::promise::Promise;
-use crate::subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription};
+use crate::subscription::{ClassList, DXFeedSubscription, DXFeedTimeSeriesSubscription};
+use crate::subscription_controller::{attach_feed, detach_feed};
 use crate::symbol::{Symbol, SymbolArena};
 
 /// The feed of a [`DXEndpoint`](crate::DXEndpoint): creates subscriptions to events and returns the last events of the
@@ -82,7 +85,7 @@ impl DXFeed {
         // SAFETY: the feed is live and the out-pointer is valid for writes.
         let handle =
             Handle::create(|t, out| unsafe { sys::dxfg_v4_DXFeed_createSubscription(t, feed, E::TYPE.to_sys(), out) })?;
-        Ok(DXFeedSubscription::new(handle, self.clone()))
+        Ok(DXFeedSubscription::from_sdk(handle, vec![self.clone()]))
     }
 
     /// Creates a subscription to events of `types`, attached to this feed; its listeners receive
@@ -91,23 +94,14 @@ impl DXFeed {
     /// Returns [`Error::InvalidArgument`] if `types` is empty.
     #[doc(alias = "createSubscription")]
     pub fn create_subscription_with_types(&self, types: &[EventType]) -> Result<DXFeedSubscription<Event>> {
-        if types.is_empty() {
-            return Err(Error::InvalidArgument(
-                "a subscription needs at least one event type".into(),
-            ));
-        }
-        let mut classes: Vec<sys::dxfg_event_clazz_t> = types.iter().map(|t| t.to_sys()).collect();
-        let mut pointers: Vec<*mut sys::dxfg_event_clazz_t> = classes.iter_mut().map(|c| c as *mut _).collect();
-        let mut list = sys::dxfg_v4_event_clazz_list {
-            size: pointers.len() as i32,
-            elements: pointers.as_mut_ptr(),
-        };
+        let mut classes = ClassList::new(types)?;
+        let list = classes.as_sys();
         let feed = self.state.feed.as_ptr();
         // SAFETY: the feed and the list are live; the SDK only reads the list. The out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe {
-            sys::dxfg_v4_DXFeed_createSubscriptionWithEventTypes(t, feed, &mut list, out)
+            sys::dxfg_v4_DXFeed_createSubscriptionWithEventTypes(t, feed, list, out)
         })?;
-        Ok(DXFeedSubscription::new(handle, self.clone()))
+        Ok(DXFeedSubscription::from_sdk(handle, vec![self.clone()]))
     }
 
     /// Creates a subscription to the time-series events of type `E`, such as [`Candle`](crate::event::Candle), from
@@ -137,10 +131,78 @@ impl DXFeed {
         let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_subscription_t| unsafe {
             sys::dxfg_v4_DXFeed_createTimeSeriesSubscription(t, feed, E::TYPE.to_sys(), out.cast())
         })?;
-        Ok(DXFeedTimeSeriesSubscription::new(DXFeedSubscription::new(
+        Ok(DXFeedTimeSeriesSubscription::new(DXFeedSubscription::from_sdk(
             handle,
-            self.clone(),
+            vec![self.clone()],
         )))
+    }
+
+    /// Creates a subscription to the time-series events of `types` from a time on, attached to this feed; its
+    /// listeners receive [`EventRef`](crate::EventRef) (`createTimeSeriesSubscription`).
+    ///
+    /// Returns [`Error::InvalidArgument`] if `types` is empty or holds a type that is not a
+    /// [`TimeSeriesEvent`](crate::event::TimeSeriesEvent).
+    #[doc(alias = "createTimeSeriesSubscription")]
+    pub fn create_time_series_subscription_with_types(
+        &self,
+        types: &[EventType],
+    ) -> Result<DXFeedTimeSeriesSubscription<Event>> {
+        if let Some(event_type) = types.iter().find(|event_type| !event_type.is_time_series()) {
+            return Err(Error::InvalidArgument(format!(
+                "{event_type} is not a time-series event type"
+            )));
+        }
+        let mut classes = ClassList::new(types)?;
+        let list = classes.as_sys();
+        let feed = self.state.feed.as_ptr();
+        // SAFETY: the feed and the list are live; the SDK only reads the list. The out-pointer is valid for writes; a
+        // time-series subscription starts with the fields of a subscription.
+        let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_subscription_t| unsafe {
+            sys::dxfg_v4_DXFeed_createTimeSeriesSubscriptionWithEventTypes(t, feed, list, out.cast())
+        })?;
+        Ok(DXFeedTimeSeriesSubscription::new(DXFeedSubscription::from_sdk(
+            handle,
+            vec![self.clone()],
+        )))
+    }
+
+    /// Attaches `subscription` to this feed, which then delivers the events of its symbols to its listeners; attaching
+    /// it again, or a closed subscription, does nothing (`attachSubscription`). The subscription keeps the endpoint of
+    /// the feed open until it is detached or closed.
+    #[doc(alias = "attachSubscription")]
+    pub fn attach_subscription<E: SubscriptionItem>(&self, subscription: &DXFeedSubscription<E>) -> Result<()> {
+        let s = subscription.as_ptr();
+        attach_feed(subscription.feeds(), self, |f| {
+            // SAFETY: the feed and the subscription are live.
+            call(|t| unsafe { sys::dxfg_v4_DXFeed_attachSubscription(t, f, s) })?;
+            Ok(!subscription.is_closed()?)
+        })
+    }
+
+    /// Detaches `subscription` from this feed (`detachSubscription`); its symbols stay. Does nothing if it is not
+    /// attached to this feed.
+    #[doc(alias = "detachSubscription")]
+    pub fn detach_subscription<E: SubscriptionItem>(&self, subscription: &DXFeedSubscription<E>) -> Result<()> {
+        let s = subscription.as_ptr();
+        detach_feed(subscription.feeds(), self, |f| {
+            // SAFETY: the feed and the subscription are live.
+            call(|t| unsafe { sys::dxfg_v4_DXFeed_detachSubscription(t, f, s) })
+        })
+    }
+
+    /// Detaches `subscription` from this feed and clears the data the feed keeps for it
+    /// (`detachSubscriptionAndClear`); its symbols stay. Java publishes empty events for that, which the SDK may not
+    /// deliver to the listeners. Does nothing if it is not attached to this feed.
+    #[doc(alias = "detachSubscriptionAndClear")]
+    pub fn detach_subscription_and_clear<E: SubscriptionItem>(
+        &self,
+        subscription: &DXFeedSubscription<E>,
+    ) -> Result<()> {
+        let s = subscription.as_ptr();
+        detach_feed(subscription.feeds(), self, |f| {
+            // SAFETY: the feed and the subscription are live.
+            call(|t| unsafe { sys::dxfg_v4_DXFeed_detachSubscriptionAndClear(t, f, s) })
+        })
     }
 
     /// Requests the time-series events of type `E` for `symbol` from `from_time` to `to_time`, in milliseconds since
