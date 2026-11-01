@@ -3,6 +3,7 @@
 
 mod support;
 
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
@@ -11,7 +12,10 @@ use dxfeed_graal::event::{
     CandlePriceLevel, CandleSession, CandleSymbol, CandleType, EventFlags, IndexedEvent, Order, OrderSource, Quote,
     TimeSeriesEvent,
 };
-use dxfeed_graal::{DXEndpoint, Error, Event, Role, Symbol, TimeFormat, live_events};
+use dxfeed_graal::{
+    DXEndpoint, Error, Event, EventType, Observable, ObservableSubscriptionChangeListener, Role, Symbol, TimeFormat,
+    live_events,
+};
 use support::{Hub, candle, collect, order, quote};
 
 /// Serializes the tests that count the live events, which are process-wide.
@@ -351,4 +355,118 @@ fn candles_carry_candle_symbols() {
     assert_eq!(candle.symbol, "AAPL{=d}");
     assert_eq!(candle.candle_symbol().unwrap(), symbol);
     assert!(Candle::new("AAPL{price=zzz}").candle_symbol().is_err());
+}
+
+/// A change listener that sends each change: whether the symbols were added, and their texts in order.
+struct Changes(Sender<(bool, Vec<String>)>);
+
+impl ObservableSubscriptionChangeListener for Changes {
+    fn symbols_added(&mut self, symbols: &[Symbol]) {
+        let _ = self.0.send((true, texts(symbols)));
+    }
+
+    fn symbols_removed(&mut self, symbols: &[Symbol]) {
+        let _ = self.0.send((false, texts(symbols)));
+    }
+}
+
+fn texts(symbols: &[Symbol]) -> Vec<String> {
+    let mut texts: Vec<_> = symbols.iter().map(Symbol::to_string).collect();
+    texts.sort();
+    texts
+}
+
+fn changes(receiver: &Receiver<(bool, Vec<String>)>) -> Vec<(bool, Vec<String>)> {
+    receiver.try_iter().filter(|(_, symbols)| !symbols.is_empty()).collect()
+}
+
+fn change(added: bool, symbols: &[&str]) -> (bool, Vec<String>) {
+    (added, symbols.iter().map(|s| s.to_string()).collect())
+}
+
+#[test]
+fn subscriptions_set_and_clear_their_symbols() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let (sender, receiver) = mpsc::channel();
+    subscription.add_change_listener(Changes(sender)).unwrap();
+    subscription.add_symbols(["C"]).unwrap();
+    assert_eq!(changes(&receiver), [change(true, &["C"])]);
+
+    subscription.set_symbols(["A", "B"]).unwrap();
+    assert_eq!(texts(&subscription.get_symbols().unwrap()), ["A", "B"]);
+    let mut seen = changes(&receiver);
+    seen.sort();
+    assert_eq!(seen, [change(false, &["C"]), change(true, &["A", "B"])]);
+    assert_eq!(subscription.get_decorated_symbols().unwrap().len(), 2);
+
+    subscription.clear().unwrap();
+    assert!(subscription.get_symbols().unwrap().is_empty());
+    assert_eq!(changes(&receiver), [change(false, &["A", "B"])]);
+
+    assert_eq!(subscription.get_event_types().unwrap(), [EventType::Quote]);
+    assert!(subscription.contains_event_type(EventType::Quote).unwrap());
+    assert!(!subscription.contains_event_type(EventType::Trade).unwrap());
+    assert!(!subscription.is_closed().unwrap());
+    subscription.close().unwrap();
+    assert!(subscription.is_closed().unwrap());
+}
+
+#[test]
+fn subscriptions_give_back_symbols_of_every_kind() {
+    let hub = Hub::new();
+    let candles = hub.feed.create_subscription::<Candle>().unwrap();
+    let candle = CandleSymbol::value_of("AAPL{=d,price=mark}").unwrap();
+    candles.add_symbols([&candle]).unwrap();
+    assert_eq!(candles.get_symbols().unwrap(), [Symbol::Candle(candle)]);
+
+    let quotes = hub.feed.create_subscription::<Quote>().unwrap();
+    quotes.set_symbols([Symbol::Wildcard]).unwrap();
+    assert_eq!(quotes.get_symbols().unwrap(), [Symbol::Wildcard]);
+
+    let orders = hub.feed.create_subscription::<Order>().unwrap();
+    let indexed = Symbol::indexed("IBM", OrderSource::NTV);
+    orders.add_symbols([&indexed]).unwrap();
+    assert_eq!(orders.get_symbols().unwrap(), [indexed]);
+
+    let series = hub.feed.create_time_series_subscription::<Candle>().unwrap();
+    series.set_from_time(1000).unwrap();
+    series.add_symbols(["MSFT{=h}"]).unwrap();
+    let symbol = Symbol::from("MSFT{=h}");
+    assert_eq!(series.get_symbols().unwrap(), [Symbol::from("MSFT{=h}")]);
+    assert_eq!(
+        series.get_decorated_symbols().unwrap(),
+        [Symbol::time_series(symbol, 1000)]
+    );
+}
+
+#[test]
+fn observable_code_takes_both_kinds_of_subscriptions() {
+    fn describe(subscription: &impl Observable) -> (bool, Vec<EventType>) {
+        (
+            subscription.is_closed().unwrap(),
+            subscription.get_event_types().unwrap(),
+        )
+    }
+    let hub = Hub::with_default_executor();
+    let feed_side = hub.feed.create_subscription::<Quote>().unwrap();
+    let publisher_side = hub.publisher.get_subscription::<Quote>().unwrap();
+    assert_eq!(describe(&feed_side), (false, vec![EventType::Quote]));
+    assert_eq!(describe(&publisher_side), (false, vec![EventType::Quote]));
+    let (sender, receiver) = mpsc::channel();
+    let id = Observable::add_change_listener(&publisher_side, Changes(sender)).unwrap();
+    feed_side.add_symbols(["IBM"]).unwrap();
+    let added = loop {
+        let (added, symbols) = receiver
+            .recv_timeout(Duration::from_secs(10))
+            .expect("the publisher sees IBM");
+        if added && symbols == ["IBM"] {
+            break true;
+        }
+    };
+    assert!(added);
+    Observable::remove_change_listener(&publisher_side, id).unwrap();
+
+    let series = hub.feed.create_time_series_subscription::<Candle>().unwrap();
+    assert_eq!(describe(&series), (false, vec![EventType::Candle]));
 }

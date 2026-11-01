@@ -180,7 +180,7 @@ impl Symbol {
     /// # Safety
     ///
     /// `list` must be NULL or point to a live SDK list of live symbol structs.
-    pub(crate) unsafe fn list_from_sys(list: *const sys::dxfg_symbol_list) -> Vec<Symbol> {
+    pub(crate) unsafe fn list_from_sys(list: *const sys::dxfg_symbol_list, component: &str) -> Vec<Symbol> {
         // SAFETY: the caller guarantees that the list and its `size` elements are live.
         unsafe {
             let Some(list) = list.as_ref() else {
@@ -195,7 +195,7 @@ impl Symbol {
                     let known = Symbol::from_sys(symbol);
                     if known.is_none() {
                         crate::ErrorManager::report(
-                            "ObservableSubscription",
+                            component,
                             "skipped a symbol of a kind or source this crate does not know",
                         );
                     }

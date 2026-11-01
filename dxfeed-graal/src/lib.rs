@@ -142,7 +142,7 @@ pub use executor::{Executor, ManualExecutor};
 pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
-pub use observable::{ObservableSubscription, ObservableSubscriptionChangeListener};
+pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
 pub use promise::{Promise, PromiseResult};
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};

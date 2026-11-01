@@ -117,7 +117,8 @@ impl ObservableSubscription {
         // SAFETY: the SDK returned a live list of `size` live classes, or NULL.
         let types = unsafe { event_types(list) };
         // SAFETY: the list came from the SDK and is released once.
-        call(|t| unsafe { sys::dxfg_v4_event_clazz_list_release(t, list) })?;
+        let released = call(|t| unsafe { sys::dxfg_v4_event_clazz_list_release(t, list) });
+        crate::error_manager::report_release("ObservableSubscription", released);
         Ok(types)
     }
 
@@ -160,12 +161,71 @@ impl ObservableSubscription {
     }
 }
 
+/// The members of Java's `ObservableSubscription` interface, which [`DXFeedSubscription`](crate::DXFeedSubscription),
+/// [`DXFeedTimeSeriesSubscription`](crate::DXFeedTimeSeriesSubscription) and [`ObservableSubscription`] have: code
+/// generic over this trait works with all of them.
+///
+/// The methods are also inherent methods of both types, so calling them needs no import of the trait. The trait is
+/// sealed: only the types of this crate implement it.
+pub trait Observable: sealed::Sealed {
+    /// Whether the subscription is closed (`isClosed`).
+    #[doc(alias = "isClosed")]
+    fn is_closed(&self) -> Result<bool>;
+
+    /// The event types of the subscription (`getEventTypes`).
+    #[doc(alias = "getEventTypes")]
+    fn get_event_types(&self) -> Result<Vec<EventType>>;
+
+    /// Whether the subscription is to the events of `event_type` (`containsEventType`).
+    #[doc(alias = "containsEventType")]
+    fn contains_event_type(&self, event_type: EventType) -> Result<bool>;
+
+    /// Adds a change listener; before this returns, the listener is called with the symbols the subscription has
+    /// (`addChangeListener`).
+    #[doc(alias = "addChangeListener")]
+    fn add_change_listener(&self, listener: impl ObservableSubscriptionChangeListener) -> Result<ListenerId>
+    where
+        Self: Sized;
+
+    /// Removes a change listener (`removeChangeListener`).
+    #[doc(alias = "removeChangeListener")]
+    fn remove_change_listener(&self, id: ListenerId) -> Result<()>;
+}
+
+pub(crate) mod sealed {
+    pub trait Sealed {}
+}
+
+impl sealed::Sealed for ObservableSubscription {}
+
+impl Observable for ObservableSubscription {
+    fn is_closed(&self) -> Result<bool> {
+        ObservableSubscription::is_closed(self)
+    }
+
+    fn get_event_types(&self) -> Result<Vec<EventType>> {
+        ObservableSubscription::get_event_types(self)
+    }
+
+    fn contains_event_type(&self, event_type: EventType) -> Result<bool> {
+        ObservableSubscription::contains_event_type(self, event_type)
+    }
+
+    fn add_change_listener(&self, listener: impl ObservableSubscriptionChangeListener) -> Result<ListenerId> {
+        ObservableSubscription::add_change_listener(self, listener)
+    }
+
+    fn remove_change_listener(&self, id: ListenerId) -> Result<()> {
+        ObservableSubscription::remove_change_listener(self, id)
+    }
+}
+
 /// The event types of an SDK list of classes, without those this crate does not know.
 ///
 /// # Safety
 ///
 /// `list` must be NULL or point to a live SDK list of `size` live classes.
-unsafe fn event_types(list: *const sys::dxfg_v4_event_clazz_list) -> Vec<EventType> {
+pub(crate) unsafe fn event_types(list: *const sys::dxfg_v4_event_clazz_list) -> Vec<EventType> {
     // SAFETY: the caller guarantees that the list and its elements are live.
     unsafe {
         let Some(list) = list.as_ref() else {

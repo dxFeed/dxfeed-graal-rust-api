@@ -377,7 +377,7 @@ unsafe extern "C" fn symbols_added_trampoline(
             "ObservableSubscription",
             "a subscription change listener",
             Nested::WarnThenClose(close_change_listener),
-            |listener| listener.symbols_added(&Symbol::list_from_sys(symbols)),
+            |listener| listener.symbols_added(&Symbol::list_from_sys(symbols, "ObservableSubscription")),
         )
     };
 }
@@ -395,7 +395,7 @@ unsafe extern "C" fn symbols_removed_trampoline(
             "ObservableSubscription",
             "a subscription change listener",
             Nested::WarnThenClose(close_change_listener),
-            |listener| listener.symbols_removed(&Symbol::list_from_sys(symbols)),
+            |listener| listener.symbols_removed(&Symbol::list_from_sys(symbols, "ObservableSubscription")),
         )
     };
 }
