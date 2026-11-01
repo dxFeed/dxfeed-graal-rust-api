@@ -71,7 +71,8 @@ sdk_handle!(
     sys::dxfg_v4_subscription_controller_t,
     sys::dxfg_v4_time_period_t,
     sys::dxfg_v4_time_zone_t,
-    sys::dxfg_v4_auth_token_t
+    sys::dxfg_v4_auth_token_t,
+    sys::dxfg_v4_logging_listener_t
 );
 
 // SAFETY: a promise keeps its Java object handle in `handler`; the promises of an event and of a list start with a

@@ -1,70 +1,19 @@
-//! Shutdown and process exit. Each scenario runs in a child process, because shutdown and exit are
-//! process-wide: the parent test re-runs this executable with `<scenario> --exact --ignored` and fails if the child
-//! fails or does not exit within 60 seconds. Scenarios that test exit with live handles leave through
+//! Shutdown and process exit. Each scenario runs in a child process ([`support::run_child`]), because shutdown and
+//! exit are process-wide. Scenarios that test exit with live handles leave through
 //! `process::exit(0)`, so no `Drop` runs and the `atexit` path is what executes.
 
 mod support;
 
-use std::io::Read;
 use std::net::TcpListener;
-use std::process::{self, Command, Stdio};
+use std::process;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use dxfeed_graal::event::Quote;
 use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, ManualExecutor, Role, live_handles, system};
-use support::{Hub, collect, is_time, quote, quote_with_bid};
-
-/// Set for the child processes; the scenarios do nothing without it.
-const CHILD: &str = "DXFEED_GRAAL_TEST_CHILD";
-
-/// Runs `scenario` in a child process and returns its stderr; panics if it fails or does not exit within 60 seconds.
-fn run(scenario: &str) -> String {
-    let mut child = Command::new(std::env::current_exe().unwrap())
-        .args([scenario, "--exact", "--ignored", "--nocapture"])
-        .env(CHILD, "1")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .unwrap();
-    let read = |mut pipe: Box<dyn Read + Send>| {
-        thread::spawn(move || {
-            let mut text = String::new();
-            let _ = pipe.read_to_string(&mut text);
-            text
-        })
-    };
-    let stdout = read(Box::new(child.stdout.take().unwrap()));
-    let stderr = read(Box::new(child.stderr.take().unwrap()));
-    let deadline = Instant::now() + Duration::from_secs(60);
-    let status = loop {
-        if let Some(status) = child.try_wait().unwrap() {
-            break status;
-        }
-        if Instant::now() > deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            panic!("{scenario} did not exit within 60 seconds");
-        }
-        thread::sleep(Duration::from_millis(50));
-    };
-    let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
-    assert!(status.success(), "{scenario} failed with {status}\n{stdout}\n{stderr}");
-    // A scenario name that matches no test makes libtest run nothing and exit with 0. The header is printed before the
-    // test starts, so it is also there when the scenario leaves through `process::exit`.
-    assert!(
-        stdout.contains("running 1 test\n"),
-        "{scenario} did not run exactly one test\n{stdout}\n{stderr}"
-    );
-    stderr
-}
-
-/// Whether this process is a child that runs a scenario.
-fn is_child() -> bool {
-    std::env::var_os(CHILD).is_some()
-}
+use support::{Hub, collect, is_child, is_time, quote, quote_with_bid, run_child};
 
 /// A feed endpoint connected to a local socket, with a subscription and a listener.
 fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription<Quote>) {
@@ -84,7 +33,7 @@ fn connected() -> (TcpListener, DXEndpoint, DXFeedSubscription<Quote>) {
 
 #[test]
 fn shutdown_stops_delivery_and_creation() {
-    let stderr = run("child_shutdown_stops_delivery_and_creation");
+    let (_, stderr) = run_child("child_shutdown_stops_delivery_and_creation");
     assert!(!stderr.contains("[dxfeed-graal]"), "{stderr}");
 }
 
@@ -135,7 +84,7 @@ fn child_shutdown_stops_delivery_and_creation() {
 
 #[test]
 fn shutdown_in_listener_is_refused() {
-    run("child_shutdown_in_listener_is_refused");
+    run_child("child_shutdown_in_listener_is_refused");
 }
 
 #[test]
@@ -159,7 +108,7 @@ fn child_shutdown_in_listener_is_refused() {
 
 #[test]
 fn display_after_shutdown() {
-    let stderr = run("child_display_after_shutdown");
+    let (_, stderr) = run_child("child_display_after_shutdown");
     let event_time = stderr
         .lines()
         .find_map(|line| line.strip_prefix("eventTime="))
@@ -187,7 +136,7 @@ fn child_display_after_shutdown() {
 
 #[test]
 fn concurrent_shutdown() {
-    run("child_concurrent_shutdown");
+    run_child("child_concurrent_shutdown");
 }
 
 #[test]
@@ -205,7 +154,7 @@ fn child_concurrent_shutdown() {
 
 #[test]
 fn exit_during_callback() {
-    run("child_exit_during_callback");
+    run_child("child_exit_during_callback");
 }
 
 #[test]
@@ -232,7 +181,7 @@ fn child_exit_during_callback() {
 
 #[test]
 fn exit_connected_without_shutdown() {
-    run("child_exit_connected_without_shutdown");
+    run_child("child_exit_connected_without_shutdown");
 }
 
 #[test]
@@ -247,7 +196,7 @@ fn child_exit_connected_without_shutdown() {
 
 #[test]
 fn return_connected_after_drop() {
-    run("child_return_connected_after_drop");
+    run_child("child_return_connected_after_drop");
 }
 
 #[test]
@@ -264,7 +213,7 @@ fn child_return_connected_after_drop() {
 
 #[test]
 fn return_connected_after_shutdown() {
-    run("child_return_connected_after_shutdown");
+    run_child("child_return_connected_after_shutdown");
 }
 
 #[test]
@@ -279,7 +228,7 @@ fn child_return_connected_after_shutdown() {
 
 #[test]
 fn return_with_thread_in_call_loop() {
-    run("child_return_with_thread_in_call_loop");
+    run_child("child_return_with_thread_in_call_loop");
 }
 
 #[test]

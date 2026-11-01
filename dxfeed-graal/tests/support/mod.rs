@@ -2,8 +2,12 @@
 
 #![allow(dead_code)] // Each test binary uses a part.
 
+use std::io::Read;
+use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
+use std::thread;
+use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{
     AnalyticOrder, AnalyticOrderRef, AuctionType, Candle, CandleRef, Configuration, ConfigurationRef, DailyCandle,
@@ -19,6 +23,57 @@ use dxfeed_graal::event::{
 use dxfeed_graal::{
     DXEndpoint, DXFeed, DXFeedSubscription, DXPublisher, Event, EventRef, ManualExecutor, Role, SubscriptionItem,
 };
+
+/// Set for the child processes; the scenarios do nothing without it.
+pub const CHILD: &str = "DXFEED_GRAAL_TEST_CHILD";
+
+/// Runs the ignored test `scenario` of this test executable in a child process, for the settings global to a process,
+/// and returns its stdout and stderr; panics if it fails, runs no test or does not exit within 60 seconds. The
+/// scenario returns at once unless [`is_child`].
+pub fn run_child(scenario: &str) -> (String, String) {
+    let mut child = Command::new(std::env::current_exe().unwrap())
+        .args([scenario, "--exact", "--ignored", "--nocapture"])
+        .env(CHILD, "1")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let read = |mut pipe: Box<dyn Read + Send>| {
+        thread::spawn(move || {
+            let mut text = String::new();
+            let _ = pipe.read_to_string(&mut text);
+            text
+        })
+    };
+    let stdout = read(Box::new(child.stdout.take().unwrap()));
+    let stderr = read(Box::new(child.stderr.take().unwrap()));
+    let deadline = Instant::now() + Duration::from_secs(60);
+    let status = loop {
+        if let Some(status) = child.try_wait().unwrap() {
+            break status;
+        }
+        if Instant::now() > deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("{scenario} did not exit within 60 seconds");
+        }
+        thread::sleep(Duration::from_millis(50));
+    };
+    let (stdout, stderr) = (stdout.join().unwrap(), stderr.join().unwrap());
+    assert!(status.success(), "{scenario} failed with {status}\n{stdout}\n{stderr}");
+    // A scenario name that matches no test makes libtest run nothing and exit with 0. The header is printed before the
+    // test starts, so it is also there when the scenario leaves through `process::exit`.
+    assert!(
+        stdout.contains("running 1 test\n"),
+        "{scenario} did not run exactly one test\n{stdout}\n{stderr}"
+    );
+    (stdout, stderr)
+}
+
+/// Whether this process is a child that runs a scenario.
+pub fn is_child() -> bool {
+    std::env::var_os(CHILD).is_some()
+}
 
 /// A `LOCAL_HUB` endpoint with a name unique in this process, its manual executor, feed and publisher.
 pub struct Hub {

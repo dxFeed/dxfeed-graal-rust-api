@@ -2,15 +2,16 @@
 //!
 //! One isolate is created on first use and never torn down: tear-down waits for every Java thread and can hang. A
 //! thread is attached on its first SDK call and detached by a thread-local guard when it exits, unless the process is
-//! exiting. Right after its creation, the isolate gets the system properties of the `dxfeed.system.properties` file and
-//! of the `DXFEED_*` environment variables, as in the C++ and .NET APIs.
+//! exiting. The isolate is created with the arguments of [`crate::system::set_isolate_arguments`], if any. Right after
+//! its creation, it gets the system properties of the `dxfeed.system.properties` file and of the `DXFEED_*`
+//! environment variables, as in the C++ and .NET APIs.
 
 use std::borrow::Cow;
 use std::cell::Cell;
 use std::ffi::{CStr, CString, c_char, c_int};
 use std::ptr;
-use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
@@ -29,6 +30,16 @@ unsafe impl Sync for Isolate {}
 
 /// The result of `graal_create_isolate`; a failure is kept and returned on every later call, never retried.
 static ISOLATE: OnceLock<std::result::Result<Isolate, i32>> = OnceLock::new();
+
+/// The isolate arguments set by [`crate::system::set_isolate_arguments`]; `None` once the isolate creation took them.
+static ARGUMENTS: Mutex<Option<Vec<CString>>> = Mutex::new(Some(Vec::new()));
+
+/// The version of `graal_create_isolate_params_t` that has the isolate arguments
+/// (`__graal_create_isolate_params_version` of `graal_isolate.h`, which bindgen does not export).
+const PARAMS_VERSION: c_int = 5;
+
+/// The program name passed as the first isolate argument, which the isolate skips.
+const PROGRAM: &CStr = c"dxfeed-graal";
 
 /// Set by the `atexit` handler: from then on nothing calls the SDK from destructors.
 static EXITING: AtomicBool = AtomicBool::new(false);
@@ -109,6 +120,17 @@ pub(crate) fn set_shut_down() {
     SHUT_DOWN.store(true, Ordering::Release);
 }
 
+/// Sets the arguments of the isolate creation; [`Error::IsolateCreated`] once the creation has been attempted.
+pub(crate) fn set_arguments(arguments: Vec<CString>) -> Result<()> {
+    match crate::lock(&ARGUMENTS).as_mut() {
+        Some(slot) => {
+            *slot = arguments;
+            Ok(())
+        }
+        None => Err(Error::IsolateCreated),
+    }
+}
+
 /// Whether the isolate has been created (successfully or not).
 pub(crate) fn isolate_created() -> bool {
     ISOLATE.get().is_some()
@@ -127,8 +149,30 @@ fn isolate() -> Result<*mut sys::graal_isolate_t> {
     let isolate = ISOLATE.get_or_init(|| {
         let mut isolate = ptr::null_mut();
         let mut thread = ptr::null_mut();
-        // SAFETY: null parameters select the defaults; the out-pointers are valid for writes.
-        let code = unsafe { sys::graal_create_isolate(ptr::null_mut(), &mut isolate, &mut thread) };
+        // Leaked, as the isolate is created once per process: `graal_isolate.h` does not say whether the isolate
+        // keeps `argv`.
+        let arguments: &'static [CString] = Vec::leak(crate::lock(&ARGUMENTS).take().unwrap_or_default());
+        let argv: &'static mut [*mut c_char] = Vec::leak(
+            std::iter::once(PROGRAM)
+                .chain(arguments.iter().map(CString::as_c_str))
+                .map(|argument| argument.as_ptr().cast_mut())
+                .collect(),
+        );
+        let mut params = sys::graal_create_isolate_params_t {
+            version: PARAMS_VERSION,
+            argc: c_int::try_from(argv.len()).unwrap_or(c_int::MAX),
+            argv: argv.as_mut_ptr(),
+            ..Default::default()
+        };
+        // Without arguments, null parameters select the defaults, as before the arguments existed.
+        let params = if arguments.is_empty() {
+            ptr::null_mut()
+        } else {
+            &raw mut params
+        };
+        // SAFETY: `params` is null or a zeroed structure of its version whose `argv` holds `argc` NUL-terminated
+        // strings that live forever; the out-pointers are valid for writes.
+        let code = unsafe { sys::graal_create_isolate(params, &mut isolate, &mut thread) };
         if code != 0 {
             return Err(code);
         }
@@ -326,7 +370,7 @@ pub(crate) unsafe fn take_returned_exception(exception: *mut sys::dxfg_v4_except
 /// # Safety
 ///
 /// `exception` must point to a live SDK exception.
-unsafe fn copy_exception(exception: *const sys::dxfg_v4_exception_t, depth: usize) -> JavaException {
+pub(crate) unsafe fn copy_exception(exception: *const sys::dxfg_v4_exception_t, depth: usize) -> JavaException {
     // SAFETY: the caller guarantees `exception` is live.
     let e = unsafe { &*exception };
     let cause = if e.cause.is_null() || depth + 1 >= MAX_CAUSES {

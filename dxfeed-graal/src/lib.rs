@@ -119,6 +119,7 @@ pub mod history;
 pub mod ipf;
 mod isolate;
 mod listener;
+pub mod logging;
 pub mod model;
 mod observable;
 pub mod ondemand;
