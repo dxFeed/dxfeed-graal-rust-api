@@ -11,7 +11,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 > [Current State](#current-state)).
 
 ![Status](https://img.shields.io/badge/status-alpha-red)
-![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.12.0-yellow)
+![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.13.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-blueviolet)
 [![License](https://img.shields.io/badge/license-MPL--2.0-orange)](LICENSE)
@@ -44,7 +44,7 @@ The names follow the [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overvi
 
 | Crate | Purpose |
 |---|---|
-| `dxfeed-graal-sys` | Raw FFI bindings to SDK 3.12.0; the build script gets and links the SDK |
+| `dxfeed-graal-sys` | Raw FFI bindings to SDK 3.13.0; the build script gets and links the SDK |
 | `dxfeed-graal` | Safe API: endpoints, feeds, subscriptions, listeners, events, publishing |
 | `dxfeed-graal-build` | Build-script helper that deploys the SDK library next to the application's executables |
 
@@ -101,10 +101,10 @@ dxfeed-graal = { path = "../dxfeed-graal-rust-api/dxfeed-graal" }
 
 ## Building
 
-The build script of `dxfeed-graal-sys` gets SDK 3.12.0 in one of these ways:
+The build script of `dxfeed-graal-sys` gets SDK 3.13.0 in one of these ways:
 
-- `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-3.12.0-<platform>.zip` from the
-  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.12.0)). Use it for offline builds.
+- `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-3.13.0-<platform>.zip` from the
+  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.13.0)). Use it for offline builds.
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
   certificate store.
@@ -114,7 +114,11 @@ The build script of `dxfeed-graal-sys` gets SDK 3.12.0 in one of these ways:
   the build directory.
 - With `--no-default-features` and no `DXFEED_GRAAL_SDK_DIR`, the build fails.
 
-The build fails if the SDK headers differ from those of 3.12.0, because the committed bindings fit only that version.
+The build fails if the SDK headers differ from those of 3.13.0, because the committed bindings fit only that version.
+`system::get_version()` returns the version of the loaded SDK library, `system::is_feature_supported` tells whether it
+has an optional feature (the `system::feature` names), and `system::get_advanced_revision()` the revision of its
+experimental functions, which matches `system::ADVANCED_REVISION` for the library this crate was built for. The
+crate does not wrap the event queue, the feed filters and the event peek of these features yet.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
 ## Running and Deployment
@@ -427,10 +431,11 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
-The API covers the dxFeed Java API 3.356 wherever SDK 3.12.0 exports it. These Java members wait for new SDK
-exports: the `DXFeedFilter` family and `configurationChanged`, `PriceLevelService.getCandles` and
-`PriceLevelCandle`, creating and failing a `Promise` from Rust, `InstrumentProfileWriter`, user data of day and
-session filters, and the property listeners of `OnDemandService`. Deprecated Java members are left out.
+The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and `configurationChanged`, creating and failing a
+`Promise` from Rust, `InstrumentProfileWriter`, user data of day and session filters, and the property listeners of
+`OnDemandService`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java
+members are left out.
 
 ## Development
 

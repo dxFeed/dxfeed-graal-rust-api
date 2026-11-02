@@ -196,7 +196,7 @@ version = "0.1.0"
 
 [[package]]
 name = "dxfeed-graal-sys"
-version = "0.1.0+sdk.3.12.0"
+version = "0.1.0+sdk.3.13.0"
 dependencies = [
  "sha2",
  "ureq",

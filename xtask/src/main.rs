@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
-const SDK_VERSION: &str = "3.12.0";
+const SDK_VERSION: &str = "3.13.0";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -43,10 +43,10 @@ fn gen_bindings(sdk_dir: &Path) -> Result<PathBuf, String> {
     if !header.is_file() {
         return Err(format!("{} not found", header.display()));
     }
-    // The event queue API is not part of SDK 3.12.0; a header set that has it is another version.
-    if sdk_dir.join("dxfg_v4_event_queue.h").exists() {
+    // The event queue API is new in SDK 3.13.0; a header set without it is an older version.
+    if !sdk_dir.join("dxfg_v4_event_queue.h").is_file() {
         return Err(format!(
-            "{} is not SDK {SDK_VERSION}: it has dxfg_v4_event_queue.h",
+            "{} is not SDK {SDK_VERSION}: it has no dxfg_v4_event_queue.h",
             sdk_dir.display()
         ));
     }
@@ -62,6 +62,8 @@ fn gen_bindings(sdk_dir: &Path) -> Result<PathBuf, String> {
         .allowlist_function("dxfg_v4_.*|graal_.*")
         .allowlist_type("dxfg_v4_.*|graal_.*")
         .allowlist_var("DXFG_.*")
+        // Macros with a cast, such as `((int32_t)1)`, are evaluated by clang; bindgen alone skips them.
+        .clang_macro_fallback()
         .default_enum_style(bindgen::EnumVariation::Consts)
         .prepend_enum_name(false)
         .layout_tests(true)

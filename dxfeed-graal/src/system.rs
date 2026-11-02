@@ -1,4 +1,4 @@
-//! Java system properties of the SDK and its shutdown.
+//! Java system properties of the SDK, its version and features, and its shutdown.
 //!
 //! When the SDK starts, as in the C++ and .NET APIs, it sets the system properties of the `dxfeed.system.properties`
 //! file in the current directory, or of the file named by the `DXFEED_dxfeed.system.properties` environment variable,
@@ -96,6 +96,56 @@ pub fn get_property(key: &str) -> Result<Option<String>> {
         call(|t| unsafe { sys::dxfg_v4_system_release_property(t, value) }),
     );
     Ok(Some(copy))
+}
+
+/// The advanced revision of the SDK headers this crate was built for (`DXFG_V4_ADVANCED_REVISION`): the revision of
+/// the experimental functions of the SDK. It is incremented when an experimental function changes incompatibly.
+pub const ADVANCED_REVISION: i32 = sys::DXFG_V4_ADVANCED_REVISION as i32;
+
+/// The names of the optional features of the SDK (the `DXFG_V4_FEATURE_` macros), for [`is_feature_supported`].
+pub mod feature {
+    /// The event queue: the events of subscriptions polled on the caller's thread.
+    pub const EVENT_QUEUE: &str = "event_queue";
+    /// The shared event queue: one queue for several subscriptions, with tags, and its executor.
+    pub const SHARED_EVENT_QUEUE: &str = "shared_event_queue";
+    /// The ready signal of an event queue: a file descriptor or a Windows event signalled when events arrive. It is
+    /// experimental in the SDK.
+    pub const EVENT_QUEUE_READY_SIGNAL: &str = "event_queue_ready_signal";
+    /// The feed filters and their trackers. They are experimental in the SDK.
+    pub const FEED_FILTER: &str = "feed_filter";
+    /// The event peek of the time series transaction model. It is experimental in the SDK.
+    pub const TIME_SERIES_TX_MODEL_EVENT_PEEK: &str = "time_series_tx_model_event_peek";
+}
+
+/// Returns the version of the SDK release the loaded library belongs to, such as `3.13.0`
+/// (`dxfg_v4_system_get_version`).
+pub fn get_version() -> Result<String> {
+    // SAFETY: the out-pointer is valid for writes.
+    isolate::out_string("System", |t, version| unsafe {
+        sys::dxfg_v4_system_get_version(t, version)
+    })
+}
+
+/// Returns the advanced revision of the loaded library: the revision of its experimental functions
+/// (`dxfg_v4_system_get_advanced_revision`). The experimental functions behave as this crate expects only when it
+/// equals [`ADVANCED_REVISION`].
+pub fn get_advanced_revision() -> Result<i32> {
+    let mut revision = 0;
+    // SAFETY: the out-pointer is valid for writes.
+    call(|t| unsafe { sys::dxfg_v4_system_get_advanced_revision(t, &mut revision) })?;
+    Ok(revision)
+}
+
+/// Whether the loaded library supports the feature `name`, one of the [`feature`] names
+/// (`dxfg_v4_system_is_feature_supported`). An unknown name, also an empty one, is not supported.
+///
+/// A name with a NUL byte returns [`Error::InvalidArgument`].
+pub fn is_feature_supported(name: &str) -> Result<bool> {
+    let name = c_string(name, "feature name")?;
+    let mut supported = 0;
+    // SAFETY: the name is NUL-terminated and outlives the call; the out-pointer is valid for writes.
+    call(|t| unsafe { sys::dxfg_v4_system_is_feature_supported(t, name.as_ptr(), &mut supported) })?;
+    Ok(supported != 0)
 }
 
 /// Shuts the SDK down (`dxfg_v4_system_shutdown`): stops the calls of all listeners, waiting for the running ones,
