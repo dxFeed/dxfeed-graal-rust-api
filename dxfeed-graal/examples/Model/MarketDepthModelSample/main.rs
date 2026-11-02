@@ -8,7 +8,7 @@ use dxfeed_graal::event::{IndexedEventSource, Order, OrderSource};
 use dxfeed_graal::model::MarketDepthModel;
 use dxfeed_graal::{DXEndpoint, system};
 
-/// The number of the price levels on each side.
+/// The number of the orders on each side.
 const DEPTH: usize = 19;
 
 /// The line of the screen where the book starts, below the four lines of the header.
@@ -121,8 +121,8 @@ fn draw_header(symbol: &str, sources: &str) {
     let _ = std::io::stdout().flush();
 }
 
-/// Draws the book below the header: a line for each price level, blank where a side has fewer levels. A bar of each
-/// level shows its size against the largest one on the screen.
+/// Draws the book below the header: a line for each order, blank where a side has fewer orders. A bar of each order
+/// shows its size against the largest one on the screen.
 fn draw_book(buy: &[Order], sell: &[Order]) {
     let max_size = buy.iter().chain(sell).map(|order| order.size).fold(0.0, f64::max);
     let blank = " ".repeat(SIDE_WIDTH);
@@ -166,7 +166,7 @@ fn columns(order: &Order) -> (char, &str, String, String) {
     (ex, mm, to_string(order.size), to_string(order.price))
 }
 
-/// A bar of up to 12 blocks for `size` against `max_size`; a level of any size has a block at least.
+/// A bar of up to 12 blocks for `size` against `max_size`; an order of any size has a block at least.
 fn bar(size: f64, max_size: f64) -> String {
     let blocks = if size > 0.0 {
         (size / max_size * 12.0).ceil().clamp(1.0, 12.0) as usize
