@@ -400,7 +400,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   event types, the aggregation period, the events batch limit, dropped events, executors and standalone
   subscriptions attached to feeds
 - [x] The event symbol and the event time of any event, owned (`Event`) or borrowed (`EventRef` and the views)
-- [x] Observable subscriptions of publishers and change listeners of subscriptions
+- [x] Observable subscriptions of publishers and change listeners of subscriptions, with `configuration_changed`
 - [x] Symbols: strings, candle symbols with their attributes, the wildcard, indexed event sources and time series
 - [x] Time series subscriptions, `get_time_series_promise` and `get_indexed_events_promise`
 - [x] `TimeFormat`: parsing and formatting of times like the other APIs
@@ -428,15 +428,15 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Market depth model of orders: `MarketDepthModel`
 - [x] List models: `OrderBookModel`, `IndexedEventModel`, `TimeSeriesEventModel` and their `ObservableListModel`
 - [x] On-demand historical data replay: `OnDemandService`
-- [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`
+- [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`,
+  `AuthOrderSource` (also created with `AuthOrderSource::create`)
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and `configurationChanged`,
-`InstrumentProfileWriter`, user data of day and session filters, and the property listeners of
-`OnDemandService`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java
-members are left out.
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family, `InstrumentProfileWriter`, user data of day
+and session filters, and the property listeners of `OnDemandService`. `PriceLevelService.getCandles` and
+`PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
 
 ## Development
 

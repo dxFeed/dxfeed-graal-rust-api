@@ -96,7 +96,8 @@ struct ListenerState<C: ?Sized> {
     running: AtomicU64,
     /// Whether a close was deferred during the running call (see [`Nested::Defer`]).
     close_deferred: AtomicBool,
-    /// Whether a nested call asked for one more call after the running one (see [`Nested::Repeat`]).
+    /// Whether a nested call asked for one more call after the running one (see [`Nested::Repeat`]), or for a
+    /// configuration call of a change listener (see [`Nested::Configuration`]).
     repeat: AtomicBool,
 }
 
@@ -135,14 +136,14 @@ impl StateListener {
 impl ChangeListener {
     pub(crate) fn new(closure: Box<ChangeClosure>) -> Result<Self> {
         Self::create(closure, |user_data| {
-            // SAFETY: as for event listeners, with the three change trampolines, which the SDK calls without a check
-            // for NULL.
+            // SAFETY: as for event listeners, with the four change trampolines.
             Handle::create(|t, out| unsafe {
-                sys::dxfg_v4_ObservableSubscriptionChangeListener_new(
+                sys::dxfg_v4_ObservableSubscriptionChangeListener_newWithConfigurationChanged(
                     t,
                     Some(symbols_added_trampoline),
                     Some(symbols_removed_trampoline),
                     Some(subscription_closed_trampoline),
+                    Some(configuration_changed_trampoline),
                     user_data,
                     out,
                 )
@@ -452,7 +453,7 @@ unsafe extern "C" fn symbols_added_trampoline(
             user_data,
             "ObservableSubscription",
             "a subscription change listener",
-            Nested::WarnThenClose(close_change_listener),
+            Nested::WarnThenDeferred(CHANGE_DEFERRED),
             |listener| listener.symbols_added(&Symbol::list_from_sys(symbols, "ObservableSubscription")),
         )
     };
@@ -470,7 +471,7 @@ unsafe extern "C" fn symbols_removed_trampoline(
             user_data,
             "ObservableSubscription",
             "a subscription change listener",
-            Nested::WarnThenClose(close_change_listener),
+            Nested::WarnThenDeferred(CHANGE_DEFERRED),
             |listener| listener.symbols_removed(&Symbol::list_from_sys(symbols, "ObservableSubscription")),
         )
     };
@@ -490,9 +491,29 @@ unsafe extern "C" fn subscription_closed_trampoline(thread: *mut sys::graal_isol
     };
 }
 
+unsafe extern "C" fn configuration_changed_trampoline(thread: *mut sys::graal_isolatethread_t, user_data: *mut c_void) {
+    // SAFETY: `user_data` is the state of a change listener.
+    unsafe {
+        dispatch::<ChangeClosure>(
+            thread,
+            user_data,
+            "ObservableSubscription",
+            "a subscription change listener",
+            Nested::Configuration(CHANGE_DEFERRED),
+            |listener| listener.configuration_changed(),
+        )
+    };
+}
+
 fn close_change_listener(listener: &mut ChangeClosure) {
     listener.subscription_closed();
 }
+
+/// The calls of a change listener deferred during its running call.
+const CHANGE_DEFERRED: Deferred<ChangeClosure> = Deferred {
+    configuration_changed: |listener| listener.configuration_changed(),
+    close: close_change_listener,
+};
 
 unsafe extern "C" fn update_trampoline(
     thread: *mut sys::graal_isolatethread_t,
@@ -607,8 +628,12 @@ enum Nested<C: ?Sized> {
     /// Skips it and reports it to `ErrorManager`: the SDK serializes the calls of a listener, so this is a guard
     /// against a deadlock on the closure lock, not an expected path.
     Warn,
-    /// Skips it and reports it to `ErrorManager`, and after the running call, runs the close deferred during it.
-    WarnThenClose(fn(&mut C)),
+    /// Skips it and reports it to `ErrorManager`, and after the running call, makes the calls deferred during it.
+    WarnThenDeferred(Deferred<C>),
+    /// Defers it until the running call returns, then makes the calls deferred during it: the configuration call of a
+    /// change listener, which the subscription makes on the thread that changes the configuration, so also inside a
+    /// call of the listener that changes it, as Java does.
+    Configuration(Deferred<C>),
     /// Defers it until the running call returns: the close of a change listener that removes itself or closes its
     /// subscription or endpoint in its own call.
     Defer,
@@ -618,6 +643,14 @@ enum Nested<C: ?Sized> {
     /// Skips it: a listener of a list whose events are only valid during the nested call, which the running call
     /// can read with `toArray`.
     Skip,
+}
+
+/// The calls that a nested call defers until the running call of a change listener returns.
+struct Deferred<C: ?Sized> {
+    /// Called once for each deferred configuration change, until no new one comes.
+    configuration_changed: fn(&mut C),
+    /// Called once if a close was deferred, after the configuration calls.
+    close: fn(&mut C),
 }
 
 /// Runs the closure of the listener whose state is `user_data` with `call`, catching panics; `component` and
@@ -651,9 +684,9 @@ unsafe fn dispatch<C: ?Sized>(
         if state.running.load(Ordering::Acquire) == me {
             match nested {
                 Nested::Defer => state.close_deferred.store(true, Ordering::Release),
-                Nested::Repeat(_) => state.repeat.store(true, Ordering::Release),
+                Nested::Repeat(_) | Nested::Configuration(_) => state.repeat.store(true, Ordering::Release),
                 Nested::Skip => {}
-                Nested::Warn | Nested::WarnThenClose(_) => crate::ErrorManager::report(
+                Nested::Warn | Nested::WarnThenDeferred(_) => crate::ErrorManager::report(
                     component,
                     format!("skipped a nested call of {what} on the thread that runs it"),
                 ),
@@ -676,14 +709,21 @@ unsafe fn dispatch<C: ?Sized>(
                 );
             }
         }
-        if let Nested::WarnThenClose(close) = nested
-            && state.close_deferred.swap(false, Ordering::AcqRel)
-        {
-            crate::error_manager::report_panic(
-                component,
-                what,
-                panic::catch_unwind(AssertUnwindSafe(|| close(&mut **closure))),
-            );
+        if let Nested::WarnThenDeferred(deferred) | Nested::Configuration(deferred) = nested {
+            while state.repeat.swap(false, Ordering::AcqRel) {
+                crate::error_manager::report_panic(
+                    component,
+                    what,
+                    panic::catch_unwind(AssertUnwindSafe(|| (deferred.configuration_changed)(&mut **closure))),
+                );
+            }
+            if state.close_deferred.swap(false, Ordering::AcqRel) {
+                crate::error_manager::report_panic(
+                    component,
+                    what,
+                    panic::catch_unwind(AssertUnwindSafe(|| (deferred.close)(&mut **closure))),
+                );
+            }
         }
         state.running.store(0, Ordering::Release);
     }));

@@ -1,10 +1,12 @@
 //! The price level checker on orders built here, and the price level service at an address where nothing listens; no
-//! network needed. The reading of `AuthOrderSource` needs a live service and is not tested here.
+//! network needed. An `AuthOrderSource` created here reads back its entries; reading one from a live service is not
+//! tested here.
 
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{CandleSymbol, Order, OrderSource, Side};
-use dxfeed_graal::orcs::{PriceLevelChecker, PriceLevelService};
+use dxfeed_graal::orcs::{AuthOrderSource, PriceLevelChecker, PriceLevelService};
 use dxfeed_graal::{Error, Result, system};
 
 const MINUTE: Duration = Duration::from_secs(60);
@@ -100,4 +102,50 @@ fn the_granularity_key_is_the_java_one() {
 #[test]
 fn a_malformed_address_is_an_error() {
     assert!(PriceLevelService::new("127.0.0.1:1[").is_err());
+}
+
+#[test]
+fn a_created_auth_order_source_returns_its_entries() {
+    let mut entries = HashMap::new();
+    entries.insert(OrderSource::NTV.get_id(), vec!["AAPL".to_owned(), "IBM".to_owned()]);
+    entries.insert(OrderSource::DEX.get_id(), Vec::new());
+    let source = AuthOrderSource::create(&entries).unwrap();
+    let mut read = source.get_by_ids().unwrap();
+    for symbols in read.values_mut() {
+        symbols.sort();
+    }
+    assert_eq!(read, entries);
+    let by_sources = source.get_by_order_sources().unwrap();
+    assert_eq!(by_sources.len(), 2);
+    assert_eq!(by_sources[&OrderSource::DEX], Vec::<String>::new());
+
+    assert!(
+        AuthOrderSource::create(&HashMap::new())
+            .unwrap()
+            .get_by_ids()
+            .unwrap()
+            .is_empty()
+    );
+}
+
+/// The symbols of a source are a set: duplicates are kept once.
+#[test]
+fn created_symbols_are_a_set() {
+    let symbols = HashMap::from([(
+        OrderSource::DEX.get_id(),
+        vec!["MSFT".to_owned(), "AAPL".to_owned(), "MSFT".to_owned()],
+    )]);
+    let source = AuthOrderSource::create(&symbols).unwrap();
+    let mut created = source.get_by_ids().unwrap().remove(&OrderSource::DEX.get_id()).unwrap();
+    created.sort();
+    assert_eq!(created, ["AAPL", "MSFT"]);
+}
+
+#[test]
+fn a_symbol_with_a_nul_byte_is_invalid() {
+    let entries = HashMap::from([(OrderSource::NTV.get_id(), vec!["A\0B".to_owned()])]);
+    assert!(matches!(
+        AuthOrderSource::create(&entries),
+        Err(Error::InvalidArgument(_))
+    ));
 }

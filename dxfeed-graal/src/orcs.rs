@@ -21,6 +21,7 @@
 //! ```
 
 use std::collections::HashMap;
+use std::ffi::{CString, c_char};
 use std::fmt;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -187,6 +188,65 @@ pub struct AuthOrderSource {
 }
 
 impl AuthOrderSource {
+    /// Creates the order sources and their symbols of `symbols_by_ids`, by the id of the source
+    /// (`AuthOrderSource.create`), as [`get_by_ids`](Self::get_by_ids) returns them.
+    ///
+    /// The symbols of a source are a set, as in Java: [`get_by_ids`](Self::get_by_ids) returns each once, in no
+    /// particular order. Any id is taken, as in Java, but
+    /// [`get_by_order_sources`](Self::get_by_order_sources) fails for an id that is not of an order source. A symbol
+    /// with a NUL byte returns [`Error::InvalidArgument`](crate::Error::InvalidArgument).
+    pub fn create(symbols_by_ids: &HashMap<i32, Vec<String>>) -> Result<Self> {
+        let symbols: Vec<(i32, Vec<CString>)> = symbols_by_ids
+            .iter()
+            .map(|(&id, symbols)| {
+                let symbols = symbols
+                    .iter()
+                    .map(|s| c_string(s, "symbol"))
+                    .collect::<Result<Vec<_>>>()?;
+                Ok((id, symbols))
+            })
+            .collect::<Result<_>>()?;
+        let mut pointers: Vec<Vec<*const c_char>> = symbols
+            .iter()
+            .map(|(_, symbols)| symbols.iter().map(|s| s.as_ptr()).collect())
+            .collect();
+        let mut lists: Vec<sys::dxfg_string_list> = pointers
+            .iter_mut()
+            .map(|pointers| {
+                Ok(sys::dxfg_string_list {
+                    size: list_size(pointers.len(), "symbols")?,
+                    elements: if pointers.is_empty() {
+                        ptr::null_mut()
+                    } else {
+                        pointers.as_mut_ptr()
+                    },
+                })
+            })
+            .collect::<Result<_>>()?;
+        let mut entries: Vec<sys::dxfg_symbols_by_order_source_id_map_entry_t> = symbols
+            .iter()
+            .zip(&mut lists)
+            .map(|((id, _), list)| sys::dxfg_symbols_by_order_source_id_map_entry_t {
+                order_source_id: *id,
+                symbols: list,
+            })
+            .collect();
+        let mut elements: Vec<*mut sys::dxfg_symbols_by_order_source_id_map_entry_t> =
+            entries.iter_mut().map(|entry| entry as *mut _).collect();
+        let list = sys::dxfg_v4_symbols_by_order_source_id_map_entry_list {
+            size: list_size(elements.len(), "order sources")?,
+            elements: if elements.is_empty() {
+                ptr::null_mut()
+            } else {
+                elements.as_mut_ptr()
+            },
+        };
+        // SAFETY: the list, its entries, their symbol lists and the strings live in the locals above during the call;
+        // the SDK only reads and copies them. The out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_AuthOrderSource_create(t, &list, out) })?;
+        Ok(AuthOrderSource { handle })
+    }
+
     /// The symbols of each available order source, by the id of the source (`getByIds`).
     #[doc(alias = "getByIds")]
     pub fn get_by_ids(&self) -> Result<HashMap<i32, Vec<String>>> {
@@ -296,4 +356,10 @@ unsafe fn strings(list: *mut sys::dxfg_string_list) -> Vec<String> {
         // SAFETY: the strings of a live list are live.
         .map(|&s| unsafe { isolate::string(s) }.into_owned())
         .collect()
+}
+
+/// The size of an SDK list of `count` elements; [`Error::InvalidArgument`](crate::Error::InvalidArgument) if it does not
+/// fit in `i32`.
+fn list_size(count: usize, what: &str) -> Result<i32> {
+    i32::try_from(count).map_err(|_| crate::Error::InvalidArgument(format!("too many {what}: {count}")))
 }

@@ -61,6 +61,16 @@ pub trait ObservableSubscriptionChangeListener: Send + 'static {
     /// default.
     #[doc(alias = "subscriptionClosed")]
     fn subscription_closed(&mut self) {}
+
+    /// Called when the configuration of the subscription changes (`configurationChanged`); does nothing by default.
+    ///
+    /// The configuration is the settings of the subscription that do not change its symbols: a
+    /// [`set_aggregation_period`](crate::DXFeedSubscription::set_aggregation_period) with another period calls it, one
+    /// with the same period does not, and neither does a change of the executor, as in Java. It is called on the thread
+    /// that changes the configuration, before that call returns; a change made inside a call of this listener, such as
+    /// [`symbols_added`](Self::symbols_added) or this one, calls it right after that call returns instead.
+    #[doc(alias = "configurationChanged")]
+    fn configuration_changed(&mut self) {}
 }
 
 impl<F: FnMut(&[Symbol]) + Send + 'static> ObservableSubscriptionChangeListener for F {

@@ -548,7 +548,7 @@ impl<E: SubscriptionItem> DXFeedTimeSeriesSubscription<E> {
     /// The time, in milliseconds since the Unix epoch, of the first events (`getFromTime`): that of the last
     /// [`set_from_time`](Self::set_from_time), or `i64::MAX` before it, when no events come.
     ///
-    /// The SDK has no such getter, so this is the time this value was given.
+    /// The subscription keeps the time it gave the SDK, so reading it needs no call of the SDK and cannot fail.
     #[doc(alias = "getFromTime")]
     pub fn get_from_time(&self) -> i64 {
         self.from_time.load(Ordering::Acquire)

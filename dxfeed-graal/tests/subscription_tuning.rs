@@ -2,12 +2,14 @@
 
 mod support;
 
-use std::sync::mpsc;
+use std::sync::{Arc, OnceLock, Weak, mpsc};
 use std::thread;
 use std::time::Duration;
 
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{DXFeedSubscription, Error, Executor, TimePeriod, TimePeriodInfo};
+use dxfeed_graal::{
+    DXFeedSubscription, Error, Executor, ObservableSubscriptionChangeListener, Symbol, TimePeriod, TimePeriodInfo,
+};
 use support::{Hub, quote_with_bid};
 
 #[test]
@@ -164,4 +166,106 @@ fn an_aggregation_period_conflates_the_batches() {
     );
     assert!(!info.is_unknown(), "the info is known once events arrive: {info}");
     assert_eq!(info.get_max(), 2000);
+}
+
+/// A change listener that sends the thread of each `configuration_changed` call.
+struct ConfigurationListener(mpsc::Sender<thread::ThreadId>);
+
+impl ObservableSubscriptionChangeListener for ConfigurationListener {
+    fn symbols_added(&mut self, _symbols: &[Symbol]) {}
+
+    fn configuration_changed(&mut self) {
+        let _ = self.0.send(thread::current().id());
+    }
+}
+
+/// Another aggregation period changes the configuration, on the calling thread before the call returns; the same
+/// period and the executor do not, as in Java.
+#[test]
+fn another_aggregation_period_changes_the_configuration() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let (sender, receiver) = mpsc::channel();
+    subscription.add_change_listener(ConfigurationListener(sender)).unwrap();
+    assert!(receiver.try_recv().is_err());
+
+    let period = Some(TimePeriod::value_of("1s").unwrap());
+    subscription.set_aggregation_period(period).unwrap();
+    assert_eq!(receiver.try_recv().unwrap(), thread::current().id());
+    subscription.set_aggregation_period(period).unwrap();
+    let executor = Executor::new_fixed_thread_pool(1, "configuration").unwrap();
+    subscription.set_executor(Some(&executor)).unwrap();
+    subscription.set_executor(None).unwrap();
+    assert!(receiver.try_recv().is_err());
+
+    subscription.set_aggregation_period(None).unwrap();
+    assert_eq!(receiver.try_recv().unwrap(), thread::current().id());
+}
+
+/// Changes the aggregation period from its own calls: once when symbols come, and once more from the first
+/// configuration call.
+struct NestedConfigurationListener {
+    subscription: Arc<OnceLock<Weak<DXFeedSubscription<Quote>>>>,
+    calls: mpsc::Sender<thread::ThreadId>,
+    configured: bool,
+}
+
+impl NestedConfigurationListener {
+    fn set_period(&self, period: &str) {
+        let subscription = self.subscription.get().and_then(Weak::upgrade).unwrap();
+        subscription
+            .set_aggregation_period(Some(TimePeriod::value_of(period).unwrap()))
+            .unwrap();
+    }
+}
+
+impl ObservableSubscriptionChangeListener for NestedConfigurationListener {
+    fn symbols_added(&mut self, _symbols: &[Symbol]) {
+        self.set_period("1s");
+    }
+
+    fn configuration_changed(&mut self) {
+        let _ = self.calls.send(thread::current().id());
+        if !self.configured {
+            self.configured = true;
+            self.set_period("2s");
+        }
+    }
+}
+
+/// A configuration change made inside a call of the listener reaches it right after that call, on the same thread.
+#[test]
+fn a_nested_configuration_change_reaches_the_listener() {
+    let hub = Hub::new();
+    let subscription = Arc::new(hub.feed.create_subscription::<Quote>().unwrap());
+    let cell = Arc::new(OnceLock::new());
+    let (calls, receiver) = mpsc::channel();
+    let listener = NestedConfigurationListener {
+        subscription: Arc::clone(&cell),
+        calls,
+        configured: false,
+    };
+    subscription.add_change_listener(listener).unwrap();
+    cell.set(Arc::downgrade(&subscription)).unwrap();
+
+    subscription.add_symbols(["AAPL"]).unwrap();
+    let me = thread::current().id();
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), me);
+    assert_eq!(receiver.recv_timeout(Duration::from_secs(5)).unwrap(), me);
+    assert!(receiver.recv_timeout(Duration::from_millis(200)).is_err());
+    assert_eq!(
+        subscription.get_aggregation_period().unwrap(),
+        Some(TimePeriod::value_of("2s").unwrap())
+    );
+}
+
+/// A closure listener ignores configuration changes.
+#[test]
+fn a_closure_listener_ignores_configuration_changes() {
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    subscription.add_change_listener(|_: &[Symbol]| {}).unwrap();
+    subscription
+        .set_aggregation_period(Some(TimePeriod::value_of("1s").unwrap()))
+        .unwrap();
 }
