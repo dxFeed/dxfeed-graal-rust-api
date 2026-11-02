@@ -1,6 +1,6 @@
 //! Errors of the API.
 
-use std::ffi::CString;
+use std::ffi::{CStr, CString};
 use std::fmt;
 
 /// The result of a fallible call.
@@ -119,6 +119,63 @@ impl fmt::Display for JavaException {
 impl std::error::Error for JavaException {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         self.cause.as_deref().map(|c| c as _)
+    }
+}
+
+/// A class of the Java exceptions that [`Promise::complete_exceptionally`](crate::Promise::complete_exceptionally)
+/// and [`Promise::failed`](crate::Promise::failed) create: the fixed set that the SDK creates without reflection.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum JavaExceptionClass {
+    /// `java.lang.RuntimeException`.
+    RuntimeException,
+    /// `java.lang.IllegalArgumentException`.
+    IllegalArgumentException,
+    /// `java.lang.IllegalStateException`.
+    IllegalStateException,
+    /// `java.lang.UnsupportedOperationException`.
+    UnsupportedOperationException,
+    /// `java.io.IOException`.
+    IOException,
+    /// `java.util.concurrent.CancellationException`. It fails a promise but does not cancel it:
+    /// [`Promise::is_cancelled`](crate::Promise::is_cancelled) stays `false`;
+    /// [`Promise::cancel`](crate::Promise::cancel) cancels a promise.
+    CancellationException,
+    /// `java.util.concurrent.TimeoutException`.
+    TimeoutException,
+}
+
+impl JavaExceptionClass {
+    /// The fully qualified name of the class, as [`JavaException::get_class_name`] returns it.
+    pub fn get_name(self) -> &'static str {
+        match self {
+            JavaExceptionClass::RuntimeException => "java.lang.RuntimeException",
+            JavaExceptionClass::IllegalArgumentException => "java.lang.IllegalArgumentException",
+            JavaExceptionClass::IllegalStateException => "java.lang.IllegalStateException",
+            JavaExceptionClass::UnsupportedOperationException => "java.lang.UnsupportedOperationException",
+            JavaExceptionClass::IOException => "java.io.IOException",
+            JavaExceptionClass::CancellationException => "java.util.concurrent.CancellationException",
+            JavaExceptionClass::TimeoutException => "java.util.concurrent.TimeoutException",
+        }
+    }
+
+    /// The name as a NUL-terminated string for the SDK.
+    pub(crate) fn c_name(self) -> &'static CStr {
+        match self {
+            JavaExceptionClass::RuntimeException => c"java.lang.RuntimeException",
+            JavaExceptionClass::IllegalArgumentException => c"java.lang.IllegalArgumentException",
+            JavaExceptionClass::IllegalStateException => c"java.lang.IllegalStateException",
+            JavaExceptionClass::UnsupportedOperationException => c"java.lang.UnsupportedOperationException",
+            JavaExceptionClass::IOException => c"java.io.IOException",
+            JavaExceptionClass::CancellationException => c"java.util.concurrent.CancellationException",
+            JavaExceptionClass::TimeoutException => c"java.util.concurrent.TimeoutException",
+        }
+    }
+}
+
+impl fmt::Display for JavaExceptionClass {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.get_name())
     }
 }
 

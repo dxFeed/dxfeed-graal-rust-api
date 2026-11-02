@@ -1,4 +1,4 @@
-//! The promise of a result of a feed request: a last event or a list of events.
+//! Promises: of the result of a feed request (a last event or a list of events), or created by the application.
 
 use std::ffi::c_void;
 use std::marker::PhantomData;
@@ -9,7 +9,7 @@ use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, JavaException, Result};
+use crate::error::{Error, JavaException, JavaExceptionClass, Result, c_string};
 use crate::event::sdk_event::{take_event, take_events};
 use crate::event::{Event, EventKind, IndexedEvent, LastingEvent, SysEvents};
 use crate::executor::Executor;
@@ -22,6 +22,7 @@ const AWAIT_TIMED_OUT: i32 = 1;
 
 /// The result of a feed request that becomes known later (`Promise`): an event of [`DXFeed::get_last_event_promise`],
 /// or a `Vec` of events of [`DXFeed::get_time_series_promise`] and [`DXFeed::get_indexed_events_promise`].
+/// [`Promise::new`] creates one that the application completes, and [`Promise::failed`] one that has failed.
 ///
 /// [`wait`](Self::wait) and [`await_result`](Self::await_result) block for it; [`get_result`](Self::get_result),
 /// [`is_done`](Self::is_done), [`is_cancelled`](Self::is_cancelled) and [`cancel`](Self::cancel) do not block, and
@@ -107,8 +108,18 @@ impl<E: IndexedEvent + EventKind> Promise<Vec<E>> {
     }
 }
 
+impl Promise<()> {
+    /// Completes the promise unless it is done, which runs its handlers as [`when_done`](Self::when_done) describes
+    /// (`complete`).
+    pub fn complete(&self) -> Result<()> {
+        let p = self.as_promise();
+        // SAFETY: the promise is live; a NULL result is the null object.
+        call(|t| unsafe { sys::dxfg_v4_Promise_complete(t, p, ptr::null_mut()) })
+    }
+}
+
 impl<T: PromiseResult> Promise<T> {
-    pub(crate) fn new(handle: Handle<sys::dxfg_v4_promise_t>, feed: DXFeed) -> Self {
+    pub(crate) fn from_request(handle: Handle<sys::dxfg_v4_promise_t>, feed: DXFeed) -> Self {
         Promise {
             handle,
             feeds: vec![feed],
@@ -116,13 +127,59 @@ impl<T: PromiseResult> Promise<T> {
         }
     }
 
-    /// Another handle of the promise that keeps no endpoint open.
-    fn try_clone(&self) -> Result<Self> {
-        Ok(Promise {
-            handle: self.handle.try_clone()?,
+    /// Creates a promise that is not done (`new Promise()`). The application completes it with `complete`,
+    /// [`complete_exceptionally`](Self::complete_exceptionally) or [`cancel`](Self::cancel); the handlers that
+    /// [`when_done`](Self::when_done) adds before then run on the thread that does so, before that call returns. The
+    /// promise keeps no endpoint open.
+    pub fn new() -> Result<Self> {
+        // SAFETY: the out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_Promise_new(t, out) })?;
+        Ok(Self::without_feed(handle))
+    }
+
+    /// Creates a promise that has failed with a new Java exception of `class` and `message` (`Promise.failed`). The
+    /// promise keeps no endpoint open.
+    ///
+    /// A message with a NUL byte returns [`Error::InvalidArgument`].
+    pub fn failed(class: JavaExceptionClass, message: &str) -> Result<Self> {
+        let (class, message) = (class.c_name(), c_string(message, "exception message")?);
+        // SAFETY: both strings are NUL-terminated and outlive the call; the out-pointer is valid for writes.
+        let handle = Handle::create(|t, out| unsafe {
+            sys::dxfg_v4_Promise_failedWithClassNameAndMessage(t, class.as_ptr(), message.as_ptr(), out)
+        })?;
+        Ok(Self::without_feed(handle))
+    }
+
+    /// Completes the promise exceptionally with a new Java exception of `class` and `message` unless it is done, which
+    /// runs its handlers as [`when_done`](Self::when_done) describes (`completeExceptionally`). The exception has no
+    /// cause. [`get_exception`](Self::get_exception), [`get_result`](Self::get_result),
+    /// [`await_result`](Self::await_result) and a zero-timeout [`wait`](Self::wait) return it as [`Error::Java`]; a
+    /// [`wait`](Self::wait) with a positive timeout returns a `com.dxfeed.promise.PromiseException` caused by it, as
+    /// Java's `awaitWithoutException` does.
+    ///
+    /// A message with a NUL byte returns [`Error::InvalidArgument`].
+    #[doc(alias = "completeExceptionally")]
+    pub fn complete_exceptionally(&self, class: JavaExceptionClass, message: &str) -> Result<()> {
+        let (class, message) = (class.c_name(), c_string(message, "exception message")?);
+        let p = self.as_promise();
+        // SAFETY: the promise is live and both strings are NUL-terminated and outlive the call.
+        call(|t| unsafe {
+            sys::dxfg_v4_Promise_completeExceptionallyWithClassNameAndMessage(t, p, class.as_ptr(), message.as_ptr())
+        })
+    }
+
+    /// A promise of `handle` that keeps no endpoint open.
+    fn without_feed(handle: Handle<sys::dxfg_v4_promise_t>) -> Self {
+        Promise {
+            handle,
             feeds: Vec::new(),
             _result: PhantomData,
-        })
+        }
+    }
+
+    /// Another handle of the promise that keeps no endpoint open.
+    fn try_clone(&self) -> Result<Self> {
+        Ok(Self::without_feed(self.handle.try_clone()?))
     }
 
     /// Waits at most `timeout` for the result (`Promise.awaitWithoutException`).
@@ -267,8 +324,8 @@ impl<T: PromiseResult> Promise<T> {
     ///
     /// If the promise is done, the calling thread runs it before this method returns. Otherwise a thread of the
     /// executor of the endpoint runs it for a feed request, also when the promise is cancelled; for a promise of
-    /// [`Promises::all_of`], the thread that completes or cancels it does, including a [`wait`](Self::wait) whose
-    /// timeout cancels it.
+    /// [`Promises::all_of`] or of [`Promise::new`], the thread that completes or cancels it does, including a
+    /// [`wait`](Self::wait) whose timeout cancels it.
     ///
     /// `handler` receives another handle of the promise, which keeps no endpoint open. A panic of `handler` goes to
     /// [`ErrorManager`](crate::ErrorManager); blocking waits inside it return [`Error::InCallback`]. A handler cannot
@@ -400,7 +457,7 @@ impl Promises {
     /// The first of `promises` to be done, normally or exceptionally (`Promises.anyOf`); the others are then
     /// cancelled.
     ///
-    /// The SDK cannot create a pending promise, so the result is an [`AnyOf`], which owns `promises`. Returns
+    /// The result is an [`AnyOf`], which owns `promises` and tells which of them is done. Returns
     /// [`Error::InvalidArgument`] if `promises` is empty.
     #[doc(alias = "anyOf")]
     pub fn any_of<T: PromiseResult + 'static>(promises: Vec<Promise<T>>) -> Result<AnyOf<T>> {

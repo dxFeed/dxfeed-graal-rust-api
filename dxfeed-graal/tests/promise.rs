@@ -7,11 +7,12 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::event::{BaseEvent, Candle, Quote};
+use dxfeed_graal::event::{BaseEvent, Candle, Quote, TimeAndSale};
 use dxfeed_graal::{
-    AnyOf, DXEndpoint, Error, ErrorManager, Executor, Promise, Promises, Role, live_events, live_handles,
+    AnyOf, DXEndpoint, Error, ErrorManager, Executor, JavaExceptionClass, Promise, Promises, Role, live_events,
+    live_handles,
 };
-use support::{Hub, candle, candle_symbol, delivered, quote, same_events};
+use support::{Hub, candle, candle_symbol, delivered, quote, same_events, time_and_sale};
 
 /// Runs the tests of this file one by one, so that each can count the live handles and events.
 fn serial() -> MutexGuard<'static, ()> {
@@ -360,4 +361,254 @@ fn all_of_and_any_of() {
 
     drop((requested, all, any, hub));
     assert_eq!(live_handles(), start);
+}
+
+/// A promise created in Rust completes with an event through the typed `complete`.
+#[test]
+fn a_new_promise_completes_with_an_event() {
+    let _serial = serial();
+    let promise = Promise::<Quote>::new().unwrap();
+    assert!(!promise.is_done().unwrap());
+    assert!(promise.get_result().unwrap().is_none());
+    promise.complete(&quote("AAPL")).unwrap();
+    assert!(promise.is_done().unwrap());
+    // The SDK keeps only the sequence of `time_millis_sequence` (its millis come from the times), so the quote is
+    // compared field by field.
+    let result = promise.get_result().unwrap().unwrap();
+    let expected = quote("AAPL");
+    assert_eq!(result.symbol(), "AAPL");
+    assert_eq!(
+        (result.bid_price, result.ask_price, result.bid_size, result.ask_size),
+        (
+            expected.bid_price,
+            expected.ask_price,
+            expected.bid_size,
+            expected.ask_size
+        )
+    );
+}
+
+#[test]
+fn a_new_promise_completes_with_events_in_order() {
+    let _serial = serial();
+    let promise = Promise::<Vec<TimeAndSale>>::new().unwrap();
+    let mut second = time_and_sale("AAPL");
+    second.price = 191.0;
+    promise.complete(&[time_and_sale("AAPL"), second.clone()]).unwrap();
+    let result = promise.wait(LONG).unwrap();
+    assert_eq!(result.len(), 2);
+    assert!(same_events(&result[0], &time_and_sale("AAPL")), "{result:?}");
+    assert!(same_events(&result[1], &second), "{result:?}");
+}
+
+#[test]
+fn a_new_unit_promise_completes() {
+    let _serial = serial();
+    let promise = Promise::<()>::new().unwrap();
+    assert!(!promise.is_done().unwrap());
+    promise.complete().unwrap();
+    assert!(promise.is_done().unwrap());
+    assert!(promise.has_result().unwrap());
+    promise.wait(LONG).unwrap();
+}
+
+#[test]
+fn complete_exceptionally_fails_the_promise_with_the_class_and_message() {
+    let _serial = serial();
+    let promise = Promise::<Quote>::new().unwrap();
+    promise
+        .complete_exceptionally(JavaExceptionClass::IllegalStateException, "no quote")
+        .unwrap();
+    assert!(promise.is_done().unwrap());
+    assert!(promise.has_exception().unwrap());
+    assert!(!promise.is_cancelled().unwrap());
+    let exception = promise.get_exception().unwrap().unwrap();
+    assert_eq!(exception.get_class_name(), "java.lang.IllegalStateException");
+    assert_eq!(exception.get_message(), "no quote");
+    // As in Java, the wait fails with a PromiseException caused by the exception.
+    match promise.wait(LONG) {
+        Err(Error::Java(exception)) => {
+            assert_eq!(exception.get_class_name(), "com.dxfeed.promise.PromiseException");
+            let cause = exception.get_cause().unwrap();
+            assert_eq!(cause.get_class_name(), "java.lang.IllegalStateException");
+            assert_eq!(cause.get_message(), "no quote");
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn every_exception_class_keeps_its_name() {
+    let _serial = serial();
+    for class in [
+        JavaExceptionClass::RuntimeException,
+        JavaExceptionClass::IllegalArgumentException,
+        JavaExceptionClass::IllegalStateException,
+        JavaExceptionClass::UnsupportedOperationException,
+        JavaExceptionClass::IOException,
+        JavaExceptionClass::CancellationException,
+        JavaExceptionClass::TimeoutException,
+    ] {
+        let promise = Promise::<()>::failed(class, "message").unwrap();
+        let exception = promise.get_exception().unwrap().unwrap();
+        assert_eq!(exception.get_class_name(), class.get_name());
+        assert_eq!(class.to_string(), class.get_name());
+    }
+}
+
+#[test]
+fn failed_is_done_with_the_exception() {
+    let _serial = serial();
+    let promise = Promise::<Vec<TimeAndSale>>::failed(JavaExceptionClass::IOException, "gone").unwrap();
+    assert!(promise.is_done().unwrap());
+    assert!(!promise.has_result().unwrap());
+    let exception = promise.get_exception().unwrap().unwrap();
+    assert_eq!(exception.get_class_name(), "java.io.IOException");
+    assert_eq!(exception.get_message(), "gone");
+    assert!(matches!(promise.get_result(), Err(Error::Java(_))));
+}
+
+#[test]
+fn a_message_with_a_nul_byte_is_invalid() {
+    let _serial = serial();
+    let promise = Promise::<()>::new().unwrap();
+    assert!(matches!(
+        promise.complete_exceptionally(JavaExceptionClass::RuntimeException, "a\0b"),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(!promise.is_done().unwrap());
+    assert!(matches!(
+        Promise::<()>::failed(JavaExceptionClass::RuntimeException, "a\0b"),
+        Err(Error::InvalidArgument(_))
+    ));
+}
+
+/// The first completion wins; the later ones do nothing.
+#[test]
+fn the_first_completion_wins() {
+    let _serial = serial();
+    let promise = Promise::<Quote>::new().unwrap();
+    promise.complete(&quote("AAPL")).unwrap();
+    promise.complete(&quote("IBM")).unwrap();
+    promise
+        .complete_exceptionally(JavaExceptionClass::RuntimeException, "late")
+        .unwrap();
+    promise.cancel().unwrap();
+    assert_eq!(promise.get_result().unwrap().unwrap().symbol(), "AAPL");
+    assert!(!promise.has_exception().unwrap());
+}
+
+/// The handlers of a new promise run on the completing thread before `complete` returns.
+#[test]
+fn when_done_runs_on_the_completing_thread() {
+    let _serial = serial();
+    let promise = Promise::<Quote>::new().unwrap();
+    let (sender, receiver) = mpsc::channel();
+    promise
+        .when_done(move |done| {
+            let symbol = done.get_result().unwrap().map(|quote| quote.symbol().into_owned());
+            sender.send((thread::current().id(), symbol)).unwrap();
+        })
+        .unwrap();
+    assert!(receiver.try_recv().is_err());
+    promise.complete(&quote("AAPL")).unwrap();
+    let (thread, symbol) = receiver.try_recv().unwrap();
+    assert_eq!(thread, thread::current().id());
+    assert_eq!(symbol.as_deref(), Some("AAPL"));
+}
+
+#[test]
+fn new_promises_combine_with_all_of() {
+    let _serial = serial();
+    let first = Promise::<Quote>::new().unwrap();
+    let second = Promise::<Quote>::new().unwrap();
+    let all = Promises::all_of([&first, &second]).unwrap();
+    first.complete(&quote("AAPL")).unwrap();
+    assert!(!all.is_done().unwrap());
+    second
+        .complete_exceptionally(JavaExceptionClass::TimeoutException, "late")
+        .unwrap();
+    assert!(all.is_done().unwrap());
+    all.wait(LONG).unwrap();
+}
+
+#[test]
+fn new_promises_release_their_handles() {
+    let _serial = serial();
+    let before = live_handles();
+    {
+        let promise = Promise::<Quote>::new().unwrap();
+        promise.when_done(|_| {}).unwrap();
+        promise.complete(&quote("AAPL")).unwrap();
+        let _failed = Promise::<()>::failed(JavaExceptionClass::RuntimeException, "x").unwrap();
+    }
+    assert_eq!(live_handles(), before);
+}
+
+/// The calls that read a done promise give the exception itself; a positive wait gives the `PromiseException` of Java.
+#[test]
+fn reads_of_a_failed_promise_give_the_exception() {
+    let _serial = serial();
+    let promise = Promise::<Quote>::failed(JavaExceptionClass::UnsupportedOperationException, "no").unwrap();
+    let class = |result: dxfeed_graal::Result<Quote>| match result {
+        Err(Error::Java(exception)) => exception.get_class_name().to_owned(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(
+        class(promise.wait(Duration::ZERO)),
+        "java.lang.UnsupportedOperationException"
+    );
+    assert_eq!(class(promise.await_result()), "java.lang.UnsupportedOperationException");
+    assert_eq!(class(promise.wait(LONG)), "com.dxfeed.promise.PromiseException");
+}
+
+/// A handler added to a done promise runs at once on the calling thread.
+#[test]
+fn when_done_of_a_failed_promise_runs_at_once() {
+    let _serial = serial();
+    let promise = Promise::<()>::failed(JavaExceptionClass::RuntimeException, "done").unwrap();
+    let (sender, receiver) = mpsc::channel();
+    promise
+        .when_done(move |done| {
+            sender
+                .send((thread::current().id(), done.has_exception().unwrap()))
+                .unwrap()
+        })
+        .unwrap();
+    assert_eq!(receiver.try_recv().unwrap(), (thread::current().id(), true));
+}
+
+/// A completion after a failure or a cancellation is ignored, and the handler runs once.
+#[test]
+fn a_late_completion_is_ignored() {
+    let _serial = serial();
+    for cancel in [false, true] {
+        let promise = Promise::<Quote>::new().unwrap();
+        let (sender, receiver) = mpsc::channel();
+        promise.when_done(move |_| sender.send(()).unwrap()).unwrap();
+        if cancel {
+            promise.cancel().unwrap();
+        } else {
+            promise
+                .complete_exceptionally(JavaExceptionClass::RuntimeException, "first")
+                .unwrap();
+        }
+        promise.complete(&quote("AAPL")).unwrap();
+        assert!(!promise.has_result().unwrap());
+        assert_eq!(promise.is_cancelled().unwrap(), cancel);
+        assert_eq!(receiver.try_iter().count(), 1);
+    }
+}
+
+/// Completing the promise of `all_of` cancels its pending promises.
+#[test]
+fn completing_all_of_cancels_its_new_promises() {
+    let _serial = serial();
+    let first = Promise::<Quote>::new().unwrap();
+    let second = Promise::<Quote>::new().unwrap();
+    first.complete(&quote("AAPL")).unwrap();
+    let all = Promises::all_of([&first, &second]).unwrap();
+    all.complete().unwrap();
+    assert!(second.is_cancelled().unwrap());
+    assert!(first.has_result().unwrap());
 }

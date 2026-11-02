@@ -245,7 +245,7 @@ impl DXFeed {
         let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
             sys::dxfg_v4_DXFeed_getTimeSeriesPromise(t, feed, E::TYPE.to_sys(), symbol, from_time, to_time, out.cast())
         })?;
-        Ok(Promise::new(handle, self.clone()))
+        Ok(Promise::from_request(handle, self.clone()))
     }
 
     /// Requests the indexed events of type `E` for `symbol` from `source` and returns the promise of the list, ordered
@@ -268,7 +268,7 @@ impl DXFeed {
         let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
             sys::dxfg_v4_DXFeed_getIndexedEventsPromise(t, feed, E::TYPE.to_sys(), symbol, source, out.cast())
         })?;
-        Ok(Promise::new(handle, self.clone()))
+        Ok(Promise::from_request(handle, self.clone()))
     }
 
     /// Returns the last event of type `E` for `symbol` from the local cache of the feed, or `None` if no subscription
@@ -358,7 +358,7 @@ impl DXFeed {
         let handle = Handle::create(|t, out: *mut *mut sys::dxfg_v4_promise_t| unsafe {
             sys::dxfg_v4_DXFeed_getLastEventPromise(t, feed, E::TYPE.to_sys(), symbol, out.cast())
         })?;
-        Ok(Promise::new(handle, self.clone()))
+        Ok(Promise::from_request(handle, self.clone()))
     }
 
     /// Returns a new event with the last values of the type and symbol of `event` from the local cache of the feed, or
@@ -444,7 +444,7 @@ impl DXFeed {
         let list = PromiseList(list);
         list.handles()?
             .into_iter()
-            .map(|handle| Ok(Promise::new(handle, self.clone())))
+            .map(|handle| Ok(Promise::from_request(handle, self.clone())))
             .collect()
     }
 

@@ -407,7 +407,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_events`, `get_last_event_promise`
   and `get_last_events_promises`
 - [x] Promises: `Promise` with `when_done`, `when_done_async` and `complete`, `Promises::all_of` and
-  `Promises::any_of`
+  `Promises::any_of`; promises created in Rust with `Promise::new` and `Promise::failed`, failed with
+  `complete_exceptionally` and a `JavaExceptionClass`
 - [x] Endpoint properties, roles and the default instances, user and password, `AuthToken`, event types and
   aggregation period info
 - [x] `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
@@ -432,8 +433,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and `configurationChanged`, creating and failing a
-`Promise` from Rust, `InstrumentProfileWriter`, user data of day and session filters, and the property listeners of
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and `configurationChanged`,
+`InstrumentProfileWriter`, user data of day and session filters, and the property listeners of
 `OnDemandService`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java
 members are left out.
 
