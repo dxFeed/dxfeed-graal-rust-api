@@ -15,7 +15,7 @@ const DEPTH: usize = 19;
 const FIRST_LINE: usize = 5;
 
 /// The width of one side of the book.
-const SIDE_WIDTH: usize = 38;
+const SIDE_WIDTH: usize = 39;
 
 fn print_usage() {
     println!(
@@ -83,7 +83,7 @@ fn run(address: &str, symbol: &str, sources: &str) -> dxfeed_graal::Result<()> {
     // The screen is cleared after the start of the SDK, which may print warnings of the JVM.
     {
         let _lock = screen.lock().unwrap();
-        draw_header(symbol);
+        draw_header(symbol, sources);
     }
 
     endpoint.connect(address)?;
@@ -94,15 +94,24 @@ fn run(address: &str, symbol: &str, sources: &str) -> dxfeed_graal::Result<()> {
 }
 
 /// Clears the screen and draws the header in its first four lines.
-fn draw_header(symbol: &str) {
+fn draw_header(symbol: &str, sources: &str) {
+    let rule = |title: &str, color: &str| format!("{:─^39}", format!(" {title} ")).replace(title, &paint(color, title));
     let lines = [
-        format!("{:=^78}", format!(" {symbol} ")),
-        format!("{:^38}||{:^38}", "BID", "ASK"),
+        format!(" {} {}", paint(BOLD, symbol), paint(DIM, sources)),
+        paint(DIM, &format!("{}┬{}", rule("BID", GREEN), rule("ASK", RED))),
         format!(
-            "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}||{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
-            "EX", "Source", "MM", "Price", "Size"
+            " {:<6} {:>12} {:>8} {:>8} {} {:>8} {:>8} {:12} {:<6} ",
+            "EX MM",
+            "",
+            "Size",
+            "Price",
+            paint(DIM, "│"),
+            "Price",
+            "Size",
+            "",
+            "MM EX"
         ),
-        format!("{:-^78}", ""),
+        paint(DIM, &format!("{0}┼{0}", "─".repeat(SIDE_WIDTH))),
     ];
     let mut screen = String::from(CLEAR_SCREEN);
     for (i, line) in lines.iter().enumerate() {
@@ -112,28 +121,64 @@ fn draw_header(symbol: &str) {
     let _ = std::io::stdout().flush();
 }
 
-/// Draws the book below the header: a line for each price level, blank where a side has fewer levels.
+/// Draws the book below the header: a line for each price level, blank where a side has fewer levels. A bar of each
+/// level shows its size against the largest one on the screen.
 fn draw_book(buy: &[Order], sell: &[Order]) {
+    let max_size = buy.iter().chain(sell).map(|order| order.size).fold(0.0, f64::max);
+    let blank = " ".repeat(SIDE_WIDTH);
     let mut screen = String::new();
     for i in 0..DEPTH {
-        let bid = buy.get(i).map(format_order).unwrap_or_default();
-        let ask = sell.get(i).map(format_order).unwrap_or_default();
-        screen += &format!("{}{bid:SIDE_WIDTH$}||{ask}{CLEAR_LINE}", move_to(FIRST_LINE + i, 1));
+        let bid = buy.get(i).map_or(blank.clone(), |order| {
+            let (ex, mm, size, price) = columns(order);
+            let bar = format!("{:>12}", bar(order.size, max_size));
+            format!(
+                " {ex} {mm:<4} {} {size:>8} {} ",
+                paint(GREEN, &bar),
+                paint(GREEN, &format!("{price:>8}"))
+            )
+        });
+        let ask = sell.get(i).map_or(blank.clone(), |order| {
+            let (ex, mm, size, price) = columns(order);
+            let bar = format!("{:<12}", bar(order.size, max_size));
+            format!(
+                " {} {size:>8} {} {mm:<4} {ex} ",
+                paint(RED, &format!("{price:>8}")),
+                paint(RED, &bar)
+            )
+        });
+        screen += &format!(
+            "{}{bid}{}{ask}{CLEAR_LINE}",
+            move_to(FIRST_LINE + i, 1),
+            paint(DIM, "│")
+        );
     }
     print!("{screen}");
     // The standard output of Rust is line-buffered, and the book has no line ends.
     let _ = std::io::stdout().flush();
 }
 
-fn format_order(order: &Order) -> String {
-    format!(
-        "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
-        encode_char(order.exchange_code()),
-        order.source(),
-        order.market_maker.as_deref().unwrap_or(""),
-        to_string(order.price),
-        to_string(order.size)
-    )
+/// The exchange, the market maker, the size and the price of an order, as the book shows them.
+fn columns(order: &Order) -> (char, &str, String, String) {
+    let ex = Some(order.exchange_code())
+        .filter(|c| c.is_ascii_graphic())
+        .unwrap_or(' ');
+    let mm = order.market_maker.as_deref().unwrap_or("");
+    (ex, mm, to_string(order.size), to_string(order.price))
+}
+
+/// A bar of up to 12 blocks for `size` against `max_size`; a level of any size has a block at least.
+fn bar(size: f64, max_size: f64) -> String {
+    let blocks = if size > 0.0 {
+        (size / max_size * 12.0).ceil().clamp(1.0, 12.0) as usize
+    } else {
+        0
+    };
+    "█".repeat(blocks)
+}
+
+/// `text` in the color or style `code`.
+fn paint(code: &str, text: &str) -> String {
+    format!("{code}{text}{RESET}")
 }
 
 /// The order sources of a comma-separated list of names, such as `NTV` or `AGGREGATE_ASK,AGGREGATE_BID`; the
@@ -151,15 +196,6 @@ fn parse_event_sources(sources: &str) -> dxfeed_graal::Result<Vec<IndexedEventSo
         .collect()
 }
 
-/// The text of `dxfcpp::encodeChar`: a printable ASCII character as is, `\0`, or `\uXXXX`.
-fn encode_char(c: char) -> String {
-    match c {
-        ' '..='~' => c.to_string(),
-        '\0' => "\\0".to_string(),
-        _ => format!("\\u{:04x}", c as u32),
-    }
-}
-
 /// The text of `dxfcpp::toString(double)`, which is the text of `Double.toString` in Java. The same for usual prices
 /// and sizes; values from 1e7 and below 1e-3 are printed without an exponent here.
 fn to_string(d: f64) -> String {
@@ -172,11 +208,16 @@ fn to_string(d: f64) -> String {
     }
 }
 
-// The escape sequences of the terminal (VT100).
+// The escape sequences of the terminal (VT100) and its colors (SGR).
 const CLEAR_SCREEN: &str = "\x1b[2J";
 const CLEAR_LINE: &str = "\x1b[K";
 const HIDE_CURSOR: &str = "\x1b[?25l";
 const SHOW_CURSOR: &str = "\x1b[?25h";
+const RESET: &str = "\x1b[0m";
+const BOLD: &str = "\x1b[1m";
+const DIM: &str = "\x1b[2m";
+const GREEN: &str = "\x1b[32m";
+const RED: &str = "\x1b[31m";
 
 /// Moves the cursor to `line` and `column`, both from 1.
 fn move_to(line: usize, column: usize) -> String {
