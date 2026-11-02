@@ -1,4 +1,4 @@
-//! Usage: `cargo run --example MarketDepthModelSample`
+//! Usage: `cargo run --example MarketDepthModelSample -- [<address> [<symbol> [<sources>]]]`
 
 use std::io::Write;
 use std::sync::{Arc, Mutex};
@@ -8,101 +8,82 @@ use dxfeed_graal::event::{IndexedEventSource, Order, OrderSource};
 use dxfeed_graal::model::MarketDepthModel;
 use dxfeed_graal::{DXEndpoint, system};
 
-// The portals::legacy functions of the C++ sample.
-use legacy as otp;
+/// The number of the price levels on each side.
+const DEPTH: usize = 19;
 
-fn draw_header() {
-    println!("{:=^78}", "");
-    println!("{:^38}||{:^38}", "BID", "ASK");
+/// The line of the screen where the book starts, below the four lines of the header.
+const FIRST_LINE: usize = 5;
+
+/// The width of one side of the book.
+const SIDE_WIDTH: usize = 38;
+
+fn print_usage() {
     println!(
-        "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}||{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
-        "EX", "Source", "MM", "Price", "Size"
+        r#"
+Usage:
+MarketDepthModelSample [<address> [<symbol> [<sources>]]]
+
+Where:
+    address - The address to connect to retrieve data (remote host or local tape file), demo.dxfeed.com:7300 by
+              default.
+    symbol  - The symbol to show the order book of, AAPL by default.
+    sources - Is comma-separated list of order sources, NTV by default (e.g. "ntv" or
+              "AGGREGATE_ASK,AGGREGATE_BID").
+
+Press Enter to stop.
+
+Examples:
+    MarketDepthModelSample
+    MarketDepthModelSample demo.dxfeed.com:7300 IBM AGGREGATE_ASK,AGGREGATE_BID"#
     );
-    println!("{:-^78}", "");
-}
-
-fn render(buy: &[Order], sell: &[Order], depth: usize) {
-    for i in 0..depth {
-        if i < buy.len() {
-            print!(
-                "{}",
-                otp::move_to(5 + i, 0)
-                    + &format!(
-                        "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
-                        encode_char(buy[i].exchange_code()),
-                        get_source(&buy[i]),
-                        buy[i].market_maker.as_deref().unwrap_or(""),
-                        to_string(buy[i].price),
-                        to_string(buy[i].size)
-                    )
-            );
-        }
-
-        print!("{}", otp::move_to(5 + i, 39) + "||");
-
-        if i < sell.len() {
-            print!(
-                "{}",
-                otp::move_to(5 + i, 41)
-                    + &format!(
-                        "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
-                        encode_char(sell[i].exchange_code()),
-                        get_source(&sell[i]),
-                        sell[i].market_maker.as_deref().unwrap_or(""),
-                        to_string(sell[i].price),
-                        to_string(sell[i].size)
-                    )
-            );
-        }
-    }
-
-    // Unlike std::cout of C++, stdout of Rust is line-buffered.
-    let _ = std::io::stdout().flush();
 }
 
 fn main() -> dxfeed_graal::Result<()> {
-    otp::VirtualTerminal::enable();
-    print!("{}", otp::hide_cursor());
+    let args: Vec<String> = std::env::args().collect();
+    if args.len() > 4 || args.iter().skip(1).any(|arg| arg == "-h" || arg == "--help") {
+        print_usage();
+        return Ok(());
+    }
+    let address = args.get(1).map_or("demo.dxfeed.com:7300", String::as_str);
+    let symbol = args.get(2).map_or("AAPL", String::as_str);
+    let sources = args.get(3).map_or("NTV", String::as_str);
 
-    // The cursor comes back on the normal exit and on an error.
-    let result = run();
-    print!("{}", otp::show_cursor());
+    enable_virtual_terminal();
+    print!("{HIDE_CURSOR}");
+
+    // The cursor comes back below the book on the normal exit and on an error.
+    let result = run(address, symbol, sources);
+    print!("{}{SHOW_CURSOR}", move_to(FIRST_LINE + DEPTH, 1));
     let _ = std::io::stdout().flush();
     result
 }
 
-fn run() -> dxfeed_graal::Result<()> {
-    let address = "demo.dxfeed.com:7300";
-    let symbol = "AAPL";
-    let sources = "NTV";
-    // let sources = "ntv";
-    // let sources = "AGGREGATE_ASK,AGGREGATE_BID";
-    let depth = 19_usize;
-
+fn run(address: &str, symbol: &str, sources: &str) -> dxfeed_graal::Result<()> {
     // Disable QD logging.
     system::set_property("log.className", "com.devexperts.logging.InterceptableLogging")?;
     system::set_property("log.level", "OFF")?;
     system::set_property("err.level", "OFF")?;
 
-    let io_mtx = Arc::new(Mutex::new(()));
+    let screen = Arc::new(Mutex::new(()));
 
     let endpoint = DXEndpoint::create()?;
-    let listener_io_mtx = Arc::clone(&io_mtx);
+    let listener_screen = Arc::clone(&screen);
     let _model = MarketDepthModel::<Order>::new_builder()
         .with_feed(&endpoint.get_feed())
         .with_listener(move |buy, sell| {
-            let _lock = listener_io_mtx.lock().unwrap();
-            render(buy, sell, depth);
+            let _lock = listener_screen.lock().unwrap();
+            draw_book(buy, sell);
         })
         .with_sources(parse_event_sources(sources)?)
         .with_symbol(symbol)
-        .with_depth_limit(depth)
+        .with_depth_limit(DEPTH)
         .with_aggregation_period(Duration::from_millis(30))
         .build()?;
 
+    // The screen is cleared after the start of the SDK, which may print warnings of the JVM.
     {
-        let _lock = io_mtx.lock().unwrap();
-        draw_header();
+        let _lock = screen.lock().unwrap();
+        draw_header(symbol);
     }
 
     endpoint.connect(address)?;
@@ -110,6 +91,49 @@ fn run() -> dxfeed_graal::Result<()> {
     let _ = std::io::stdin().read_line(&mut String::new());
 
     Ok(())
+}
+
+/// Clears the screen and draws the header in its first four lines.
+fn draw_header(symbol: &str) {
+    let lines = [
+        format!("{:=^78}", format!(" {symbol} ")),
+        format!("{:^38}||{:^38}", "BID", "ASK"),
+        format!(
+            "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}||{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
+            "EX", "Source", "MM", "Price", "Size"
+        ),
+        format!("{:-^78}", ""),
+    ];
+    let mut screen = String::from(CLEAR_SCREEN);
+    for (i, line) in lines.iter().enumerate() {
+        screen += &format!("{}{line}{CLEAR_LINE}", move_to(1 + i, 1));
+    }
+    print!("{screen}");
+    let _ = std::io::stdout().flush();
+}
+
+/// Draws the book below the header: a line for each price level, blank where a side has fewer levels.
+fn draw_book(buy: &[Order], sell: &[Order]) {
+    let mut screen = String::new();
+    for i in 0..DEPTH {
+        let bid = buy.get(i).map(format_order).unwrap_or_default();
+        let ask = sell.get(i).map(format_order).unwrap_or_default();
+        screen += &format!("{}{bid:SIDE_WIDTH$}||{ask}{CLEAR_LINE}", move_to(FIRST_LINE + i, 1));
+    }
+    print!("{screen}");
+    // The standard output of Rust is line-buffered, and the book has no line ends.
+    let _ = std::io::stdout().flush();
+}
+
+fn format_order(order: &Order) -> String {
+    format!(
+        "{0:^2}|{1:^13}|{2:^4}|{3:^8}|{4:^7}",
+        encode_char(order.exchange_code()),
+        order.source(),
+        order.market_maker.as_deref().unwrap_or(""),
+        to_string(order.price),
+        to_string(order.size)
+    )
 }
 
 /// The order sources of a comma-separated list of names, such as `NTV` or `AGGREGATE_ASK,AGGREGATE_BID`; the
@@ -125,11 +149,6 @@ fn parse_event_sources(sources: &str) -> dxfeed_graal::Result<Vec<IndexedEventSo
         .filter(|name| !name.is_empty())
         .map(OrderSource::value_of)
         .collect()
-}
-
-/// The source of an order.
-fn get_source(order: &Order) -> IndexedEventSource {
-    order.source()
 }
 
 /// The text of `dxfcpp::encodeChar`: a printable ASCII character as is, `\0`, or `\uXXXX`.
@@ -153,63 +172,41 @@ fn to_string(d: f64) -> String {
     }
 }
 
-/// The functions of `portals::legacy`: VT escape sequences of the terminal.
-mod legacy {
-    pub struct VirtualTerminal;
+// The escape sequences of the terminal (VT100).
+const CLEAR_SCREEN: &str = "\x1b[2J";
+const CLEAR_LINE: &str = "\x1b[K";
+const HIDE_CURSOR: &str = "\x1b[?25l";
+const SHOW_CURSOR: &str = "\x1b[?25h";
 
-    impl VirtualTerminal {
-        /// Enables VT interpretation on the standard output of the process: it is a no-op out of Windows.
-        #[cfg(windows)]
-        pub fn enable() -> bool {
-            use std::ffi::c_void;
+/// Moves the cursor to `line` and `column`, both from 1.
+fn move_to(line: usize, column: usize) -> String {
+    format!("\x1b[{line};{column}H")
+}
 
-            type Handle = *mut c_void;
+/// Makes the Windows console interpret the escape sequences; other terminals always do.
+#[cfg(windows)]
+fn enable_virtual_terminal() {
+    use std::ffi::c_void;
 
-            const STD_OUTPUT_HANDLE: u32 = -11_i32 as u32;
-            const ENABLE_PROCESSED_OUTPUT: u32 = 0x0001;
-            const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
+    const STD_OUTPUT_HANDLE: u32 = -11_i32 as u32;
+    const ENABLE_VIRTUAL_TERMINAL_PROCESSING: u32 = 0x0004;
 
-            unsafe extern "system" {
-                fn GetStdHandle(std_handle: u32) -> Handle;
-                fn GetConsoleMode(console_handle: Handle, mode: *mut u32) -> i32;
-                fn SetConsoleMode(console_handle: Handle, mode: u32) -> i32;
-            }
+    unsafe extern "system" {
+        fn GetStdHandle(std_handle: u32) -> *mut c_void;
+        fn GetConsoleMode(console_handle: *mut c_void, mode: *mut u32) -> i32;
+        fn SetConsoleMode(console_handle: *mut c_void, mode: u32) -> i32;
+    }
 
-            // SAFETY: the functions of kernel32 get a handle of the process and a valid pointer to a local.
-            unsafe {
-                let handle = GetStdHandle(STD_OUTPUT_HANDLE);
-                let mut mode = 0;
-
-                if handle.is_null() || handle as isize == -1 || GetConsoleMode(handle, &mut mode) == 0 {
-                    return false;
-                }
-
-                SetConsoleMode(
-                    handle,
-                    mode | ENABLE_PROCESSED_OUTPUT | ENABLE_VIRTUAL_TERMINAL_PROCESSING,
-                ) != 0
-            }
+    // SAFETY: the functions of kernel32 get the handle of the process's output and a pointer to a local; a failure,
+    // such as an output that is no console, leaves the mode as it is.
+    unsafe {
+        let handle = GetStdHandle(STD_OUTPUT_HANDLE);
+        let mut mode = 0;
+        if GetConsoleMode(handle, &mut mode) != 0 {
+            SetConsoleMode(handle, mode | ENABLE_VIRTUAL_TERMINAL_PROCESSING);
         }
-
-        /// Enables VT interpretation on the standard output of the process: it is a no-op out of Windows.
-        #[cfg(not(windows))]
-        pub fn enable() -> bool {
-            true
-        }
-    }
-
-    /// The cursor-position sequence `ESC[line;columnH`.
-    pub fn move_to(line: usize, column: usize) -> String {
-        format!("\x1b[{line};{column}H")
-    }
-
-    /// The cursor-hide sequence.
-    pub fn hide_cursor() -> String {
-        "\x1b[?25l".to_string()
-    }
-
-    /// The cursor-show sequence.
-    pub fn show_cursor() -> String {
-        "\x1b[?25h".to_string()
     }
 }
+
+#[cfg(not(windows))]
+fn enable_virtual_terminal() {}
