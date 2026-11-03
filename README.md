@@ -427,16 +427,15 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
 - [x] List models: `OrderBookModel`, `IndexedEventModel`, `TimeSeriesEventModel` and their `ObservableListModel`
-- [x] On-demand historical data replay: `OnDemandService`
+- [x] On-demand historical data replay: `OnDemandService` and its property change listeners
 - [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`,
   `AuthOrderSource` (also created with `AuthOrderSource::create`)
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family, user data of day and session filters, and the
-property listeners of `OnDemandService`. `PriceLevelService.getCandles` and
-`PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and user data of day and session filters.
+`PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
 
 ## Development
 

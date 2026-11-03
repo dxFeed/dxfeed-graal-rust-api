@@ -56,6 +56,7 @@ sdk_handle!(
     sys::dxfg_v4_iterable_ip_t,
     sys::dxfg_v4_ipf_update_listener_t,
     sys::dxfg_v4_ipf_connection_state_change_listener_t,
+    sys::dxfg_v4_on_demand_property_change_listener_t,
     sys::dxfg_v4_schedule_t,
     sys::dxfg_v4_day_t,
     sys::dxfg_v4_session_t,

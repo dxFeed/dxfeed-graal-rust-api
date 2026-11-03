@@ -2,7 +2,7 @@
 //! the release thread and the lists of listeners added to an SDK object.
 
 use std::cell::Cell;
-use std::ffi::c_void;
+use std::ffi::{c_char, c_void};
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::mpsc::{self, Sender};
@@ -18,6 +18,7 @@ use crate::ipf::InstrumentProfile;
 use crate::ipf::live::ConnectionState;
 use crate::isolate::{self, CallbackScope};
 use crate::observable::ObservableSubscriptionChangeListener;
+use crate::ondemand::PropertyValue;
 use crate::subscription::ListenerId;
 use crate::symbol::Symbol;
 
@@ -32,6 +33,9 @@ pub(crate) type ChangeClosure = dyn ObservableSubscriptionChangeListener;
 
 /// The closure of an update listener of an instrument profile collector.
 pub(crate) type UpdateClosure = dyn FnMut(&[InstrumentProfile]) + Send;
+
+/// The closure of a property change listener of an on-demand service.
+pub(crate) type PropertyClosure = dyn FnMut(Option<&str>, PropertyValue, PropertyValue) + Send;
 
 /// The closure of a state listener of an instrument profile connection: it receives the old and the new state.
 pub(crate) type IpfStateClosure = dyn FnMut(ConnectionState, ConnectionState) + Send;
@@ -59,6 +63,9 @@ pub(crate) type ChangeListener = Listener<sys::dxfg_v4_observable_subscription_c
 /// An update listener of an instrument profile collector.
 pub(crate) type UpdateListener = Listener<sys::dxfg_v4_ipf_update_listener_t, UpdateClosure>;
 
+/// A property change listener of an on-demand service.
+pub(crate) type PropertyListener = Listener<sys::dxfg_v4_on_demand_property_change_listener_t, PropertyClosure>;
+
 /// A state listener of an instrument profile connection.
 pub(crate) type IpfStateListener = Listener<sys::dxfg_v4_ipf_connection_state_change_listener_t, IpfStateClosure>;
 
@@ -79,6 +86,9 @@ pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription
 
 /// The update listeners of an instrument profile collector.
 pub(crate) type UpdateListeners = Listeners<sys::dxfg_v4_ipf_update_listener_t, UpdateClosure>;
+
+/// The property change listeners of an on-demand service.
+pub(crate) type PropertyListeners = Listeners<sys::dxfg_v4_on_demand_property_change_listener_t, PropertyClosure>;
 
 /// The state listeners of an instrument profile connection.
 pub(crate) type IpfStateListeners = Listeners<sys::dxfg_v4_ipf_connection_state_change_listener_t, IpfStateClosure>;
@@ -147,6 +157,17 @@ impl ChangeListener {
                     user_data,
                     out,
                 )
+            })
+        })
+    }
+}
+
+impl PropertyListener {
+    pub(crate) fn new(closure: Box<PropertyClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `property_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_OnDemandPropertyChangeListener_new(t, Some(property_trampoline), user_data, out)
             })
         })
     }
@@ -514,6 +535,34 @@ const CHANGE_DEFERRED: Deferred<ChangeClosure> = Deferred {
     configuration_changed: |listener| listener.configuration_changed(),
     close: close_change_listener,
 };
+
+unsafe extern "C" fn property_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    name: *const c_char,
+    old_value: *const sys::dxfg_v4_on_demand_property_value_t,
+    new_value: *const sys::dxfg_v4_on_demand_property_value_t,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of a property change listener, and the SDK keeps the name, NUL-terminated or
+    // NULL, and the values, which are not NULL, alive until this call returns.
+    unsafe {
+        dispatch::<PropertyClosure>(
+            thread,
+            user_data,
+            "OnDemandService",
+            "an on-demand property change listener",
+            Nested::Warn,
+            |closure| {
+                let name = (!name.is_null()).then(|| isolate::string(name));
+                closure(
+                    name.as_deref(),
+                    PropertyValue::from_sys(&*old_value),
+                    PropertyValue::from_sys(&*new_value),
+                )
+            },
+        )
+    };
+}
 
 unsafe extern "C" fn update_trampoline(
     thread: *mut sys::graal_isolatethread_t,

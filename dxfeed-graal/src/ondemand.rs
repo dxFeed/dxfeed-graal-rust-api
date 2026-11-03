@@ -24,6 +24,8 @@
 //! on_demand.replay(1_273_175_268_000)?; // 2010-05-06 14:47:48 EST (19:47:48 UTC)
 //! # Ok::<(), dxfeed_graal::Error>(())
 //! ```
+//!
+//! A property change listener follows the replay: its `time`, `speed` and modes.
 
 use std::fmt;
 use std::sync::{Mutex, OnceLock};
@@ -33,7 +35,9 @@ use dxfeed_graal_sys as sys;
 use crate::endpoint::DXEndpoint;
 use crate::error::Result;
 use crate::handle::Handle;
-use crate::isolate::call;
+use crate::isolate::{self, call};
+use crate::listener::{PropertyListener, PropertyListeners};
+use crate::subscription::ListenerId;
 
 /// The service of an endpoint that replays historical market data on demand (`OnDemandService`).
 ///
@@ -44,6 +48,51 @@ pub struct OnDemandService {
     handle: Handle<sys::dxfg_v4_on_demand_service_t>,
     /// The endpoint of the service, kept open while the service lives.
     endpoint: DXEndpoint,
+    /// The property change listeners added through this value.
+    listeners: PropertyListeners,
+}
+
+impl Drop for OnDemandService {
+    fn drop(&mut self) {
+        if isolate::exiting() {
+            // No SDK calls from destructors while the process exits; the listeners' state is leaked.
+            return;
+        }
+        let s = self.handle.as_ptr();
+        self.listeners.remove_all("OnDemandService", |l| {
+            // SAFETY: the service and the listener are live.
+            call(|t| unsafe { sys::dxfg_v4_OnDemandService_removePropertyChangeListener(t, s, l) })
+        });
+    }
+}
+
+/// The value of a property of an [`OnDemandService`] before or after a change, as a property change listener gets it.
+#[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
+pub enum PropertyValue {
+    /// No value (`null`).
+    Null,
+    /// A boolean: the properties `replaySupported`, `replay` and `clear`.
+    Boolean(bool),
+    /// A double: the property `speed`.
+    Double(f64),
+    /// A time in milliseconds since the Unix epoch: the property `time`.
+    Time(i64),
+    /// A value of a type that the crate does not know, of a property that a later SDK may add.
+    Other,
+}
+
+impl PropertyValue {
+    /// Converts a value of the SDK; a kind that the crate does not know is [`PropertyValue::Other`].
+    pub(crate) fn from_sys(value: &sys::dxfg_v4_on_demand_property_value_t) -> Self {
+        match value.kind {
+            sys::DXFG_V4_ON_DEMAND_PROPERTY_VALUE_NULL => PropertyValue::Null,
+            sys::DXFG_V4_ON_DEMAND_PROPERTY_VALUE_BOOLEAN => PropertyValue::Boolean(value.boolean_value != 0),
+            sys::DXFG_V4_ON_DEMAND_PROPERTY_VALUE_DOUBLE => PropertyValue::Double(value.double_value),
+            sys::DXFG_V4_ON_DEMAND_PROPERTY_VALUE_TIME => PropertyValue::Time(value.time_value),
+            _ => PropertyValue::Other,
+        }
+    }
 }
 
 impl OnDemandService {
@@ -64,6 +113,7 @@ impl OnDemandService {
             Ok(OnDemandService {
                 handle,
                 endpoint: DXEndpoint::new(endpoint, false)?,
+                listeners: PropertyListeners::new("a property change listener of this service"),
             })
         })
     }
@@ -79,6 +129,7 @@ impl OnDemandService {
         Ok(OnDemandService {
             handle,
             endpoint: endpoint.clone(),
+            listeners: PropertyListeners::new("a property change listener of this service"),
         })
     }
 
@@ -181,6 +232,41 @@ impl OnDemandService {
         call(|t| unsafe { sys::dxfg_v4_OnDemandService_setSpeed(t, s, speed) })
     }
 
+    /// Adds a listener of the property changes and returns its id (`addPropertyChangeListener`).
+    ///
+    /// The listener gets the name of the changed property and its old and new values, once per property:
+    /// `replaySupported`, `replay` and `clear` as [`PropertyValue::Boolean`], `speed` as [`PropertyValue::Double`] and
+    /// `time` as [`PropertyValue::Time`]. The name is `None` for a change of several properties at once, as a Java
+    /// property change event without a name. As in Java, a change of `clear` is reported only when the same check of
+    /// the service sees a change of `replay`, `speed` or `time` too, so it may be missed: [`is_clear`](Self::is_clear)
+    /// tells the mode. The listener is called on a thread of the executor of the endpoint, not on the thread that
+    /// changed the service, one change at a time. It stays until it is removed or this value is dropped;
+    /// [`get_instance`](Self::get_instance) is never dropped.
+    #[doc(alias = "addPropertyChangeListener")]
+    pub fn add_property_change_listener(
+        &self,
+        listener: impl FnMut(Option<&str>, PropertyValue, PropertyValue) + Send + 'static,
+    ) -> Result<ListenerId> {
+        let s = self.handle.as_ptr();
+        self.listeners.add(PropertyListener::new(Box::new(listener))?, |l| {
+            // SAFETY: the service and the listener are live.
+            call(|t| unsafe { sys::dxfg_v4_OnDemandService_addPropertyChangeListener(t, s, l) })
+        })
+    }
+
+    /// Removes a listener, waiting for its running call unless called from it (`removePropertyChangeListener`).
+    ///
+    /// Returns [`Error::InvalidArgument`](crate::Error::InvalidArgument) if the listener was not added through this
+    /// value.
+    #[doc(alias = "removePropertyChangeListener")]
+    pub fn remove_property_change_listener(&self, id: ListenerId) -> Result<()> {
+        let s = self.handle.as_ptr();
+        self.listeners.remove(id, |l| {
+            // SAFETY: the service and the listener are live.
+            call(|t| unsafe { sys::dxfg_v4_OnDemandService_removePropertyChangeListener(t, s, l) })
+        })
+    }
+
     fn flag(
         &self,
         f: unsafe extern "C" fn(
@@ -202,5 +288,30 @@ impl fmt::Debug for OnDemandService {
         f.debug_struct("OnDemandService")
             .field("endpoint", &self.endpoint)
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn value(kind: i32) -> sys::dxfg_v4_on_demand_property_value_t {
+        sys::dxfg_v4_on_demand_property_value_t {
+            kind,
+            boolean_value: 1,
+            double_value: 2.5,
+            time_value: 42,
+        }
+    }
+
+    #[test]
+    fn values_are_converted_by_kind() {
+        assert_eq!(PropertyValue::from_sys(&value(0)), PropertyValue::Null);
+        assert_eq!(PropertyValue::from_sys(&value(1)), PropertyValue::Boolean(true));
+        assert_eq!(PropertyValue::from_sys(&value(2)), PropertyValue::Double(2.5));
+        assert_eq!(PropertyValue::from_sys(&value(3)), PropertyValue::Time(42));
+        assert_eq!(PropertyValue::from_sys(&value(4)), PropertyValue::Other);
+        assert_eq!(PropertyValue::from_sys(&value(99)), PropertyValue::Other);
+        assert_eq!(PropertyValue::from_sys(&value(-1)), PropertyValue::Other);
     }
 }
