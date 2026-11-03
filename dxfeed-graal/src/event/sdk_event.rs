@@ -114,3 +114,92 @@ pub(crate) fn take_events<E: EventKind + TryFrom<Event>>(
 pub(crate) fn needs_candle_symbol(event_type: EventType) -> bool {
     matches!(event_type, EventType::Candle | EventType::DailyCandle)
 }
+
+/// An error for an event that the SDK returned but the crate cannot copy as the expected type.
+fn unexpected_event() -> Error {
+    Error::Java(JavaException::from_message(
+        "the SDK returned an event of an unexpected type",
+    ))
+}
+
+/// Copies the events of a list that the SDK gave to the caller, and releases the list; NULL is no events.
+///
+/// # Safety
+///
+/// `list` must be NULL or a live SDK event list that the caller owns and nothing else releases.
+pub(crate) unsafe fn take_event_list<E: TryFrom<Event>>(list: *mut sys::dxfg_event_type_list) -> Result<Vec<E>> {
+    let Some(list) = NonNull::new(list) else {
+        return Ok(Vec::new());
+    };
+    // SAFETY: the caller guarantees that the list is live.
+    let len = usize::try_from(unsafe { list.as_ref() }.size).unwrap_or(0);
+    LIVE.fetch_add(len, Ordering::SeqCst);
+    let guard = SdkEventList(list, len);
+    // SAFETY: the list is live while the guard lives, and the views are copied before it is dropped.
+    let events = unsafe { super::Events::new(guard.0.as_ptr()) };
+    events
+        .map(|event| {
+            event
+                .to_owned()
+                .and_then(|e| E::try_from(e).ok())
+                .ok_or_else(unexpected_event)
+        })
+        .collect()
+}
+
+/// A list of events with tags that the SDK returned, released on `Drop`.
+struct SdkTaggedEventList(NonNull<sys::dxfg_v4_tagged_event_list>, usize);
+
+impl Drop for SdkTaggedEventList {
+    fn drop(&mut self) {
+        LIVE.fetch_sub(self.1, Ordering::SeqCst);
+        if isolate::exiting() {
+            return;
+        }
+        let list = self.0.as_ptr();
+        // SAFETY: the list came from the SDK and is released once, with its events and tags; a failed release leaks
+        // it.
+        crate::error_manager::report_release(
+            "EventQueue",
+            call(|t| unsafe { sys::dxfg_v4_tagged_event_list_release(t, list) }),
+        );
+    }
+}
+
+/// Copies the events of a list with tags that the SDK gave to the caller, each with its tag, and releases the list;
+/// NULL is no events.
+///
+/// # Safety
+///
+/// `list` must be NULL or a live SDK list with tags that the caller owns and nothing else releases.
+pub(crate) unsafe fn take_tagged_event_list(list: *mut sys::dxfg_v4_tagged_event_list) -> Result<Vec<(i64, Event)>> {
+    let Some(list) = NonNull::new(list) else {
+        return Ok(Vec::new());
+    };
+    // SAFETY: the caller guarantees that the list is live.
+    let raw = unsafe { list.as_ref() };
+    let len = usize::try_from(raw.size).unwrap_or(0);
+    LIVE.fetch_add(len, Ordering::SeqCst);
+    let guard = SdkTaggedEventList(list, len);
+    if len == 0 || raw.elements.is_null() || raw.tags.is_null() {
+        return Ok(Vec::new());
+    }
+    // SAFETY: a live list holds `size` events and `size` tags, live while the guard lives.
+    let (elements, tags) = unsafe {
+        (
+            std::slice::from_raw_parts(raw.elements, len),
+            std::slice::from_raw_parts(raw.tags, len),
+        )
+    };
+    let events = elements
+        .iter()
+        .zip(tags)
+        .map(|(&event, &tag)| {
+            // SAFETY: the events of a live list are live, and the view is copied before the guard is dropped.
+            let event = unsafe { <Event as Sealed>::item(event) }.and_then(|e| e.to_owned());
+            event.map(|e| (tag, e)).ok_or_else(unexpected_event)
+        })
+        .collect();
+    drop(guard);
+    events
+}

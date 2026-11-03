@@ -149,7 +149,8 @@ pub fn is_feature_supported(name: &str) -> Result<bool> {
 }
 
 /// Shuts the SDK down (`dxfg_v4_system_shutdown`): stops the calls of all listeners, waiting for the running ones,
-/// then closes all endpoints and waits for their termination. It cannot be undone.
+/// then closes all endpoints and waits for their termination. It also closes all event queues, also those created
+/// later, which ends their polls. It cannot be undone.
 ///
 /// It is an advanced function with no counterpart in the other dxFeed APIs, for an orderly stop of everything at once.
 /// An application usually closes its endpoints with

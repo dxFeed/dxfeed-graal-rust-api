@@ -44,6 +44,7 @@ sdk_handle!(
     sys::dxfg_v4_feed_t,
     sys::dxfg_v4_publisher_t,
     sys::dxfg_v4_executor_t,
+    sys::dxfg_v4_event_queue_t,
     sys::dxfg_v4_subscription_t,
     sys::dxfg_v4_feed_event_listener_t,
     sys::dxfg_v4_endpoint_state_change_listener_t,

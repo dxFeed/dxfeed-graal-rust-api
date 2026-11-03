@@ -193,7 +193,9 @@ impl DXFeed {
 
     /// Detaches `subscription` from this feed and clears the data the feed keeps for it
     /// (`detachSubscriptionAndClear`); its symbols stay. Java publishes empty events for that, which the SDK may not
-    /// deliver to the listeners. Does nothing if it is not attached to this feed.
+    /// deliver to the listeners. Does nothing if it is not attached to this feed. With the executor of an event queue,
+    /// it waits for a poll: see
+    /// [`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor).
     #[doc(alias = "detachSubscriptionAndClear")]
     pub fn detach_subscription_and_clear<E: SubscriptionItem>(
         &self,

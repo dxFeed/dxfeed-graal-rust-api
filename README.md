@@ -235,7 +235,8 @@ set before the first endpoint is created.
 
 - `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
   `close()` does not wait. Dropping the last handle of an endpoint (the endpoint, its feed, its publisher or a
-  subscription) closes it as well.
+  subscription) closes it as well. Close the event queues of its subscriptions first: it waits while a queue holds
+  events that no poll returned.
 - The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
   longer called and destructors no longer call the SDK.
 - `system::shutdown()` is an advanced function with no counterpart in the other dxFeed APIs. It stops all listeners,
@@ -396,6 +397,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
   endpoint and feed (`get_instance`)
 - [x] Typed and untyped subscriptions, listeners, publishing
+- [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
+  `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Subscription symbols and state: `set_symbols`, `get_symbols`, `get_decorated_symbols`, `clear`, `is_closed`,
   event types, the aggregation period, the events batch limit, dropped events, executors and standalone
   subscriptions attached to feeds

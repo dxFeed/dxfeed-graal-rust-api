@@ -310,7 +310,9 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
         Ok(handle.map(Executor::from_handle))
     }
 
-    /// Changes the executor that calls the listeners; `None` for the executor of the feed (`setExecutor`).
+    /// Changes the executor that calls the listeners; `None` for the executor of the feed (`setExecutor`). The
+    /// executor of a subscription attached to an [event queue](crate::event_queue) cannot change: it is
+    /// [`Error::Java`] of `java.lang.IllegalStateException`.
     #[doc(alias = "setExecutor")]
     pub fn set_executor(&self, executor: Option<&Executor>) -> Result<()> {
         let s = self.handle.as_ptr();

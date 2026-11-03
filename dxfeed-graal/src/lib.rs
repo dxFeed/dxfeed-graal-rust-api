@@ -83,6 +83,10 @@
 //! are valid during the call only; copy what you keep with `to_owned()`. A panic in a closure is caught and goes to
 //! [`ErrorManager`].
 //!
+//! Without listeners, an [event queue](event_queue) gives the events of subscriptions to a thread of the application,
+//! which polls them; the listeners of its subscriptions, and of the models and the collector on its executor, then run
+//! inside the polls.
+//!
 //! Add listeners before symbols. Removing a listener or dropping its [`DXFeedSubscription`] waits for its running
 //! calls, except inside a callback, and so does dropping the last owner of an endpoint with state listeners. So do not
 //! hold a lock that a closure takes while doing that from another thread.
@@ -113,6 +117,7 @@ mod endpoint;
 mod error;
 mod error_manager;
 pub mod event;
+pub mod event_queue;
 mod executor;
 mod feed;
 pub mod glossary;
