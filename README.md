@@ -417,8 +417,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
 - [x] Event type names: `EventType::get_name`, parsing with `FromStr`, `EventType::ALL`
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
-- [x] Instrument profiles: reading files, URLs and bytes, typed fields, a collector with generations, a live
-  connection and option chains
+- [x] Instrument profiles: reading files, URLs and bytes, writing files and bytes with `InstrumentProfileWriter`,
+  typed fields, a collector with generations, a live connection and option chains
 - [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
 - [x] Candle symbols with all their attributes, `CandlePeriod` parsing, `MarketEventSymbols`, order sources
 - [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE, and the `accept`
@@ -434,8 +434,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family, `InstrumentProfileWriter`, user data of day
-and session filters, and the property listeners of `OnDemandService`. `PriceLevelService.getCandles` and
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family, user data of day and session filters, and the
+property listeners of `OnDemandService`. `PriceLevelService.getCandles` and
 `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
 
 ## Development

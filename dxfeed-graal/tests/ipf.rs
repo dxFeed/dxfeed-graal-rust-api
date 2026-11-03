@@ -9,9 +9,9 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::ipf::InstrumentProfileReader;
 use dxfeed_graal::ipf::live::{ConnectionState, Generation, InstrumentProfileCollector, InstrumentProfileConnection};
 use dxfeed_graal::ipf::{InstrumentProfile, InstrumentProfileField, InstrumentProfileType};
+use dxfeed_graal::ipf::{InstrumentProfileReader, InstrumentProfileWriter};
 use dxfeed_graal::{AuthToken, Error, Executor, ManualExecutor};
 
 fn fixture() -> String {
@@ -480,4 +480,154 @@ fn the_collector_calls_listeners_on_its_executor() {
     assert_eq!(count, 1);
     assert_ne!(own_id, thread::current().id());
     assert_ne!(own_id, id);
+}
+
+/// A path in the temporary directory for a file of this test process.
+fn temporary(name: &str) -> String {
+    std::env::temp_dir()
+        .join(format!("dxfeed-graal-{}-{name}", std::process::id()))
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// Plain text is the format that Java composes: the headers of all types first, then the profiles and the end tag;
+/// the lines end with `\r\n` on every platform.
+#[test]
+fn the_writer_writes_the_format() {
+    let bytes = InstrumentProfileWriter::new()
+        .write_to_bytes("profiles.ipf", &expected())
+        .unwrap();
+    let lines = [
+        "#OPTION::=TYPE,SYMBOL,DESCRIPTION,MULTIPLIER,UNDERLYING,SPC,EXPIRATION,STRIKE,OPTION_TYPE",
+        "#STOCK::=TYPE,SYMBOL,DESCRIPTION,COUNTRY,CURRENCY,ICB,MULTIPLIER,CUSTOM_NOTE",
+        "STOCK,AAPL,Apple Inc.,US,USD,9572,1,first",
+        "OPTION,.AAPL261218C200,AAPL Dec 2026 200 Call,100,AAPL,100,2026-12-18,200.5,STAN",
+        "##COMPLETE",
+    ];
+    assert_eq!(String::from_utf8(bytes).unwrap(), lines.join("\r\n") + "\r\n");
+    let empty = InstrumentProfileWriter::new().write_to_bytes("empty.ipf", &[]).unwrap();
+    assert_eq!(String::from_utf8(empty).unwrap(), "##COMPLETE\r\n");
+}
+
+/// Files written with each compression are read back as the same profiles.
+#[test]
+fn written_files_are_read_back() {
+    let writer = InstrumentProfileWriter::new();
+    let reader = InstrumentProfileReader::new().unwrap();
+    for name in ["round-trip.ipf", "round-trip.ipf.gz", "round-trip.ipf.ZIP"] {
+        let file = temporary(name);
+        writer.write_to_file(&file, &expected()).unwrap();
+        assert_eq!(reader.read_from_file(&file).unwrap(), expected(), "{name}");
+        assert!(reader.was_complete().unwrap(), "{name}");
+        let _ = std::fs::remove_file(&file);
+    }
+}
+
+/// The name selects gzip or zip bytes, which the reader unpacks.
+#[test]
+fn the_name_selects_the_compression() {
+    let writer = InstrumentProfileWriter::new();
+    let reader = InstrumentProfileReader::new().unwrap();
+    let gzipped = writer.write_to_bytes("profiles.ipf.gz", &expected()).unwrap();
+    assert_eq!(gzipped[..2], [0x1f, 0x8b]);
+    assert_eq!(reader.read_from_bytes(&gzipped, "profiles.ipf.gz").unwrap(), expected());
+    let zipped = writer.write_to_bytes("dir/profiles.ipf.zip", &expected()).unwrap();
+    assert_eq!(zipped[..2], *b"PK");
+    assert_eq!(reader.read_from_bytes(&zipped, "profiles.ipf.zip").unwrap(), expected());
+    assert_eq!(zip_entry(&zipped), b"profiles.ipf");
+
+    // Any case of the letters, a directory after a backslash, and an entry whose name selects gzip in turn.
+    let gzipped = writer.write_to_bytes("PROFILES.IPF.GZ", &expected()).unwrap();
+    assert_eq!(gzipped[..2], [0x1f, 0x8b]);
+    let zipped = writer.write_to_bytes(r"dir\profiles.ipf.gz.Zip", &expected()).unwrap();
+    assert_eq!(zip_entry(&zipped), b"profiles.ipf.gz");
+    // As in Java, the reader takes the entry of zip data for plain text, so it cannot read gzip data in a zip entry.
+    assert!(matches!(
+        reader.read_from_bytes(&zipped, "profiles.ipf.gz.zip"),
+        Err(Error::Java(e)) if e.get_class_name() == "com.dxfeed.ipf.InstrumentProfileFormatException"
+    ));
+}
+
+/// The name of the first entry of zip data, from its local file header.
+fn zip_entry(zipped: &[u8]) -> &[u8] {
+    &zipped[30..30 + usize::from(u16::from_le_bytes([zipped[26], zipped[27]]))]
+}
+
+/// An existing file is overwritten, also by shorter data.
+#[test]
+fn an_existing_file_is_overwritten() {
+    let writer = InstrumentProfileWriter::new();
+    let file = temporary("overwritten.ipf");
+    writer.write_to_file(&file, &expected()).unwrap();
+    writer.write_to_file(&file, &[]).unwrap();
+    let text = std::fs::read_to_string(&file).unwrap();
+    let _ = std::fs::remove_file(&file);
+    assert_eq!(text.trim_end(), "##COMPLETE");
+}
+
+/// The `Write` method writes the bytes of `write_to_bytes`, and an error of the output is `Error::Io`.
+#[test]
+fn the_writer_writes_to_a_stream() {
+    let writer = InstrumentProfileWriter::new();
+    let mut out = Vec::new();
+    writer.write(&mut out, "profiles.ipf.gz", &expected()).unwrap();
+    assert_eq!(out, writer.write_to_bytes("profiles.ipf.gz", &expected()).unwrap());
+
+    struct Broken;
+    impl Write for Broken {
+        fn write(&mut self, _: &[u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::other("broken"))
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    match writer.write(&mut Broken, "profiles.ipf", &expected()) {
+        Err(error @ Error::Io(_)) => {
+            assert_eq!(error.to_string(), "the output failed");
+            assert_eq!(std::error::Error::source(&error).unwrap().to_string(), "broken");
+        }
+        other => panic!("expected an I/O error, got {other:?}"),
+    }
+}
+
+/// A custom field with an empty value is not written.
+#[test]
+fn empty_custom_fields_are_not_written() {
+    let mut profile = InstrumentProfile {
+        instrument_type: "STOCK".into(),
+        symbol: "IBM".into(),
+        ..InstrumentProfile::new()
+    };
+    profile.custom_fields.insert("CUSTOM_EMPTY".into(), String::new());
+    profile.custom_fields.insert("CUSTOM_NOTE".into(), "kept".into());
+    let bytes = InstrumentProfileWriter::new()
+        .write_to_bytes("custom.ipf", slice::from_ref(&profile))
+        .unwrap();
+    let text = String::from_utf8(bytes).unwrap();
+    assert!(!text.contains("CUSTOM_EMPTY"), "{text}");
+    let read = InstrumentProfileReader::new()
+        .unwrap()
+        .read_from_bytes(text.as_bytes(), "custom.ipf")
+        .unwrap();
+    assert_eq!(read, [profile]);
+}
+
+/// A file in a missing directory is a `FileNotFoundException`; a NUL byte is an invalid argument.
+#[test]
+fn the_writer_reports_bad_files() {
+    let writer = InstrumentProfileWriter::new();
+    let file = temporary("missing-directory/profiles.ipf");
+    match writer.write_to_file(&file, &expected()) {
+        Err(Error::Java(e)) => assert_eq!(e.get_class_name(), "java.io.FileNotFoundException"),
+        other => panic!("expected a Java exception, got {other:?}"),
+    }
+    assert!(matches!(
+        writer.write_to_file("a\0b", &[]),
+        Err(Error::InvalidArgument(_))
+    ));
+    assert!(matches!(
+        writer.write_to_bytes("a\0b", &[]),
+        Err(Error::InvalidArgument(_))
+    ));
 }

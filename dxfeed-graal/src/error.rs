@@ -2,6 +2,7 @@
 
 use std::ffi::{CStr, CString};
 use std::fmt;
+use std::sync::Arc;
 
 /// The result of a fallible call.
 pub type Result<T, E = Error> = std::result::Result<T, E>;
@@ -26,6 +27,9 @@ pub enum Error {
     /// The isolate of the SDK has already been created, or its creation has failed, so its arguments cannot be set any
     /// more ([`system::set_isolate_arguments`](crate::system::set_isolate_arguments)).
     IsolateCreated,
+    /// A Rust output failed, e.g. the writer given to
+    /// [`InstrumentProfileWriter::write`](crate::ipf::InstrumentProfileWriter::write).
+    Io(Arc<std::io::Error>),
 }
 
 impl fmt::Display for Error {
@@ -38,6 +42,7 @@ impl fmt::Display for Error {
             Error::InCallback => f.write_str("the call is not allowed inside an event listener"),
             Error::Timeout => f.write_str("the wait timed out"),
             Error::IsolateCreated => f.write_str("the isolate has already been created"),
+            Error::Io(_) => f.write_str("the output failed"),
         }
     }
 }
@@ -46,6 +51,7 @@ impl std::error::Error for Error {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Error::Java(e) => e.source(),
+            Error::Io(e) => Some(&**e),
             _ => None,
         }
     }
@@ -177,6 +183,11 @@ impl fmt::Display for JavaExceptionClass {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.get_name())
     }
+}
+
+/// The size of an SDK list of `count` elements; [`Error::InvalidArgument`] if it does not fit in `i32`.
+pub(crate) fn list_size(count: usize, what: &str) -> Result<i32> {
+    i32::try_from(count).map_err(|_| Error::InvalidArgument(format!("too many {what}: {count}")))
 }
 
 /// Converts `s` for the SDK; `what` names the argument in the error.

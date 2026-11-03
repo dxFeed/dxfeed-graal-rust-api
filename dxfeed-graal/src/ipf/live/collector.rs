@@ -7,10 +7,11 @@ use std::sync::Arc;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, JavaException, Result};
+use crate::error::{Error, JavaException, Result, list_size};
 use crate::executor::Executor;
 use crate::handle::Handle;
 use crate::ipf::InstrumentProfile;
+use crate::ipf::profile::SysProfileList;
 use crate::isolate::{self, call};
 use crate::listener::{UpdateListener, UpdateListeners};
 use crate::subscription::ListenerId;
@@ -139,19 +140,13 @@ impl InstrumentProfileCollector {
         profiles: &[InstrumentProfile],
         generation: Option<&Generation>,
     ) -> Result<()> {
-        let mut profiles = profiles
-            .iter()
-            .map(InstrumentProfile::to_sys)
-            .collect::<Result<Vec<_>>>()?;
-        let mut elements: Vec<_> = profiles.iter_mut().map(|p| &raw mut p.data).collect();
-        let list = sys::dxfg_v4_instrument_profile_data_list {
-            size: list_size(elements.len(), "profiles")?,
-            elements: elements.as_mut_ptr(),
-        };
+        let profiles = SysProfileList::new(profiles)?;
         let generation = generation.map_or(ptr::null_mut(), |g| g.handle.as_ptr());
         let c = self.as_ptr();
         // SAFETY: the collector, the list, its structures and the tag are live; the SDK only reads them.
-        call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_updateInstrumentProfiles(t, c, &list, generation) })
+        call(|t| unsafe {
+            sys::dxfg_v4_InstrumentProfileCollector_updateInstrumentProfiles(t, c, &profiles.list, generation)
+        })
     }
 
     /// Removes the profiles tagged with one of `generations` and tells the listeners of the removals
@@ -228,11 +223,6 @@ impl InstrumentProfileCollector {
             call(|t| unsafe { sys::dxfg_v4_InstrumentProfileCollector_removeUpdateListener(t, c, l) })
         })
     }
-}
-
-/// The size of an SDK list of `count` elements; [`Error::InvalidArgument`] if it does not fit in `i32`.
-fn list_size(count: usize, what: &str) -> Result<i32> {
-    i32::try_from(count).map_err(|_| Error::InvalidArgument(format!("too many {what}: {count}")))
 }
 
 /// Copies the profiles left in an SDK iterator.

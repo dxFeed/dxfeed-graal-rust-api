@@ -29,7 +29,7 @@ use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Result, c_string};
+use crate::error::{Result, c_string, list_size};
 use crate::event::sdk_event::take_events;
 use crate::event::{CandleSymbol, Event, IndexedEventSource, Order, Quote, SysEvents};
 use crate::handle::Handle;
@@ -356,10 +356,4 @@ unsafe fn strings(list: *mut sys::dxfg_string_list) -> Vec<String> {
         // SAFETY: the strings of a live list are live.
         .map(|&s| unsafe { isolate::string(s) }.into_owned())
         .collect()
-}
-
-/// The size of an SDK list of `count` elements; [`Error::InvalidArgument`](crate::Error::InvalidArgument) if it does not
-/// fit in `i32`.
-fn list_size(count: usize, what: &str) -> Result<i32> {
-    i32::try_from(count).map_err(|_| crate::Error::InvalidArgument(format!("too many {what}: {count}")))
 }

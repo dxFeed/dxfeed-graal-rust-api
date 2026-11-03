@@ -10,7 +10,7 @@ use std::str::FromStr;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, JavaException, Result, c_string};
+use crate::error::{Error, JavaException, Result, c_string, list_size};
 use crate::handle::Handle;
 use crate::isolate::{self, call};
 
@@ -805,6 +805,34 @@ pub(crate) struct SysProfile {
     pub(crate) data: sys::dxfg_v4_instrument_profile_data_t,
     _strings: Vec<CString>,
     _custom: Option<Handle<sys::dxfg_v4_instrument_profile_custom_fields_t>>,
+}
+
+/// The SDK list of the structures of profiles, with the structures it points to.
+pub(crate) struct SysProfileList {
+    pub(crate) list: sys::dxfg_v4_instrument_profile_data_list,
+    // The list points into the heap buffers of both vectors, which stay in place when this value moves.
+    _elements: Vec<*mut sys::dxfg_v4_instrument_profile_data_t>,
+    _profiles: Vec<SysProfile>,
+}
+
+impl SysProfileList {
+    /// Builds the list of `profiles`, which the SDK only reads.
+    pub(crate) fn new(profiles: &[InstrumentProfile]) -> Result<Self> {
+        let mut profiles = profiles
+            .iter()
+            .map(InstrumentProfile::to_sys)
+            .collect::<Result<Vec<_>>>()?;
+        let mut elements: Vec<_> = profiles.iter_mut().map(|p| &raw mut p.data).collect();
+        let list = sys::dxfg_v4_instrument_profile_data_list {
+            size: list_size(elements.len(), "profiles")?,
+            elements: elements.as_mut_ptr(),
+        };
+        Ok(SysProfileList {
+            list,
+            _elements: elements,
+            _profiles: profiles,
+        })
+    }
 }
 
 /// Keeps a copy of `value` in `strings` and returns a pointer to it; the SDK only reads it.
