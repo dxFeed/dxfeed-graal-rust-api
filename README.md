@@ -421,8 +421,8 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   typed fields, a collector with generations, a live connection and option chains
 - [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
 - [x] Candle symbols with all their attributes, `CandlePeriod` parsing, `MarketEventSymbols`, order sources
-- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE, and the `accept`
-  of the day and session filters
+- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE, the `accept` of
+  the day and session filters, and custom filters with a Rust predicate
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,
   `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
@@ -434,7 +434,7 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 
 The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family and user data of day and session filters.
+3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family.
 `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
 
 ## Development

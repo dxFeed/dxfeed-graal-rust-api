@@ -4,10 +4,12 @@
 //! need no defaults. Java logs an error for each cached schedule whose venue the new defaults drop.
 
 use std::collections::HashSet;
+use std::sync::{Arc, Mutex};
+use std::thread;
 
-use dxfeed_graal::Error;
 use dxfeed_graal::ipf::InstrumentProfile;
-use dxfeed_graal::schedule::{DayFilter, Schedule, SessionFilter, SessionType};
+use dxfeed_graal::schedule::{CustomDayFilter, CustomSessionFilter, DayFilter, Schedule, SessionFilter, SessionType};
+use dxfeed_graal::{Error, ErrorManager};
 
 /// The US extended trading hours without holidays: pre-market 04:00, regular 09:30, after-market 16:00 to 20:00.
 const DEFINITION: &str = "Test(name=Test;tz=America/New_York;td=12345;de=+0000;0=p04000930r09301600a16002000)";
@@ -243,4 +245,151 @@ fn the_defaults_give_the_venues_and_holidays_of_profiles() {
     let by_venue = Schedule::get_instance_with_venue(&profile, "RustVenue").unwrap();
     assert_eq!(by_venue.get_day_by_id(20754).unwrap(), holiday);
     assert!(Schedule::get_instance_with_venue(&profile, "NoSuchVenue").is_err());
+}
+
+#[test]
+fn custom_filters_have_the_conditions_of_java() {
+    let schedule = schedule();
+    let saturday = schedule.get_day_by_year_month_day(20261031).unwrap();
+    let wednesdays = CustomDayFilter::new(CustomDayFilter::WEDNESDAY, None, None, Some(true)).unwrap();
+    assert_eq!(wednesdays.to_string(), "DayFilter(8, null, null, true)");
+    let wednesday = saturday.get_next_day(&wednesdays).unwrap();
+    assert_eq!(wednesday.get_year_month_day().unwrap(), 20261104);
+    assert!(wednesdays.accept(&wednesday).unwrap());
+    assert!(!wednesdays.accept(&saturday).unwrap());
+    let weekend = CustomDayFilter::new(CustomDayFilter::SATURDAY | CustomDayFilter::SUNDAY, None, None, None).unwrap();
+    assert_eq!(
+        saturday.get_prev_day(&weekend).unwrap().get_year_month_day().unwrap(),
+        20261025
+    );
+    // A mask of 0 accepts any day of the week.
+    let any = CustomDayFilter::new(0, None, Some(false), None).unwrap();
+    assert_eq!(
+        saturday.get_next_day(&any).unwrap().get_year_month_day().unwrap(),
+        20261101
+    );
+    assert!(any.accept(&saturday).unwrap());
+    let holidays = CustomDayFilter::new(0, Some(true), None, None).unwrap();
+    assert!(saturday.find_next_day(&holidays).unwrap().is_none());
+    assert!(!holidays.accept(&saturday).unwrap());
+
+    let day = schedule.get_day_by_year_month_day(20261028).unwrap();
+    let regular = CustomSessionFilter::new(Some(SessionType::Regular), Some(true)).unwrap();
+    assert_eq!(regular.to_string(), "SessionFilter(REGULAR, true)");
+    let session = day.get_first_session(&regular).unwrap();
+    assert_eq!(session.get_type().unwrap(), SessionType::Regular);
+    assert!(regular.accept(&session).unwrap());
+    let none = CustomSessionFilter::new(Some(SessionType::Regular), Some(false)).unwrap();
+    assert!(day.find_first_session(&none).unwrap().is_none());
+    assert!(!none.accept(&session).unwrap());
+    let trading = CustomSessionFilter::new(None, Some(true)).unwrap();
+    assert_eq!(
+        day.get_last_session(&trading).unwrap().get_type().unwrap(),
+        SessionType::AfterMarket
+    );
+    let any = CustomSessionFilter::new(None, None).unwrap();
+    assert_eq!(
+        day.get_first_session(&any).unwrap().get_type().unwrap(),
+        SessionType::NoTrading
+    );
+    assert_eq!(any.to_string(), "SessionFilter(null, null)");
+    // A filter can be given by value too.
+    let first = day
+        .get_first_session(CustomSessionFilter::new(None, Some(true)).unwrap())
+        .unwrap();
+    assert_eq!(first.get_type().unwrap(), SessionType::PreMarket);
+}
+
+#[test]
+fn a_predicate_is_asked_after_the_conditions() {
+    let schedule = schedule();
+    let saturday = schedule.get_day_by_year_month_day(20261031).unwrap();
+    let asked = Arc::new(Mutex::new(Vec::new()));
+    let days = Arc::clone(&asked);
+    // The trading days of an odd day of the month.
+    let odd = CustomDayFilter::with_predicate(0, None, None, Some(true), move |day| {
+        let day_of_month = day.get_day_of_month().unwrap();
+        days.lock().unwrap().push(day_of_month);
+        day_of_month % 2 == 1
+    })
+    .unwrap();
+    assert_eq!(
+        saturday.get_next_day(&odd).unwrap().get_year_month_day().unwrap(),
+        20261103
+    );
+    // Sunday, November 1, is not a trading day, so the predicate is not asked for it.
+    assert_eq!(*asked.lock().unwrap(), [2, 3]);
+    asked.lock().unwrap().clear();
+    assert_eq!(
+        saturday
+            .find_prev_day(&odd)
+            .unwrap()
+            .unwrap()
+            .get_year_month_day()
+            .unwrap(),
+        20261029
+    );
+    assert_eq!(*asked.lock().unwrap(), [30, 29]);
+    assert!(!odd.accept(&saturday).unwrap());
+    let tuesday = schedule.get_day_by_year_month_day(20261103).unwrap();
+    assert!(odd.accept(&tuesday).unwrap());
+    assert!(format!("{odd:?}").contains("predicate: true"), "{odd:?}");
+
+    // The trading sessions that end at 18:00 of their day or later: the after-market ones only.
+    let late = CustomSessionFilter::with_predicate(None, Some(true), |session| {
+        let day_start = session.get_day().unwrap().get_start_time().unwrap();
+        session.get_end_time().unwrap() >= day_start + 18 * HOUR
+    })
+    .unwrap();
+    let day = schedule.get_day_by_year_month_day(20261028).unwrap();
+    let after_market = day.get_first_session(&late).unwrap();
+    assert_eq!(after_market.get_type().unwrap(), SessionType::AfterMarket);
+    assert!(late.accept(&after_market).unwrap());
+    let next = after_market.get_next_session(&late).unwrap();
+    assert_eq!(next.get_day().unwrap().get_year_month_day().unwrap(), 20261029);
+    assert_eq!(next.get_type().unwrap(), SessionType::AfterMarket);
+    // Noon is in the regular session; the after-market one, from 16:00, is nearer than that of the day before.
+    let noon = day.get_start_time().unwrap() + 12 * HOUR;
+    assert_eq!(schedule.get_nearest_session_by_time(noon, &late).unwrap(), after_market);
+}
+
+#[test]
+fn a_panicking_predicate_rejects_and_is_reported() {
+    let schedule = schedule();
+    let saturday = schedule.get_day_by_year_month_day(20261031).unwrap();
+    let filter = CustomDayFilter::with_predicate(0, None, None, Some(true), |day| {
+        assert_ne!(day.get_day_of_month().unwrap(), 2, "test panic in a day predicate");
+        true
+    })
+    .unwrap();
+    assert_eq!(
+        saturday.get_next_day(&filter).unwrap().get_year_month_day().unwrap(),
+        20261103
+    );
+    assert!(
+        ErrorManager::get_errors()
+            .iter()
+            .any(|e| e.component == "Schedule" && e.message.contains("test panic in a day predicate")),
+        "{:?}",
+        ErrorManager::get_errors()
+    );
+}
+
+#[test]
+fn custom_filters_are_shared_by_threads() {
+    let schedule = schedule();
+    let filter = CustomDayFilter::with_predicate(CustomDayFilter::FRIDAY, None, None, None, |day| {
+        day.get_day_of_month().is_ok_and(|d| d > 7)
+    })
+    .unwrap();
+    thread::scope(|scope| {
+        for _ in 0..4 {
+            scope.spawn(|| {
+                let start = schedule.get_day_by_year_month_day(20261101).unwrap();
+                // Friday, November 6, is the 6th, so the next accepted Friday is November 13.
+                let friday = start.get_next_day(&filter).unwrap();
+                assert_eq!(friday.get_year_month_day().unwrap(), 20261113);
+            });
+        }
+    });
 }
