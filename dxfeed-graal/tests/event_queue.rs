@@ -354,3 +354,185 @@ fn child_a_full_buffer_drops_the_oldest_events() {
     assert!(dropped > 0, "{} events, none dropped", sales.len());
     assert_eq!(subscription.get_total_dropped_events().unwrap(), dropped);
 }
+
+/// The OS objects of the ready signal, a Windows event or an `eventfd`, with what the tests do to them.
+#[cfg(all(feature = "experimental", any(windows, target_os = "linux")))]
+mod signal {
+    use std::time::Duration;
+
+    use dxfeed_graal::event_queue::ReadySignal;
+
+    #[cfg(windows)]
+    pub struct Object(std::os::windows::io::RawHandle);
+
+    #[cfg(windows)]
+    #[link(name = "kernel32")]
+    unsafe extern "system" {
+        fn CreateEventW(attributes: *mut u8, manual_reset: i32, initial_state: i32, name: *const u16) -> *mut u8;
+        fn ResetEvent(event: *mut u8) -> i32;
+        fn WaitForSingleObject(handle: *mut u8, milliseconds: u32) -> u32;
+        fn CloseHandle(handle: *mut u8) -> i32;
+    }
+
+    #[cfg(windows)]
+    impl Object {
+        pub fn new() -> Self {
+            // SAFETY: a manual-reset event, not signalled, without a name.
+            let event = unsafe { CreateEventW(std::ptr::null_mut(), 1, 0, std::ptr::null()) };
+            assert!(!event.is_null());
+            Object(event.cast())
+        }
+
+        pub fn signal(&self) -> ReadySignal {
+            ReadySignal::WindowsEvent(self.0)
+        }
+
+        pub fn invalid() -> ReadySignal {
+            ReadySignal::WindowsEvent(std::ptr::null_mut())
+        }
+
+        pub fn reset(&self) {
+            // SAFETY: the event is open.
+            assert_ne!(unsafe { ResetEvent(self.0.cast()) }, 0);
+        }
+
+        /// Whether the object becomes ready within `timeout`.
+        pub fn wait(&self, timeout: Duration) -> bool {
+            // SAFETY: the event is open.
+            unsafe { WaitForSingleObject(self.0.cast(), timeout.as_millis() as u32) == 0 }
+        }
+    }
+
+    #[cfg(windows)]
+    impl Drop for Object {
+        fn drop(&mut self) {
+            // SAFETY: the event is open and closed once.
+            unsafe { CloseHandle(self.0.cast()) };
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    pub struct Object(std::os::fd::RawFd);
+
+    #[cfg(target_os = "linux")]
+    unsafe extern "C" {
+        fn eventfd(initial_value: u32, flags: i32) -> i32;
+        fn read(fd: i32, buffer: *mut std::ffi::c_void, count: usize) -> isize;
+        fn close(fd: i32) -> i32;
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Object {
+        pub fn new() -> Self {
+            const EFD_NONBLOCK: i32 = 0o4000;
+            // SAFETY: a plain call.
+            let fd = unsafe { eventfd(0, EFD_NONBLOCK) };
+            assert!(fd >= 0);
+            Object(fd)
+        }
+
+        pub fn signal(&self) -> ReadySignal {
+            ReadySignal::Fd(self.0)
+        }
+
+        pub fn invalid() -> ReadySignal {
+            ReadySignal::Fd(-1)
+        }
+
+        /// Reads the counter, if any: the object is not ready afterwards.
+        fn take(&self) -> bool {
+            let mut counter = [0u8; 8];
+            // SAFETY: the descriptor is open and the buffer holds 8 bytes.
+            unsafe { read(self.0, counter.as_mut_ptr().cast(), counter.len()) == 8 }
+        }
+
+        pub fn reset(&self) {
+            self.take();
+        }
+
+        /// Whether the object becomes ready within `timeout`; it is reset then.
+        pub fn wait(&self, timeout: Duration) -> bool {
+            let start = std::time::Instant::now();
+            loop {
+                if self.take() {
+                    return true;
+                }
+                if start.elapsed() >= timeout {
+                    return false;
+                }
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    impl Drop for Object {
+        fn drop(&mut self) {
+            // SAFETY: the descriptor is open and closed once.
+            unsafe { close(self.0) };
+        }
+    }
+}
+
+#[cfg(all(feature = "experimental", any(windows, target_os = "linux")))]
+#[test]
+fn the_ready_signal_tells_when_to_poll() {
+    use dxfeed_graal::event_queue::ReadySignal;
+    use signal::Object;
+
+    let hub = Hub::with_default_executor();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let queue = EventQueue::new(&subscription).unwrap();
+    subscription.add_symbols(["AAPL"]).unwrap();
+    let object = Object::new();
+    // SAFETY: the object stays open until the signal is removed.
+    unsafe { queue.set_ready_signal(object.signal()) }.unwrap();
+    object.reset();
+    assert_eq!(queue.poll(Some(Duration::ZERO), 0).unwrap(), PollResult::NoEvents);
+
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
+    let start = Instant::now();
+    let quotes = loop {
+        assert!(object.wait(WAIT), "no signal for a quote");
+        object.reset();
+        // A signal without work is possible: its poll has no events.
+        match queue.poll(Some(Duration::ZERO), 0).unwrap() {
+            PollResult::Events(quotes) => break quotes,
+            other => assert!(start.elapsed() < WAIT, "{other:?}"),
+        }
+    };
+    assert_eq!(quotes.len(), 1);
+
+    // SAFETY: removing the signal needs no object.
+    unsafe { queue.set_ready_signal(ReadySignal::None) }.unwrap();
+    object.reset();
+    let changed = Quote {
+        bid_price: 190.0,
+        ..quote("AAPL")
+    };
+    hub.publisher.publish_events(&[changed.into()]).unwrap();
+    assert!(!object.wait(Duration::from_millis(300)), "a removed signal was written");
+    assert!(matches!(queue.poll(Some(WAIT), 0).unwrap(), PollResult::Events(_)));
+
+    // SAFETY: the SDK refuses the object and keeps no signal.
+    let refused = unsafe { queue.set_ready_signal(Object::invalid()) };
+    assert!(
+        matches!(&refused, Err(Error::Java(e)) if e.get_class_name() == "java.lang.IllegalArgumentException"),
+        "{refused:?}"
+    );
+}
+
+#[cfg(all(feature = "experimental", any(windows, target_os = "linux")))]
+#[test]
+fn a_shared_queue_signals_its_close() {
+    use signal::Object;
+
+    let queue = SharedEventQueue::new().unwrap();
+    let object = Object::new();
+    // SAFETY: the object stays open until the queue is closed, which removes the signal.
+    unsafe { queue.set_ready_signal(object.signal()) }.unwrap();
+    object.reset();
+    queue.close().unwrap();
+    assert!(object.wait(WAIT), "no signal for the close");
+    assert_eq!(queue.poll(Some(Duration::ZERO), 0).unwrap(), PollResult::Closed);
+}

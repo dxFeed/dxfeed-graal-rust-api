@@ -290,7 +290,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     }
 
     /// The controller of the subscription (`getSubscriptionController`): it attaches the subscription to feeds and
-    /// detaches it, and changes how the events are delivered. Experimental in Java.
+    /// detaches it, and changes how the events are delivered. Experimental in Java and in the SDK.
     #[doc(alias = "getSubscriptionController")]
     pub fn get_subscription_controller(&self) -> Result<SubscriptionController<'_>> {
         let s = self.handle.as_ptr();
@@ -386,7 +386,7 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     }
 
     /// How many events were dropped because of a buffer overflow since the subscription was created
-    /// (`getTotalDroppedEvents`). Experimental in Java.
+    /// (`getTotalDroppedEvents`). Experimental in Java and in the SDK.
     #[doc(alias = "getTotalDroppedEvents")]
     pub fn get_total_dropped_events(&self) -> Result<i64> {
         let (s, mut dropped) = (self.handle.as_ptr(), 0);

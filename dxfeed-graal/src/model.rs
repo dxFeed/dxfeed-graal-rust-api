@@ -1,6 +1,9 @@
 //! Transactional models of indexed and time-series events (`IndexedTxModel`, `TimeSeriesTxModel`): a model subscribes
 //! to the events of a symbol and passes them to its listener in whole transactions and snapshots only.
 //!
+//! They are experimental in the SDK, which may change them in a minor release; the crate builds them without the
+//! `experimental` feature, as they came before the SDK had tiers.
+//!
 //! ```no_run
 //! use dxfeed_graal::DXFeed;
 //! use dxfeed_graal::event::{Order, OrderSource};
@@ -30,11 +33,15 @@ use std::sync::{Arc, Mutex};
 use dxfeed_graal_sys as sys;
 
 use crate::error::Result;
+#[cfg(feature = "experimental")]
+use crate::event::EventRef;
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
 use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::{Handle, SdkHandle};
 use crate::isolate::{self, call};
+#[cfg(feature = "experimental")]
+use crate::listener::{EventPeek, PeekClosure};
 use crate::listener::{TxClosure, TxListener};
 use crate::subscription::check_aggregation_period;
 use crate::subscription_controller::{attach_feed, detach_feed};
@@ -562,6 +569,9 @@ impl SortOrder {
 /// it. It keeps the endpoints of the feeds it is attached to open.
 pub struct TimeSeriesTxModel<E: TimeSeriesEvent + EventKind> {
     core: Core<TimeSeries>,
+    /// Dropped after the model is closed.
+    #[cfg(feature = "experimental")]
+    _event_peek: Option<EventPeek>,
     _event: PhantomData<fn() -> E>,
 }
 
@@ -580,6 +590,8 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModel<E> {
             ignore_remove_events: None,
             ignore_events_from_past: None,
             confirmation_tick: None,
+            #[cfg(feature = "experimental")]
+            event_peek: None,
             _event: PhantomData,
         }
     }
@@ -623,6 +635,8 @@ pub struct TimeSeriesTxModelBuilder<E: TimeSeriesEvent + EventKind> {
     ignore_remove_events: Option<bool>,
     ignore_events_from_past: Option<bool>,
     confirmation_tick: Option<bool>,
+    #[cfg(feature = "experimental")]
+    event_peek: Option<Box<PeekClosure>>,
     _event: PhantomData<fn() -> E>,
 }
 
@@ -667,6 +681,25 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
         self
     }
 
+    /// Calls `f` with each event of a transaction or a snapshot, in the order of the list, before the listener gets
+    /// the list (`withEventPeek`); it runs on the thread that calls the listener. The event is valid during the call
+    /// only: copy what you keep with `to_owned()`. A panic in `f` is caught and goes to
+    /// [`ErrorManager`](crate::ErrorManager).
+    ///
+    /// The model drops `f` when it is dropped, after it is closed. The SDK may still call the peek then, so a small
+    /// record of it, without `f`, stays allocated for each model built with one. Needs the cargo feature
+    /// `experimental`: the SDK function is experimental and may change in a minor release.
+    #[cfg(feature = "experimental")]
+    #[doc(alias = "withEventPeek")]
+    pub fn with_event_peek(mut self, mut f: impl FnMut(E::Item<'_>) + Send + 'static) -> Self {
+        self.event_peek = Some(Box::new(move |event: EventRef<'_>| {
+            if let Some(event) = E::from_ref(event) {
+                f(event);
+            }
+        }));
+        self
+    }
+
     /// Builds the model; it attaches to the feed of [`with_feed`](Self::with_feed), if any (`build`).
     ///
     /// Returns an error if the symbol is not set.
@@ -678,8 +711,12 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
             ignore_remove_events,
             ignore_events_from_past,
             confirmation_tick,
+            #[cfg(feature = "experimental")]
+            event_peek,
             _event,
         } = self;
+        #[cfg(feature = "experimental")]
+        let event_peek = event_peek.map(EventPeek::new);
         let core = settings.build::<TimeSeries>(E::TYPE.to_sys(), |mut builder| {
             if let Some(from_time) = from_time {
                 builder = with(builder, sys::dxfg_v4_TimeSeriesTxModel_Builder_withFromTime, from_time)?;
@@ -706,10 +743,16 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
                 let set = sys::dxfg_v4_TimeSeriesTxModel_Builder_withConfirmationTick;
                 builder = with(builder, set, i32::from(tick))?;
             }
+            #[cfg(feature = "experimental")]
+            if let Some(peek) = &event_peek {
+                builder = peek.apply(builder)?;
+            }
             Ok(builder)
         })?;
         Ok(TimeSeriesTxModel {
             core,
+            #[cfg(feature = "experimental")]
+            _event_peek: event_peek,
             _event: PhantomData,
         })
     }

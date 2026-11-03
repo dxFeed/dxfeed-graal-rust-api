@@ -1,4 +1,7 @@
 //! The transactional model of one source of indexed events (`IndexedEventTxModel`) and its subscription controller.
+//!
+//! They are experimental in the SDK, which may change them in a minor release; the crate builds them without the
+//! `experimental` feature, as they came before the SDK had tiers.
 
 use std::fmt;
 use std::marker::PhantomData;

@@ -12,6 +12,8 @@ use dxfeed_graal_sys as sys;
 
 use crate::endpoint::State;
 use crate::error::{Error, Result};
+#[cfg(feature = "experimental")]
+use crate::event::EventRef;
 use crate::event::{Events, IndexedEventSource};
 use crate::handle::{Handle, SdkHandle};
 use crate::ipf::InstrumentProfile;
@@ -51,6 +53,14 @@ pub(crate) type EventTxClosure = dyn FnMut(Events<'_>, bool) + Send;
 /// The closure of a listener of an order book model: it is called after the book has changed.
 pub(crate) type OrderBookClosure = dyn FnMut() + Send;
 
+/// The closure of a listener of a feed filter tracker: it is called after the filter has been updated.
+#[cfg(feature = "experimental")]
+pub(crate) type FilterClosure = dyn FnMut() + Send;
+
+/// The closure of the event peek of a time series transaction model: it gets each event before the listener.
+#[cfg(feature = "experimental")]
+pub(crate) type PeekClosure = dyn FnMut(EventRef<'_>) + Send;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
@@ -81,6 +91,10 @@ pub(crate) type OrderBookListener = Listener<sys::dxfg_v4_order_book_model_liste
 /// A listener of a list of a model: it receives all the events of the list.
 pub(crate) type ListListener = Listener<sys::dxfg_v4_observable_list_model_listener_t, EventClosure>;
 
+/// A listener of a feed filter tracker.
+#[cfg(feature = "experimental")]
+pub(crate) type FilterListener = Listener<sys::dxfg_v4_feed_filter_listener_t, FilterClosure>;
+
 /// The change listeners of a subscription.
 pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
 
@@ -98,6 +112,10 @@ pub(crate) type OrderBookListeners = Listeners<sys::dxfg_v4_order_book_model_lis
 
 /// The listeners of a list of a model.
 pub(crate) type ListListeners = Listeners<sys::dxfg_v4_observable_list_model_listener_t, EventClosure>;
+
+/// The listeners of a feed filter tracker.
+#[cfg(feature = "experimental")]
+pub(crate) type FilterListeners = Listeners<sys::dxfg_v4_feed_filter_listener_t, FilterClosure>;
 
 /// What a trampoline needs; shared by the owner of the listener, the SDK (`user_data`) and running calls.
 struct ListenerState<C: ?Sized> {
@@ -234,6 +252,82 @@ impl ListListener {
                 sys::dxfg_v4_ObservableListModelListener_new(t, Some(list_trampoline), user_data, out)
             })
         })
+    }
+}
+
+#[cfg(feature = "experimental")]
+impl FilterListener {
+    pub(crate) fn new(closure: Box<FilterClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `filter_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_DXFeedFilterListener_new(t, Some(filter_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+/// The event peek of a time series transaction model: a closure that the SDK calls with `user_data`, without a
+/// handle of its own.
+///
+/// The SDK may call it until the model is closed and its executor has no pending notifications, which releasing the
+/// handles of the model does not wait for. So the SDK's reference to the state is never dropped: dropping the peek
+/// only replaces its closure with one that does nothing, which frees what the closure holds.
+#[cfg(feature = "experimental")]
+pub(crate) struct EventPeek {
+    state: Arc<ListenerState<PeekClosure>>,
+}
+
+#[cfg(feature = "experimental")]
+impl EventPeek {
+    pub(crate) fn new(closure: Box<PeekClosure>) -> Self {
+        EventPeek {
+            state: Arc::new(ListenerState {
+                closure: Mutex::new(closure),
+                running: AtomicU64::new(0),
+                close_deferred: AtomicBool::new(false),
+                repeat: AtomicBool::new(false),
+            }),
+        }
+    }
+
+    /// Sets the peek on `builder` and returns the builder to use next; the previous handle is released.
+    pub(crate) fn apply(
+        &self,
+        builder: Handle<sys::dxfg_v4_time_series_tx_model_builder_t>,
+    ) -> Result<Handle<sys::dxfg_v4_time_series_tx_model_builder_t>> {
+        // The SDK's reference to the state, never dropped (see the type), also if the call fails: the SDK may have
+        // kept it.
+        let user_data = Arc::into_raw(Arc::clone(&self.state)).cast_mut().cast::<c_void>();
+        let b = builder.as_ptr();
+        // SAFETY: the builder is live and the out-pointer is valid for writes; `user_data` is the state of a closure of
+        // type `PeekClosure`, as `peek_trampoline` expects, and it is never freed.
+        Handle::create(|t, out| unsafe {
+            sys::dxfg_v4_TimeSeriesTxModel_Builder_withEventPeekFunction(t, b, Some(peek_trampoline), user_data, out)
+        })
+    }
+}
+
+#[cfg(feature = "experimental")]
+impl Drop for EventPeek {
+    fn drop(&mut self) {
+        if isolate::exiting() {
+            // The process is exiting: the closure is leaked with its state.
+            return;
+        }
+        let state = Arc::clone(&self.state);
+        let clear = move || {
+            let idle: Box<PeekClosure> = Box::new(|_| {});
+            // The lock waits for a running call; the closure is dropped after the lock is released.
+            let closure = std::mem::replace(&mut *crate::lock(&state.closure), idle);
+            drop(closure);
+        };
+        // Inside a callback, as for the release of a listener: a running call on another thread may wait for us.
+        if isolate::in_callback() {
+            release_thread(Box::new(clear));
+        } else {
+            clear();
+        }
     }
 }
 
@@ -606,6 +700,51 @@ unsafe extern "C" fn ipf_state_trampoline(
             ) {
                 (Ok(old_state), Ok(new_state)) => closure(old_state, new_state),
                 _ => crate::ErrorManager::report("InstrumentProfileConnection", "skipped an unknown connection state"),
+            },
+        )
+    };
+}
+
+#[cfg(feature = "experimental")]
+unsafe extern "C" fn filter_trampoline(thread: *mut sys::graal_isolatethread_t, user_data: *mut c_void) {
+    // SAFETY: `user_data` is the state of a feed filter listener.
+    unsafe {
+        dispatch::<FilterClosure>(
+            thread,
+            user_data,
+            "DXFeedFilterTracker",
+            "a feed filter listener",
+            Nested::Warn,
+            |closure| closure(),
+        )
+    };
+}
+
+#[cfg(feature = "experimental")]
+unsafe extern "C" fn peek_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    event: *mut sys::dxfg_v4_event_type_t,
+    user_data: *mut c_void,
+) {
+    let mut element = event;
+    let list = sys::dxfg_event_type_list {
+        size: 1,
+        elements: &mut element,
+    };
+    // SAFETY: the SDK passes a live event, valid during the call, and the list of it lives in this frame.
+    let mut events = unsafe { Events::new(&list) };
+    // SAFETY: `user_data` is the state of an event peek, which is never freed.
+    unsafe {
+        dispatch::<PeekClosure>(
+            thread,
+            user_data,
+            "TimeSeriesTxModel",
+            "an event peek",
+            Nested::Warn,
+            |closure| {
+                if let Some(event) = events.next() {
+                    closure(event);
+                }
             },
         )
     };

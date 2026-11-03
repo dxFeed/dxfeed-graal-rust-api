@@ -120,6 +120,8 @@ pub mod event;
 pub mod event_queue;
 mod executor;
 mod feed;
+#[cfg(feature = "experimental")]
+pub mod feed_filter;
 pub mod glossary;
 mod handle;
 pub mod history;

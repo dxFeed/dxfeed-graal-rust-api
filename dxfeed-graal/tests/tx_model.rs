@@ -244,3 +244,78 @@ fn time_series_come_from_a_time_on() {
     model.set_from_time(i64::MAX).unwrap();
     assert_eq!(model.get_from_time().unwrap(), i64::MAX);
 }
+
+#[cfg(feature = "experimental")]
+#[test]
+fn the_event_peek_sees_each_event_before_the_listener() {
+    use std::sync::{Arc, Mutex};
+
+    let hub = Hub::new();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let (peeks, calls) = (Arc::clone(&log), Arc::clone(&log));
+    let _model = TimeSeriesTxModel::<TimeAndSale>::new_builder()
+        .with_feed(&hub.feed)
+        .with_symbol("TX")
+        .with_from_time(1_000)
+        .with_snapshot_processing(true)
+        .with_event_peek(move |sale| peeks.lock().unwrap().push(format!("peek {}", sale.time())))
+        .with_listener(move |_, sales, _| {
+            let times: Vec<i64> = sales.map(|sale| sale.time()).collect();
+            calls.lock().unwrap().push(format!("listener {times:?}"));
+        })
+        .build()
+        .unwrap();
+    hub.executor.process_all_pending().unwrap();
+
+    let sale = |time: i64, flags: EventFlags| {
+        let mut sale = TimeAndSale {
+            price: 10.0,
+            size: 1.0,
+            event_flags: flags,
+            ..TimeAndSale::new("TX")
+        };
+        sale.set_time(time);
+        sale.into()
+    };
+    hub.publisher
+        .publish_events(&[
+            sale(3_000, EventFlags::SNAPSHOT_BEGIN),
+            sale(2_000, EventFlags::empty()),
+            sale(1_000, EventFlags::SNAPSHOT_END),
+        ])
+        .unwrap();
+    hub.executor.process_all_pending().unwrap();
+    hub.publisher
+        .publish_events(&[sale(4_000, EventFlags::empty())])
+        .unwrap();
+    hub.executor.process_all_pending().unwrap();
+
+    let log = log.lock().unwrap().clone();
+    assert_eq!(log.len(), 6, "{log:?}");
+    let mut snapshot = log[..3].to_vec();
+    snapshot.sort();
+    assert_eq!(snapshot, ["peek 1000", "peek 2000", "peek 3000"], "{log:?}");
+    assert!(log[3].starts_with("listener ["), "{log:?}");
+    assert_eq!(log[4..], ["peek 4000", "listener [4000]"], "{log:?}");
+}
+
+#[cfg(feature = "experimental")]
+#[test]
+fn a_dropped_model_drops_its_event_peek() {
+    use std::sync::Arc;
+
+    let hub = Hub::new();
+    let token = Arc::new(());
+    let held = Arc::clone(&token);
+    let model = TimeSeriesTxModel::<TimeAndSale>::new_builder()
+        .with_feed(&hub.feed)
+        .with_symbol("TX")
+        .with_event_peek(move |_| {
+            let _ = &held;
+        })
+        .build()
+        .unwrap();
+    assert_eq!(Arc::strong_count(&token), 2);
+    drop(model);
+    assert_eq!(Arc::strong_count(&token), 1);
+}

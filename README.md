@@ -117,8 +117,10 @@ The build script of `dxfeed-graal-sys` gets SDK 3.13.0 in one of these ways:
 The build fails if the SDK headers differ from those of 3.13.0, because the committed bindings fit only that version.
 `system::get_version()` returns the version of the loaded SDK library, `system::is_feature_supported` tells whether it
 has an optional feature (the `system::feature` names), and `system::get_advanced_revision()` the revision of its
-experimental functions, which matches `system::ADVANCED_REVISION` for the library this crate was built for. The
-crate does not wrap the event queue, the feed filters and the event peek of these features yet.
+experimental functions, which matches `system::ADVANCED_REVISION` for the library this crate was built for.
+The cargo feature `experimental`, off by default, adds the wrappers of the experimental tier of the SDK: the feed
+filters (`feed_filter`), the ready signal of the event queues (`set_ready_signal`) and the event peek of the time
+series transaction models (`with_event_peek`). They may change in a minor release of the SDK.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
 ## Running and Deployment
@@ -435,10 +437,12 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   `AuthOrderSource` (also created with `AuthOrderSource::create`)
 - [x] Candles and time and sales from the history service: `HistoryEndpoint`
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
+- [x] With the cargo feature `experimental`: feed filters (`DXFeedFilter`, its builder and its tracker with
+  listeners), the ready signal of the event queues (an `eventfd` or a Windows event) and the event peek of
+  `TimeSeriesTxModel`
 
-The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, except these Java members, new in SDK
-3.13.0, which wait for their Rust wrappers: the `DXFeedFilter` family.
-`PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
+The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, its experimental tier with the feature
+`experimental`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
 
 ## Development
 

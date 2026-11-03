@@ -15,7 +15,7 @@ use crate::subscription::{check_aggregation_period, check_events_batch_limit};
 use crate::time_period::TimePeriod;
 
 /// The controller of a subscription (`SubscriptionController`): it attaches the subscription to feeds and detaches it,
-/// and changes how the events are delivered.
+/// and changes how the events are delivered. Experimental in Java and in the SDK.
 ///
 /// It comes from [`DXFeedSubscription::get_subscription_controller`] or from a model, such as
 /// [`IndexedEventTxModel::get_subscription_controller`], and borrows it.

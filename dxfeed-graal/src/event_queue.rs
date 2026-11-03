@@ -24,6 +24,9 @@
 //!   attached subscription, which waits while the queue holds events that no poll returned; never call it on the
 //!   polling thread.
 //!
+//! With the cargo feature `experimental`, a queue also has a ready signal (`set_ready_signal`): an OS object that the
+//! SDK makes ready when the queue has work, so that an event loop polls with the timeout zero on its own thread.
+//!
 //! ```
 //! use std::time::Duration;
 //!
@@ -117,6 +120,21 @@ impl<E: SubscriptionItem> EventQueue<E> {
     #[doc(alias = "getDroppedEvents")]
     pub fn get_dropped_events(&self) -> Result<i64> {
         dropped_events(&self.handle)
+    }
+
+    /// Sets, replaces or removes the ready signal of the queue (`dxfg_v4_EventQueue_setReadySignal`); see
+    /// [`ReadySignal`]. Needs the cargo feature `experimental`.
+    ///
+    /// # Safety
+    ///
+    /// The object of the signal must stay open, and be the same object, until another signal replaces it,
+    /// [`ReadySignal::None`] removes it, [`close`](Self::close) returns on any thread or a poll returns
+    /// [`PollResult::Closed`]: the SDK writes to it until then. Dropping the queue or closing its subscription does not
+    /// count; to stop an event loop, close the queue, and close the object after a poll returns `Closed`.
+    #[cfg(feature = "experimental")]
+    #[doc(alias = "setReadySignal")]
+    pub unsafe fn set_ready_signal(&self, signal: ReadySignal) -> Result<()> {
+        set_ready_signal(&self.handle, signal)
     }
 }
 
@@ -244,6 +262,48 @@ impl SharedEventQueue {
     pub fn get_dropped_events(&self) -> Result<i64> {
         dropped_events(&self.handle)
     }
+
+    /// Sets, replaces or removes the ready signal of the queue, as [`EventQueue::set_ready_signal`] does; the work of
+    /// the executor also signals. Needs the cargo feature `experimental`.
+    ///
+    /// # Safety
+    ///
+    /// As for [`EventQueue::set_ready_signal`]: the object must stay open until another signal replaces it,
+    /// [`ReadySignal::None`] removes it, [`close`](Self::close) returns or a poll returns [`PollResult::Closed`]. A
+    /// live executor of the queue keeps it open, so dropping the queue alone does not stop the writes.
+    #[cfg(feature = "experimental")]
+    #[doc(alias = "setReadySignal")]
+    pub unsafe fn set_ready_signal(&self, signal: ReadySignal) -> Result<()> {
+        set_ready_signal(&self.handle, signal)
+    }
+}
+
+/// The ready signal of an event queue: the OS object that the SDK makes ready whenever the queue has work (events, the
+/// work of its executor, a wake-up, the close), so that an event loop, such as `epoll` or
+/// `RegisterWaitForSingleObject`, polls the queue with the timeout zero on its own thread. Needs the cargo feature
+/// `experimental`: the SDK function is experimental and may change in a minor release.
+///
+/// The application creates the object, owns it and closes it. A signal disarms the queue and each poll arms it again,
+/// signalling at once if work remains: reset the object before each poll. A signal without work is possible; its poll
+/// returns [`PollResult::NoEvents`]. A queue has one signal, and the SDK does not write to an old one after
+/// `set_ready_signal` returns; the close signals once more and removes the signal. A signal set on a closed queue is
+/// written once and not kept. An object that the SDK refuses, such as a descriptor that is negative, closed, blocking
+/// or read-only, or a handle that is null or `INVALID_HANDLE_VALUE`, is [`Error::Java`] of
+/// `java.lang.IllegalArgumentException`, and the signal stays as it was. On Windows the value holds a raw handle, so
+/// it is neither `Send` nor `Sync`.
+#[cfg(feature = "experimental")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ReadySignal {
+    /// No signal: removes the signal of the queue.
+    None,
+    /// A non-blocking descriptor open for writing, such as an `eventfd` made with `EFD_NONBLOCK` or the write end of
+    /// a non-blocking pipe: the SDK writes the 8 bytes of the value 1 to it.
+    #[cfg(unix)]
+    Fd(std::os::fd::RawFd),
+    /// A Windows event: the SDK calls `SetEvent` on it.
+    #[cfg(windows)]
+    WindowsEvent(std::os::windows::io::RawHandle),
 }
 
 impl std::fmt::Debug for SharedEventQueue {
@@ -305,6 +365,20 @@ fn close(handle: &Handle<sys::dxfg_v4_event_queue_t>) -> Result<()> {
     let q = handle.as_ptr();
     // SAFETY: the queue is live.
     call(|t| unsafe { sys::dxfg_v4_EventQueue_close(t, q) })
+}
+
+#[cfg(feature = "experimental")]
+fn set_ready_signal(handle: &Handle<sys::dxfg_v4_event_queue_t>, signal: ReadySignal) -> Result<()> {
+    let (kind, object) = match signal {
+        ReadySignal::None => (sys::DXFG_V4_READY_SIGNAL_NONE, 0),
+        #[cfg(unix)]
+        ReadySignal::Fd(fd) => (sys::DXFG_V4_READY_SIGNAL_FD, i64::from(fd)),
+        #[cfg(windows)]
+        ReadySignal::WindowsEvent(event) => (sys::DXFG_V4_READY_SIGNAL_WINDOWS_EVENT, event as isize as i64),
+    };
+    let q = handle.as_ptr();
+    // SAFETY: the queue is live; the caller keeps the object open while the SDK writes to it.
+    call(|t| unsafe { sys::dxfg_v4_EventQueue_setReadySignal(t, q, kind, object) })
 }
 
 fn dropped_events(handle: &Handle<sys::dxfg_v4_event_queue_t>) -> Result<i64> {
