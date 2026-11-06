@@ -4,9 +4,12 @@
 
 mod args;
 mod articles;
+mod connect;
 mod console;
+mod dump;
 mod help;
 mod qds;
+mod tape;
 
 use std::error::Error;
 use std::process::ExitCode;
@@ -19,13 +22,15 @@ use crate::help::Info;
 /// A tool.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tool {
+    Connect,
+    Dump,
     Help,
     Qds,
 }
 
 impl Tool {
     /// Every tool.
-    pub const ALL: &'static [Tool] = &[Tool::Help, Tool::Qds];
+    pub const ALL: &'static [Tool] = &[Tool::Connect, Tool::Dump, Tool::Help, Tool::Qds];
 
     /// The tool with this name, in any case.
     pub fn find(name: &str) -> Option<Tool> {
@@ -38,6 +43,8 @@ impl Tool {
     /// The help screen contents of the tool.
     pub fn info(self) -> &'static Info {
         match self {
+            Tool::Connect => &connect::INFO,
+            Tool::Dump => &dump::INFO,
             Tool::Help => &help::HELP,
             Tool::Qds => &qds::INFO,
         }
@@ -45,6 +52,8 @@ impl Tool {
 
     fn run(self, args: &args::Parsed) -> Result<(), Box<dyn Error>> {
         match self {
+            Tool::Connect => connect::run(args)?,
+            Tool::Dump => dump::run(args)?,
             Tool::Help => help::run(args),
             Tool::Qds => qds::run(args)?,
         }

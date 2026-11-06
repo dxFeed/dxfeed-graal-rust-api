@@ -195,7 +195,6 @@ impl Parsed {
     }
 
     /// Whether a flag is given.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the event tools of the next changes use it"))]
     pub fn has(&self, arg: Arg) -> bool {
         self.flags.contains(&arg)
     }
@@ -304,7 +303,6 @@ pub fn parse_properties(properties: Option<&str>) -> Vec<(String, String)> {
 }
 
 /// The upper-case name of an event type in the C++ API, such as `TIME_AND_SALE` for `TimeAndSale`.
-#[cfg_attr(not(test), expect(dead_code, reason = "the event tools of the next changes use it"))]
 fn upper_case_name(event_type: EventType) -> String {
     let mut name = String::new();
     let mut previous_lower = false;
@@ -320,7 +318,6 @@ fn upper_case_name(event_type: EventType) -> String {
 
 /// Parses event types: `*` or `all` for every type; otherwise comma-separated names, each either the upper-case name
 /// in any case (`QUOTE`, `time_and_sale`) or the class name (`TimeAndSale`). Returns the types and the unknown names.
-#[cfg_attr(not(test), expect(dead_code, reason = "the event tools of the next changes use it"))]
 pub fn parse_types(types: &str) -> (Vec<EventType>, Vec<String>) {
     let types = types.trim();
     if types.is_empty() {
@@ -346,7 +343,6 @@ pub fn parse_types(types: &str) -> (Vec<EventType>, Vec<String>) {
 }
 
 /// Parses event types as [`parse_types`] does, `None` meaning all of them, with the C++ error messages.
-#[cfg_attr(not(test), expect(dead_code, reason = "the event tools of the next changes use it"))]
 pub fn event_types(types: Option<&str>) -> Result<Vec<EventType>, String> {
     let (types, unknown) = parse_types(types.unwrap_or("all"));
     if !unknown.is_empty() {
@@ -365,7 +361,6 @@ pub fn event_types(types: Option<&str>) -> Result<Vec<EventType>, String> {
 
 /// Parses symbols with the symbol list parser of the SDK, trimmed and without repeats, as `IBM, AAPL` lists them;
 /// `*` or `all` among them makes the wildcard. An empty list has no symbols, and `None` is the wildcard.
-#[cfg_attr(not(test), expect(dead_code, reason = "the event tools of the next changes use it"))]
 pub fn symbols(symbols: Option<&str>) -> dxfeed_graal::Result<Vec<Symbol>> {
     let Some(symbols) = symbols.map(str::trim) else {
         return Ok(vec![Symbol::Wildcard]);

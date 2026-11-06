@@ -368,8 +368,10 @@ specified symbols. It is one binary, `Tools`, whose first argument names the too
 arguments of a tool, and `Tools Help contents` lists the help articles, such as the address format and the tape
 options:
 
-- [ ] Connect connects to the specified address(es) and subscribes to the specified events with the specified symbol
-- [ ] Dump dumps all events received from address. This was designed to retrieve data from a file
+- [x] [Connect](tools/src/connect.rs) connects to the specified address(es) and subscribes to the specified events
+  with the specified symbol
+- [x] [Dump](tools/src/dump.rs) dumps all events received from address. This was designed to retrieve data from a
+  file
 - [ ] PerfTest connects to the specified address(es) and calculates performance counters (events per second, memory
   usage, CPU usage, etc.)
 - [ ] LatencyTest connects to the specified address(es) and calculates latency
@@ -381,6 +383,8 @@ Build and run it with cargo, or build it once and run `target/release/Tools`, wh
 
 ```shell
 cargo run --release -p dxfeed-graal-tools -- Help contents
+target/release/Tools Connect demo.dxfeed.com:7300 Quote AAPL,IBM
+target/release/Tools Dump "file:quotes.txt[speed=max]" Quote -t quotes-copy.txt
 target/release/Tools Qds "help connect"
 ```
 

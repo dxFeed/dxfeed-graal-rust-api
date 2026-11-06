@@ -28,7 +28,8 @@ fn the_usage_lists_the_tools() {
     );
     assert!(
         usage.contains(
-            "\nWhere:\n\n  Help  Help tool.\n  Qds   A collection of tools ported from the Java qds-tools.\n"
+            "\nWhere:\n\n  Connect  Connects to specified address(es).\n  Dump     Dumps all events received from address.\n  \
+             Help     Help tool.\n  Qds      A collection of tools ported from the Java qds-tools.\n"
         )
     );
     assert!(usage.contains("\nTo get detailed help on some tool use \"Help <tool>\".\n"));
