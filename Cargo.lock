@@ -204,6 +204,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "dxfeed-graal-tools"
+version = "0.1.0"
+dependencies = [
+ "dxfeed-graal",
+ "dxfeed-graal-build",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"

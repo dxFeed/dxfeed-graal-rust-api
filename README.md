@@ -33,6 +33,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
   * [System Properties](#system-properties)
   * [Threads and Listeners](#threads-and-listeners)
   * [Closing and Exit](#closing-and-exit)
+- [Tools](#tools)
 - [Samples](#samples)
 - [Current State](#current-state)
 - [How To Develop](HOW_TO_DEVELOP.md)
@@ -360,6 +361,29 @@ set before the first endpoint is created.
   calling `process_all_pending`.
 - Only executables are supported: a Rust `cdylib` loaded as a DLL is not.
 
+## Tools
+
+[Tools](tools/src/main.rs) is a collection of utilities that allow you to subscribe to various market events for the
+specified symbols. It is one binary, `Tools`, whose first argument names the tool; `Tools Help <tool>` describes the
+arguments of a tool, and `Tools Help contents` lists the help articles, such as the address format and the tape
+options:
+
+- [ ] Connect connects to the specified address(es) and subscribes to the specified events with the specified symbol
+- [ ] Dump dumps all events received from address. This was designed to retrieve data from a file
+- [ ] PerfTest connects to the specified address(es) and calculates performance counters (events per second, memory
+  usage, CPU usage, etc.)
+- [ ] LatencyTest connects to the specified address(es) and calculates latency
+- [x] [Qds](tools/src/qds.rs) collection of tools ported from the Java qds-tools
+- [x] [Help](tools/src/help.rs) shows the help screens of the tools and the help articles
+
+Build and run it with cargo, or build it once and run `target/release/Tools`, which has the SDK library next to it
+(see [Running and Deployment](#running-and-deployment)):
+
+```shell
+cargo run --release -p dxfeed-graal-tools -- Help contents
+target/release/Tools Qds "help connect"
+```
+
 ## Samples
 
 The samples follow the samples of the dxFeed Java API and have the names and groups of the samples of the C++ API.
@@ -640,6 +664,8 @@ the types.
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
+- [x] The [Tools](#tools) binary and the QDS tools of the SDK (`qds::Tools`): the symbol list parser and the
+  qds-tools runner
 - [x] With the cargo feature `experimental`: feed filters (`DXFeedFilter`, its builder and its tracker with
   listeners), the ready signal of the event queues (an `eventfd` or a Windows event) and the event peek of
   `TimeSeriesTxModel`

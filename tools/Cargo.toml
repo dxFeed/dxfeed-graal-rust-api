@@ -1,0 +1,22 @@
+[package]
+name = "dxfeed-graal-tools"
+description = "A collection of useful utilities that use the dxFeed API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+
+[[bin]]
+name = "Tools"
+path = "src/main.rs"
+
+[dependencies]
+dxfeed-graal = { path = "../dxfeed-graal" }
+
+[build-dependencies]
+dxfeed-graal-build = { path = "../dxfeed-graal-build" }
+
+[lints]
+workspace = true

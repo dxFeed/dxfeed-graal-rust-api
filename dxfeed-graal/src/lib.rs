@@ -135,6 +135,7 @@ pub mod ondemand;
 pub mod orcs;
 mod promise;
 mod publisher;
+pub mod qds;
 pub mod schedule;
 mod subscription;
 mod subscription_controller;
