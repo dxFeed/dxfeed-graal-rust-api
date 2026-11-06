@@ -8,6 +8,8 @@ mod connect;
 mod console;
 mod dump;
 mod help;
+mod metrics;
+mod perf_test;
 mod qds;
 mod tape;
 
@@ -25,12 +27,13 @@ pub enum Tool {
     Connect,
     Dump,
     Help,
+    PerfTest,
     Qds,
 }
 
 impl Tool {
     /// Every tool.
-    pub const ALL: &'static [Tool] = &[Tool::Connect, Tool::Dump, Tool::Help, Tool::Qds];
+    pub const ALL: &'static [Tool] = &[Tool::Connect, Tool::Dump, Tool::Help, Tool::PerfTest, Tool::Qds];
 
     /// The tool with this name, in any case.
     pub fn find(name: &str) -> Option<Tool> {
@@ -46,6 +49,7 @@ impl Tool {
             Tool::Connect => &connect::INFO,
             Tool::Dump => &dump::INFO,
             Tool::Help => &help::HELP,
+            Tool::PerfTest => &perf_test::INFO,
             Tool::Qds => &qds::INFO,
         }
     }
@@ -55,6 +59,7 @@ impl Tool {
             Tool::Connect => connect::run(args)?,
             Tool::Dump => dump::run(args)?,
             Tool::Help => help::run(args),
+            Tool::PerfTest => perf_test::run(args)?,
             Tool::Qds => qds::run(args)?,
         }
         Ok(())
