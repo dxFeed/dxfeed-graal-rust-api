@@ -165,14 +165,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "deploy-sample"
-version = "0.1.0"
-dependencies = [
- "dxfeed-graal",
- "dxfeed-graal-build",
-]
-
-[[package]]
 name = "digest"
 version = "0.11.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -193,6 +185,14 @@ dependencies = [
 [[package]]
 name = "dxfeed-graal-build"
 version = "0.1.0"
+
+[[package]]
+name = "dxfeed-graal-samples"
+version = "0.1.0"
+dependencies = [
+ "dxfeed-graal",
+ "dxfeed-graal-build",
+]
 
 [[package]]
 name = "dxfeed-graal-sys"

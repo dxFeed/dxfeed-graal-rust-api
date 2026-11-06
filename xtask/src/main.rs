@@ -3,8 +3,8 @@
 //! `cargo run -p xtask -- gen-bindings <sdk dir>` regenerates `dxfeed-graal-sys/src/bindings.rs` from the headers of an
 //! unpacked SDK archive. It needs libclang (set `LIBCLANG_PATH` if the right one is not found first).
 //!
-//! `cargo run -p xtask -- check-deploy` builds `samples/deploy` and checks that its executable runs outside cargo from
-//! a directory holding only the executable and the deployed SDK library, and fails without the library.
+//! `cargo run -p xtask -- check-deploy` builds `WriteTapeFileSample` of the samples and checks that it runs outside
+//! cargo from a directory holding only the executable and the deployed SDK library, and fails without the library.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -85,8 +85,12 @@ fn workspace_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
-const SAMPLE: &str = "deploy-sample";
-const SAMPLE_OUTPUT: &str = "Created a Feed endpoint with a quote subscription";
+/// The package of the samples, whose build script deploys the SDK library.
+const PACKAGE: &str = "dxfeed-graal-samples";
+/// A sample that uses the SDK without a network: it writes two quotes to a tape file in its current directory.
+const SAMPLE: &str = "WriteTapeFileSample";
+const SAMPLE_OUTPUT_FILE: &str = "WriteTapeFile.out.txt";
+const SAMPLE_OUTPUT: &str = "TEST1";
 const LIBRARY: &str = if cfg!(windows) {
     "DxFeedGraalNativeSdk.dll"
 } else if cfg!(target_os = "macos") {
@@ -101,7 +105,7 @@ fn check_deploy() -> Result<String, String> {
     let build = || {
         let output = Command::new(&cargo)
             // The rebuild check looks for the plain `Compiling` line, which colors and quiet mode would hide.
-            .args(["build", "-p", SAMPLE, "--color", "never"])
+            .args(["build", "-p", PACKAGE, "--bin", SAMPLE, "--color", "never"])
             .env_remove("CARGO_TERM_QUIET")
             .current_dir(&workspace)
             .output()
@@ -110,7 +114,7 @@ fn check_deploy() -> Result<String, String> {
         if output.status.success() {
             Ok(stderr)
         } else {
-            Err(format!("cargo build -p {SAMPLE} failed:\n{stderr}"))
+            Err(format!("cargo build -p {PACKAGE} --bin {SAMPLE} failed:\n{stderr}"))
         }
     };
     build()?;
@@ -129,7 +133,7 @@ fn check_deploy() -> Result<String, String> {
     let result = run_outside_cargo(&exe, &library, &temp);
     let _ = fs::remove_dir_all(&temp);
     result?;
-    rebuild_keeps_library(&library, &workspace.join("samples/deploy/build.rs"), build)?;
+    rebuild_keeps_library(&library, &workspace.join("samples/build.rs"), build)?;
 
     Ok(format!(
         "check-deploy passed: {} runs with {LIBRARY} next to it, fails without it, and a rebuild keeps the library",
@@ -152,7 +156,8 @@ fn run_outside_cargo(exe: &Path, library: &Path, temp: &Path) -> Result<(), Stri
     let exe_name = exe.file_name().unwrap_or_default();
 
     let (succeeded, output) = run_sanitized(&with_library.join(exe_name))?;
-    if !succeeded || !output.contains(SAMPLE_OUTPUT) {
+    let written = fs::read_to_string(with_library.join(SAMPLE_OUTPUT_FILE)).unwrap_or_default();
+    if !succeeded || !written.contains(SAMPLE_OUTPUT) {
         return Err(format!(
             "the deployed executable failed in {}:\n{output}",
             with_library.display()
@@ -197,9 +202,9 @@ fn rebuild_keeps_library(
             .and_then(|file| file.set_modified(std::time::SystemTime::now()))
             .map_err(|error| format!("cannot touch {}: {error}", build_rs.display()))?;
         let stderr = build()?;
-        if !stderr.contains(&format!("Compiling {SAMPLE}")) {
+        if !stderr.contains(&format!("Compiling {PACKAGE}")) {
             return Err(format!(
-                "the rebuild after touching build.rs did not compile {SAMPLE}:\n{stderr}"
+                "the rebuild after touching build.rs did not compile {PACKAGE}:\n{stderr}"
             ));
         }
         if fs::read(library).map_err(error)? != marked {

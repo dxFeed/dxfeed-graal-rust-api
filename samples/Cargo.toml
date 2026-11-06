@@ -1,0 +1,147 @@
+[package]
+name = "dxfeed-graal-samples"
+description = "The samples of the dxFeed Graal Rust API"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+publish.workspace = true
+autobins = false
+
+[dependencies]
+dxfeed-graal = { path = "../dxfeed-graal" }
+
+[build-dependencies]
+dxfeed-graal-build = { path = "../dxfeed-graal-build" }
+
+[lints]
+workspace = true
+
+# The samples have the names and groups of the samples of the C++ API; run a sample from its directory, which holds
+# its dxfeed.system.properties.
+
+[[bin]]
+name = "AuthSample"
+path = "API/AuthSample/main.rs"
+test = false
+
+[[bin]]
+name = "ConnectSample"
+path = "API/ConnectSample/main.rs"
+test = false
+
+[[bin]]
+name = "PrintQuoteEventsSample"
+path = "API/PrintQuoteEventsSample/main.rs"
+test = false
+
+[[bin]]
+name = "PublishProfilesSample"
+path = "API/PublishProfilesSample/main.rs"
+test = false
+
+[[bin]]
+name = "QuoteAndTradeSample"
+path = "API/QuoteAndTradeSample/main.rs"
+test = false
+
+[[bin]]
+name = "ReconnectSample"
+path = "API/ReconnectSample/main.rs"
+test = false
+
+[[bin]]
+name = "RequestProfileSample"
+path = "API/RequestProfileSample/main.rs"
+test = false
+
+[[bin]]
+name = "CandleSample"
+path = "Candle/CandleSample/main.rs"
+test = false
+
+[[bin]]
+name = "CandleDataSample"
+path = "Candle/CandleDataSample/main.rs"
+test = false
+
+[[bin]]
+name = "FetchDailyCandlesSample"
+path = "Candle/FetchDailyCandlesSample/main.rs"
+test = false
+
+[[bin]]
+name = "LastEventConsoleSample"
+path = "Console/LastEventConsoleSample/main.rs"
+test = false
+
+[[bin]]
+name = "ConvertTapeFileSample"
+path = "File/ConvertTapeFileSample/main.rs"
+test = false
+
+[[bin]]
+name = "FileParserSample"
+path = "File/FileParserSample/main.rs"
+test = false
+
+[[bin]]
+name = "WriteTapeFileSample"
+path = "File/WriteTapeFileSample/main.rs"
+test = false
+
+[[bin]]
+name = "IpfSample"
+path = "IPF/IpfSample/main.rs"
+test = false
+
+[[bin]]
+name = "IpfLiveSample"
+path = "IPF/IpfLiveSample/main.rs"
+test = false
+
+[[bin]]
+name = "OptionChainSample"
+path = "IPF/OptionChainSample/main.rs"
+test = false
+
+[[bin]]
+name = "IncOrderSnapshotSample"
+path = "Model/IncOrderSnapshotSample/main.rs"
+test = false
+
+[[bin]]
+name = "MarketDepthModelSample"
+path = "Model/MarketDepthModelSample/main.rs"
+test = false
+
+[[bin]]
+name = "MultipleMarketDepthSample"
+path = "Model/MultipleMarketDepthSample/main.rs"
+test = false
+
+[[bin]]
+name = "PriceLevelBookSample"
+path = "Model/PriceLevelBookSample/main.rs"
+test = false
+
+[[bin]]
+name = "SimpleOrderBookSample"
+path = "Model/SimpleOrderBookSample/main.rs"
+test = false
+
+[[bin]]
+name = "OnDemandSample"
+path = "OnDemand/OnDemandSample/main.rs"
+test = false
+
+[[bin]]
+name = "PriceLevelServiceClientSample"
+path = "Orcs/PriceLevelServiceClientSample/main.rs"
+test = false
+
+[[bin]]
+name = "ScheduleSample"
+path = "Schedule/ScheduleSample/main.rs"
+test = false

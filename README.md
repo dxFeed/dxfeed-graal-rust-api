@@ -201,12 +201,13 @@ fn main() {
 `target/<triple>/<profile>` when cross-compiling), where cargo puts the executables, and skips the copy when the
 library has not changed. On Linux and macOS it also sets the executables' rpath to their own directory
 (`$ORIGIN`, `@loader_path`), so they find the library without `LD_LIBRARY_PATH`. To ship the application, copy the
-executable together with the library. Examples and tests are not covered; they run through cargo.
+executable together with the library. Cargo examples and tests are not covered; they run through cargo.
 
 For another layout, or when `build.build-dir` moves build scripts out of the target directory, call
 `dxfeed_graal_build::library_path()` and copy the library yourself. The macOS rpath is not verified yet.
-[`samples/deploy`](samples/deploy) is a complete application, and `cargo run -p xtask -- check-deploy` checks that it
-runs from a directory holding only the executable and the library.
+The [samples](samples) deploy the library this way (see [`samples/build.rs`](samples/build.rs)), and
+`cargo run -p xtask -- check-deploy` checks that one of them runs from a directory holding only the executable and the
+library.
 
 ## Usage
 
@@ -393,111 +394,115 @@ target/release/Tools Qds "help connect"
 ## Samples
 
 The samples follow the samples of the dxFeed Java API and have the names and groups of the samples of the C++ API.
-Each one is a Cargo example in `dxfeed-graal/examples/<Group>/<Name>Sample`; started without its required arguments,
-it prints its usage.
+Each one is a binary of the `dxfeed-graal-samples` package in `samples/<Group>/<Name>Sample`; started without its
+required arguments, it prints its usage.
 
 A sample that uses the default feed reads its address from the `dxfeed.system.properties` file in the current
 directory, so run it from its directory, which holds that file:
 
 ```bash
-cd dxfeed-graal/examples/API/PrintQuoteEventsSample
-cargo run --example PrintQuoteEventsSample -- AAPL
+cd samples/API/PrintQuoteEventsSample
+cargo run --bin PrintQuoteEventsSample -- AAPL
 ```
 
 The `DXFEED_dxfeed.address` environment variable overrides the file (see [System Properties](#system-properties)):
 
 ```bash
-env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEventsSample -- AAPL
+env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --bin PrintQuoteEventsSample -- AAPL
+```
+
+The build script of the samples puts the SDK library next to them, so a built sample also runs outside cargo
+(see [Running and Deployment](#running-and-deployment)):
+
+```bash
+cargo build --release -p dxfeed-graal-samples
+cd samples/API/PrintQuoteEventsSample
+../../../target/release/PrintQuoteEventsSample AAPL
 ```
 
 ### API
 
-- [x] [AuthSample](dxfeed-graal/examples/API/AuthSample/main.rs)
+- [x] [AuthSample](samples/API/AuthSample/main.rs)
   demonstrates how to connect to an endpoint that requires an authentication token, subscribe to market data events,
   and handle periodic token updates
-- [x] [ConnectSample](dxfeed-graal/examples/API/ConnectSample/main.rs)
+- [x] [ConnectSample](samples/API/ConnectSample/main.rs)
   demonstrates how to connect to the endpoint and subscribe to various market events
-- [x] [PrintQuoteEventsSample](dxfeed-graal/examples/API/PrintQuoteEventsSample/main.rs)
+- [x] [PrintQuoteEventsSample](samples/API/PrintQuoteEventsSample/main.rs)
   is a simple demonstration of how to subscribe to the `Quote` event, using the `DXFeed` instance singleton and the
   `dxfeed.system.properties` file
-- [x] [PublishProfilesSample](dxfeed-graal/examples/API/PublishProfilesSample/main.rs)
+- [x] [PublishProfilesSample](samples/API/PublishProfilesSample/main.rs)
   is a simple demonstration of how to publish market events
-- [x] [RequestProfileSample](dxfeed-graal/examples/API/RequestProfileSample/main.rs)
+- [x] [RequestProfileSample](samples/API/RequestProfileSample/main.rs)
   using an address like `localhost:7700` and a symbol like `A:TEST`, connects to the running `PublishProfilesSample`
   sample, prints the profile of the symbol and exits
-- [x] [QuoteAndTradeSample](dxfeed-graal/examples/API/QuoteAndTradeSample/main.rs)
+- [x] [QuoteAndTradeSample](samples/API/QuoteAndTradeSample/main.rs)
   demonstrates how to create multiple event listeners and subscribe to `Quote` and `Trade` events
-- [x] [ReconnectSample](dxfeed-graal/examples/API/ReconnectSample/main.rs)
+- [x] [ReconnectSample](samples/API/ReconnectSample/main.rs)
   demonstrates how to connect to an endpoint, subscribe to market data events, and handle reconnections and
   re-subscribing
 
 ### Candle
 
-- [x] [CandleSample](dxfeed-graal/examples/Candle/CandleSample/main.rs)
+- [x] [CandleSample](samples/Candle/CandleSample/main.rs)
   demonstrates how to subscribe to `Candle` events from a time with the candle symbol attributes
-- [x] [CandleDataSample](dxfeed-graal/examples/Candle/CandleDataSample/main.rs)
+- [x] [CandleDataSample](samples/Candle/CandleDataSample/main.rs)
   demonstrates how to query the CandleData service using the `HistoryEndpoint`
-- [x] [FetchDailyCandlesSample](dxfeed-graal/examples/Candle/FetchDailyCandlesSample/main.rs)
+- [x] [FetchDailyCandlesSample](samples/Candle/FetchDailyCandlesSample/main.rs)
   demonstrates how to fetch the candles of the last N days for a symbol
 
 ### Console
 
-- [x] [LastEventConsoleSample](dxfeed-graal/examples/Console/LastEventConsoleSample/main.rs)
+- [x] [LastEventConsoleSample](samples/Console/LastEventConsoleSample/main.rs)
   demonstrates how to subscribe to various market events with the dxFeed API, cache them in memory, and take
   snapshots of these events based on user input
 
 ### File
 
-- [x] [ConvertTapeFileSample](dxfeed-graal/examples/File/ConvertTapeFileSample/main.rs)
+- [x] [ConvertTapeFileSample](samples/File/ConvertTapeFileSample/main.rs)
   demonstrates how to convert one tape file to another tape file with optional intermediate processing or filtering
-- [x] [FileParserSample](dxfeed-graal/examples/File/FileParserSample/main.rs)
+- [x] [FileParserSample](samples/File/FileParserSample/main.rs)
   demonstrates how to read events from a tape file
-- [x] [WriteTapeFileSample](dxfeed-graal/examples/File/WriteTapeFileSample/main.rs)
+- [x] [WriteTapeFileSample](samples/File/WriteTapeFileSample/main.rs)
   demonstrates how to write events to a tape file
 
 ### IPF
 
-- [x] [IpfSample](dxfeed-graal/examples/IPF/IpfSample/main.rs)
+- [x] [IpfSample](samples/IPF/IpfSample/main.rs)
   is a simple demonstration of how to get instrument profiles
-- [x] [IpfLiveSample](dxfeed-graal/examples/IPF/IpfLiveSample/main.rs)
+- [x] [IpfLiveSample](samples/IPF/IpfLiveSample/main.rs)
   is a simple demonstration of how to get live updates of instrument profiles
-- [x] [OptionChainSample](dxfeed-graal/examples/IPF/OptionChainSample/main.rs)
+- [x] [OptionChainSample](samples/IPF/OptionChainSample/main.rs)
   demonstrates how to build option chains, and prints quotes for nearby option strikes
 
 ### Model
 
-- [x] [SimpleOrderBookSample](dxfeed-graal/examples/Model/SimpleOrderBookSample/main.rs)
+- [x] [SimpleOrderBookSample](samples/Model/SimpleOrderBookSample/main.rs)
   demonstrates how to build an order book of a symbol and an order source with `IndexedEventTxModel`
-- [x] [IncOrderSnapshotSample](dxfeed-graal/examples/Model/IncOrderSnapshotSample/main.rs)
+- [x] [IncOrderSnapshotSample](samples/Model/IncOrderSnapshotSample/main.rs)
   demonstrates how to subscribe to the `Order` event and handle snapshots and updates
-- [x] [MultipleMarketDepthSample](dxfeed-graal/examples/Model/MultipleMarketDepthSample/main.rs)
+- [x] [MultipleMarketDepthSample](samples/Model/MultipleMarketDepthSample/main.rs)
   demonstrates how to use the `MarketDepthModel` to manage and display order books for multiple symbols
-- [x] [PriceLevelBookSample](dxfeed-graal/examples/Model/PriceLevelBookSample/main.rs)
+- [x] [PriceLevelBookSample](samples/Model/PriceLevelBookSample/main.rs)
   demonstrates how to compile a price level book (market by price) that aggregates individual orders (market by
   order)
-- [x] [MarketDepthModelSample](dxfeed-graal/examples/Model/MarketDepthModelSample/main.rs)
+- [x] [MarketDepthModelSample](samples/Model/MarketDepthModelSample/main.rs)
   demonstrates how to use the `MarketDepthModel`
 
 ### Schedule
 
-- [x] [ScheduleSample](dxfeed-graal/examples/Schedule/ScheduleSample/main.rs)
+- [x] [ScheduleSample](samples/Schedule/ScheduleSample/main.rs)
   demonstrates how to get various scheduling information for instruments
 
 ### OnDemand
 
-- [x] [OnDemandSample](dxfeed-graal/examples/OnDemand/OnDemandSample/main.rs)
+- [x] [OnDemandSample](samples/OnDemand/OnDemandSample/main.rs)
   demonstrates how to use the dxFeed on-demand history data replay service API
 
 ### ORCS
 
-- [x] [PriceLevelServiceClientSample](dxfeed-graal/examples/Orcs/PriceLevelServiceClientSample/main.rs)
+- [x] [PriceLevelServiceClientSample](samples/Orcs/PriceLevelServiceClientSample/main.rs)
   demonstrates how to get the price levels and the quotes of a symbol for a period from the Order Reconstruction
   Service (ORCS) with `PriceLevelService`
-
-### Deployment
-
-- [x] [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable
-  (see [Running and Deployment](#running-and-deployment))
 
 ## Current State
 
@@ -514,7 +519,7 @@ left out.
   data parsing from files
 - [x] [PUBLISHER](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#PUBLISHER)
   (`Role::Publisher`) connects to the remote publisher hub (also known as multiplexor) or creates a publisher on the
-  local host ([WriteTapeFileSample](dxfeed-graal/examples/File/WriteTapeFileSample/main.rs))
+  local host ([WriteTapeFileSample](samples/File/WriteTapeFileSample/main.rs))
 - [x] [STREAM_PUBLISHER](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#STREAM_PUBLISHER)
   (`Role::StreamPublisher`) is similar to PUBLISHER and also connects to the remote publisher hub, but is designed for
   bulk data publishing
@@ -631,7 +636,7 @@ the types.
 
 - [x] [InstrumentProfile](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfile.html) represents basic
   profile information about a market instrument, with typed fields
-  ([IpfSample](dxfeed-graal/examples/IPF/IpfSample/main.rs))
+  ([IpfSample](samples/IPF/IpfSample/main.rs))
 - [x] [InstrumentProfileReader](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfileReader.html) reads
   instrument profiles from files, URLs and bytes using Instrument Profile Format (IPF)
 - [x] [InstrumentProfileWriter](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfileWriter.html)
@@ -640,25 +645,25 @@ the types.
   connects to an instrument profile URL and reads instrument profiles with support of streaming live updates
 - [x] [InstrumentProfileCollector](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/live/InstrumentProfileCollector.html)
   collects instrument profile updates and provides the live instrument profiles list, with generations
-  ([IpfLiveSample](dxfeed-graal/examples/IPF/IpfLiveSample/main.rs))
+  ([IpfLiveSample](samples/IPF/IpfLiveSample/main.rs))
 - [x] [OptionChainsBuilder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/option/OptionChainsBuilder.html) builds
-  option chains ([OptionChainSample](dxfeed-graal/examples/IPF/OptionChainSample/main.rs))
+  option chains ([OptionChainSample](samples/IPF/OptionChainSample/main.rs))
 - [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
 - [x] [Schedule](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/schedule/Schedule.html) provides API to retrieve and
   explore various exchanges’ trading schedules and different financial instrument classes: days, sessions, holidays,
   venues, the schedule defaults, UTC and NYSE, the `accept` of the day and session filters, and custom filters with a Rust predicate
-  ([ScheduleSample](dxfeed-graal/examples/Schedule/ScheduleSample/main.rs))
+  ([ScheduleSample](samples/Schedule/ScheduleSample/main.rs))
 
 ### Services
 
 - [x] [OnDemandService](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ondemand/OnDemandService.html) provides on-demand
   historical tick data replay controls, with property change listeners
-  ([OnDemandSample](dxfeed-graal/examples/OnDemand/OnDemandSample/main.rs))
+  ([OnDemandSample](samples/OnDemand/OnDemandSample/main.rs))
 - [x] `PriceLevelService` gets the price levels and the quotes of the Order Reconstruction Service (ORCS), with
   `PriceLevelChecker` and `AuthOrderSource`
-  ([PriceLevelServiceClientSample](dxfeed-graal/examples/Orcs/PriceLevelServiceClientSample/main.rs))
+  ([PriceLevelServiceClientSample](samples/Orcs/PriceLevelServiceClientSample/main.rs))
 - [x] `HistoryEndpoint` gets candles and time and sales from the history service
-  ([CandleDataSample](dxfeed-graal/examples/Candle/CandleDataSample/main.rs))
+  ([CandleDataSample](samples/Candle/CandleDataSample/main.rs))
 
 ### Other Features
 

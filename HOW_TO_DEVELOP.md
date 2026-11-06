@@ -6,8 +6,8 @@ Regenerate the bindings after an SDK update (needs libclang; set `LIBCLANG_PATH`
 cargo run -p xtask -- gen-bindings <unpacked SDK dir>
 ```
 
-Check that `samples/deploy` runs outside cargo with only the deployed library next to it, fails without it, and that a
-rebuild does not copy the library again:
+Check that a sample (`WriteTapeFileSample`) runs outside cargo with only the deployed library next to it, fails without
+it, and that a rebuild does not copy the library again:
 
 ```bash
 cargo run -p xtask -- check-deploy

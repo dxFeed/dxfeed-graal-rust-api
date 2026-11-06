@@ -1,6 +1,6 @@
 /target
 /.idea
-# Written by the write_tape_file sample.
+# Written by WriteTapeFileSample.
 WriteTapeFile.out.txt
-# Written by the convert_tape_file sample.
+# Written by ConvertTapeFileSample.
 ConvertTapeFile.out
