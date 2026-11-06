@@ -1,0 +1,124 @@
+# Copyright (c) 2026 Devexperts LLC.
+# SPDX-License-Identifier: MPL-2.0
+
+name: CI
+
+# The same checks as the local gates (HOW_TO_DEVELOP.md): fmt and rustdoc once, clippy, the tests and the deployment
+# check on every platform of the SDK, and a check on the minimum supported Rust version.
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# A newer push to a pull request cancels the run of the older one. Other runs are grouped by commit, so a run of every
+# commit on main finishes: a group keeps only one pending run, and a newer one would cancel it.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+env:
+  # The toolchain of the gates; a newer one may add clippy lints, so it changes together with the code.
+  RUSTUP_TOOLCHAIN: 1.99.1
+  # The rust-version of the workspace.
+  MSRV: '1.88'
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+  RUST_BACKTRACE: 1
+
+# One shell on every runner: PowerShell on Windows would treat some arguments differently.
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  lint:
+    name: fmt and rustdoc
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+
+      - name: fmt
+        run: cargo fmt --all -- --check
+
+      - name: rustdoc
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p dxfeed-graal --no-deps
+
+      - name: rustdoc, all features
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --locked -p dxfeed-graal --no-deps --all-features
+
+      # docs.rs builds without the SDK and without network, with the features of [package.metadata.docs.rs].
+      - name: rustdoc as on docs.rs
+        env:
+          RUSTDOCFLAGS: -D warnings
+          DOCS_RS: 1
+        run: cargo doc --locked -p dxfeed-graal --no-deps --all-features --target-dir target/docs-rs
+
+  build:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: linux-x64
+            image: ubuntu-24.04
+          - name: linux-aarch64
+            image: ubuntu-24.04-arm
+          - name: win-x64
+            image: windows-2022
+          - name: osx-aarch64
+            image: macos-15
+          - name: osx-x64
+            image: macos-15-intel
+    runs-on: ${{ matrix.image }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+
+      - name: clippy
+        run: cargo clippy --locked --workspace --all-targets -- -D warnings
+
+      - name: clippy, all features
+        run: cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+
+      - name: test
+        run: cargo test --locked --workspace
+
+      - name: test, all features
+        run: cargo test --locked --workspace --all-features
+
+      - name: test, release
+        run: cargo test --locked --workspace --release
+
+      - name: test, release, all features
+        run: cargo test --locked --workspace --release --all-features
+
+      # A sample runs outside cargo with only the deployed SDK library next to it.
+      - name: check-deploy
+        run: cargo run --locked -p xtask -- check-deploy
+
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+        with:
+          extra-toolchains: ${{ env.MSRV }}
+
+      - name: check
+        run: cargo +${{ env.MSRV }} check --locked --workspace --all-targets
+
+      - name: check, all features
+        run: cargo +${{ env.MSRV }} check --locked --workspace --all-targets --all-features

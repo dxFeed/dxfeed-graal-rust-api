@@ -1,0 +1,57 @@
+# Copyright (c) 2026 Devexperts LLC.
+# SPDX-License-Identifier: MPL-2.0
+
+name: Set up the build
+description: >
+  Installs the Rust toolchain of the job (RUSTUP_TOOLCHAIN) and the extra toolchains it asks for, and restores the
+  cargo registry and the cache of the SDK archive (DXFEED_GRAAL_SDK_CACHE_DIR), so the build scripts do not download
+  the SDK on every run.
+
+inputs:
+  extra-toolchains:
+    description: Space-separated toolchains to install besides RUSTUP_TOOLCHAIN, for example the MSRV.
+    required: false
+    default: ''
+
+runs:
+  using: composite
+  steps:
+    # The hosted images have rustup; the Linux arm64 image may not, so it is installed there without a toolchain.
+    - name: Install Rust
+      shell: bash
+      env:
+        EXTRA_TOOLCHAINS: ${{ inputs.extra-toolchains }}
+      run: |
+        if ! command -v rustup > /dev/null; then
+          curl --proto '=https' --tlsv1.2 --retry 3 -sSf https://sh.rustup.rs | sh -s -- -y --profile minimal --default-toolchain none
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          export PATH="$HOME/.cargo/bin:$PATH"
+        fi
+        rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --component clippy,rustfmt
+        for toolchain in $EXTRA_TOOLCHAINS; do
+          rustup toolchain install "$toolchain" --profile minimal
+        done
+        rustc --version
+        cargo --version
+
+    # An absolute path outside the checkout: the build script rejects a relative one.
+    - name: Set the SDK cache directory
+      shell: bash
+      run: echo "DXFEED_GRAAL_SDK_CACHE_DIR=$RUNNER_TEMP/dxfeed-graal-sdk" >> "$GITHUB_ENV"
+
+    # The SDK version and the archive digests live in the build script of dxfeed-graal-sys.
+    - name: Restore the SDK archive
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ runner.temp }}/dxfeed-graal-sdk
+        key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dxfeed-graal-sys/build.rs') }}
+
+    - name: Restore the cargo registry
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: |
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+        key: cargo-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock') }}
+        restore-keys: cargo-${{ runner.os }}-${{ runner.arch }}-

@@ -12,6 +12,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 > [!WARNING]
 > The project is in **alpha**: the API may change in any release (see [Current State](#current-state)).
 
+[![Build](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml)
 ![Status](https://img.shields.io/badge/status-alpha-red)
 ![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.13.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)

@@ -13,6 +13,13 @@ it, and that a rebuild does not copy the library again:
 cargo run -p xtask -- check-deploy
 ```
 
-The tests expect no `DXFEED_*` environment variables: the SDK reads them as system properties in every test process.
+The tests expect no `DXFEED_*` environment variables except the build ones (`DXFEED_GRAAL_SDK_*`): the SDK reads them
+as system properties in every test process.
 
 The cargo feature `experimental` adds items, so run clippy, rustdoc and the tests with and without `--all-features`.
+
+CI (`.github/workflows/build.yml`) runs the same checks on a pull request and a push to main: fmt and rustdoc (also
+without the SDK, as on docs.rs) on Linux; on Linux x64 and arm64, Windows x64 and macOS arm64 and x64, clippy and the
+tests in debug and release, each with and without `--all-features`, and then `check-deploy`; and `cargo check` on the
+minimum supported Rust version. It uses the toolchain set in the workflow (`RUSTUP_TOOLCHAIN`); update it there together with the code that
+a newer clippy needs.
