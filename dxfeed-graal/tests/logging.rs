@@ -215,7 +215,10 @@ fn child_isolate_arguments_apply_before_the_isolate_only() {
 #[test]
 fn wrong_isolate_arguments_fail_every_call() {
     let (_, stderr) = run_child("child_wrong_isolate_arguments_fail_every_call");
-    assert!(stderr.contains("64q"), "{stderr}");
+    // In CI the SDK for macOS x86-64 printed nothing when it could not create the isolate; the others print the reason.
+    if !cfg!(all(target_os = "macos", target_arch = "x86_64")) {
+        assert!(stderr.contains("64q"), "{stderr}");
+    }
 }
 
 #[test]

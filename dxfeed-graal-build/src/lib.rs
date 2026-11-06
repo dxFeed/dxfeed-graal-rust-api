@@ -29,6 +29,7 @@ use std::fmt;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 /// Set by the build script of `dxfeed-graal` for the build scripts of its direct dependents.
 const LIB_DIR_VAR: &str = "DEP_DXFEED_GRAAL_LIB_DIR";
@@ -136,20 +137,38 @@ fn profile_dir(out_dir: &Path) -> Result<PathBuf> {
 
 /// Copies `from` to `to` unless `to` already has the same size and modification time. Gives the copy the source's
 /// modification time, which `fs::copy` keeps only on Windows, so the next call can skip it. Returns whether it copied.
+///
+/// The build scripts of several packages of a workspace may deploy into the same directory at once, so the library is
+/// copied into a file of this call and renamed into place: no one sees a partial copy, and two copies do not write one
+/// file. When the rename fails but the destination is the same by then, another build has put it there, and that counts.
 fn copy_if_changed(from: &Path, to: &Path) -> io::Result<bool> {
+    static NEXT: AtomicUsize = AtomicUsize::new(0);
     let source = fs::metadata(from)?;
-    if let Ok(dest) = fs::metadata(to)
-        && dest.len() == source.len()
-        && dest.modified()? == source.modified()?
-    {
+    let modified = source.modified()?;
+    let same = || {
+        fs::metadata(to).is_ok_and(|dest| dest.len() == source.len() && dest.modified().is_ok_and(|m| m == modified))
+    };
+    if same() {
         return Ok(false);
     }
-    fs::copy(from, to)?;
-    fs::File::options()
-        .write(true)
-        .open(to)?
-        .set_modified(source.modified()?)?;
-    Ok(true)
+    let temp = to.with_file_name(format!(
+        ".{}.{}-{}.tmp",
+        to.file_name().unwrap_or_default().to_string_lossy(),
+        std::process::id(),
+        NEXT.fetch_add(1, Ordering::Relaxed)
+    ));
+    let copied = (|| {
+        fs::copy(from, &temp)?;
+        fs::File::options().write(true).open(&temp)?.set_modified(modified)?;
+        fs::rename(&temp, to)
+    })();
+    match copied {
+        Ok(()) => Ok(true),
+        Err(error) => {
+            let _ = fs::remove_file(&temp);
+            if same() { Ok(false) } else { Err(error) }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -243,6 +262,40 @@ mod tests {
             "a source of the same size with another modification time is copied"
         );
         assert_eq!(fs::read(&to).unwrap(), b"A NEW LIBRARY");
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn concurrent_copies_leave_one_whole_library() {
+        let dir = env::temp_dir().join(format!("dxfeed-graal-build-concurrent-{}", std::process::id()));
+        fs::create_dir_all(&dir).unwrap();
+        let (from, to) = (dir.join("from"), dir.join("to"));
+        // As big as the SDK library, so the copies overlap.
+        let library = vec![7u8; 32 << 20];
+        fs::write(&from, &library).unwrap();
+        let _ = fs::remove_file(&to);
+
+        let start = std::sync::Barrier::new(8);
+        std::thread::scope(|scope| {
+            let copies: Vec<_> = (0..8)
+                .map(|_| {
+                    scope.spawn(|| {
+                        start.wait();
+                        copy_if_changed(&from, &to)
+                    })
+                })
+                .collect();
+            for copy in copies {
+                copy.join().unwrap().unwrap();
+            }
+        });
+        assert!(fs::read(&to).unwrap() == library);
+        let names: Vec<_> = fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(names.len(), 2, "temporary files are left: {names:?}");
 
         fs::remove_dir_all(&dir).unwrap();
     }

@@ -40,9 +40,10 @@ pub fn run_child(scenario: &str) -> (String, String) {
         .unwrap();
     let read = |mut pipe: Box<dyn Read + Send>| {
         thread::spawn(move || {
-            let mut text = String::new();
-            let _ = pipe.read_to_string(&mut text);
-            text
+            // Bytes that are not UTF-8 are replaced rather than losing the whole output.
+            let mut bytes = Vec::new();
+            let _ = pipe.read_to_end(&mut bytes);
+            String::from_utf8_lossy(&bytes).into_owned()
         })
     };
     let stdout = read(Box::new(child.stdout.take().unwrap()));

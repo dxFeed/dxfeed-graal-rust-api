@@ -38,7 +38,6 @@ impl Drop for TempFile {
 
 /// Writes a text tape with two quotes and a trade.
 fn write_tape(name: &str) -> TempFile {
-    let file = TempFile::new(name);
     let events: Vec<Event> = vec![
         Quote {
             bid_price: 10.1,
@@ -58,6 +57,12 @@ fn write_tape(name: &str) -> TempFile {
         }
         .into(),
     ];
+    write_events(name, &events)
+}
+
+/// Writes a text tape with `events`.
+fn write_events(name: &str, events: &[Event]) -> TempFile {
+    let file = TempFile::new(name);
     // Without a subscription a publisher drops its events; the wildcard subscribes the tape to everything.
     let writer = DXEndpoint::new_builder()
         .with_role(Role::Publisher)
@@ -67,7 +72,7 @@ fn write_tape(name: &str) -> TempFile {
     writer
         .connect(&format!("tape:{}[format=text]", file.path().display()))
         .unwrap();
-    writer.get_publisher().publish_events(&events).unwrap();
+    writer.get_publisher().publish_events(events).unwrap();
     writer.await_processed().unwrap();
     writer.close_and_await_termination().unwrap();
     file
@@ -181,9 +186,14 @@ fn connect_prints_the_events_of_a_tape() {
 
 #[test]
 fn a_closed_output_ends_connect() {
-    let file = write_tape("connect-closed.txt");
+    // More quotes than a pipe holds, so the printing reaches the closed pipe even when the quotes start to come before
+    // the pipe has lost its last reader: before the drop below, or while a child spawned by another test still holds
+    // the read end (on macOS a pipe gets its close-on-exec flag only after it is made).
+    let symbols: Vec<String> = (0..2000).map(|i| format!("TEST{i}")).collect();
+    let quotes: Vec<Event> = symbols.iter().map(|symbol| Quote::new(symbol).into()).collect();
+    let file = write_events("connect-closed.txt", &quotes);
     let mut child = Command::new(env!("CARGO_BIN_EXE_Tools"))
-        .args(["Connect", &file.address(), "Quote", "TEST1,TEST2"])
+        .args(["Connect", &file.address(), "Quote", &symbols.join(",")])
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
