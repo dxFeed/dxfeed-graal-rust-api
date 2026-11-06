@@ -8,9 +8,11 @@ mod connect;
 mod console;
 mod dump;
 mod help;
+mod latency_test;
 mod metrics;
 mod perf_test;
 mod qds;
+mod stats;
 mod tape;
 
 use std::error::Error;
@@ -27,13 +29,21 @@ pub enum Tool {
     Connect,
     Dump,
     Help,
+    LatencyTest,
     PerfTest,
     Qds,
 }
 
 impl Tool {
     /// Every tool.
-    pub const ALL: &'static [Tool] = &[Tool::Connect, Tool::Dump, Tool::Help, Tool::PerfTest, Tool::Qds];
+    pub const ALL: &'static [Tool] = &[
+        Tool::Connect,
+        Tool::Dump,
+        Tool::Help,
+        Tool::LatencyTest,
+        Tool::PerfTest,
+        Tool::Qds,
+    ];
 
     /// The tool with this name, in any case.
     pub fn find(name: &str) -> Option<Tool> {
@@ -49,8 +59,17 @@ impl Tool {
             Tool::Connect => &connect::INFO,
             Tool::Dump => &dump::INFO,
             Tool::Help => &help::HELP,
+            Tool::LatencyTest => &latency_test::INFO,
             Tool::PerfTest => &perf_test::INFO,
             Tool::Qds => &qds::INFO,
+        }
+    }
+
+    /// Checks the parsed arguments beyond their positions and names, with a message for the help screen.
+    fn check(self, args: &args::Parsed) -> Result<(), String> {
+        match self {
+            Tool::LatencyTest => latency_test::exchange_codes(args.get(args::Arg::IgnoreExchanges)).map(drop),
+            _ => Ok(()),
         }
     }
 
@@ -59,6 +78,7 @@ impl Tool {
             Tool::Connect => connect::run(args)?,
             Tool::Dump => dump::run(args)?,
             Tool::Help => help::run(args),
+            Tool::LatencyTest => latency_test::run(args)?,
             Tool::PerfTest => perf_test::run(args)?,
             Tool::Qds => qds::run(args)?,
         }
@@ -93,7 +113,13 @@ fn run(args: &[String]) -> Result<(), Box<dyn Error>> {
             console::println(&help::tools_name());
             console::println(&help::tool_screen(tool.info(), Some(&error)));
         }
-        ParseResult::Ok(parsed) => tool.run(&parsed)?,
+        ParseResult::Ok(parsed) => match tool.check(&parsed) {
+            Ok(()) => tool.run(&parsed)?,
+            Err(error) => {
+                console::println(&help::tools_name());
+                console::println(&help::tool_screen(tool.info(), Some(&error)));
+            }
+        },
     }
     Ok(())
 }

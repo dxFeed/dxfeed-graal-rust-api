@@ -26,13 +26,14 @@ fn the_usage_lists_the_tools() {
     assert!(
         usage.contains("\nA collection of useful utilities that use the dxFeed API.\n\nUsage:\n  Tools <tool> [...]\n")
     );
-    assert!(
-        usage.contains(
-            "\nWhere:\n\n  Connect   Connects to specified address(es).\n  Dump      Dumps all events received from address.\n  \
-             Help      Help tool.\n  PerfTest  Connects to specified address and calculates performance counters.\n  \
-             Qds       A collection of tools ported from the Java qds-tools.\n"
-        )
-    );
+    assert!(usage.contains(
+        "\nWhere:\n\n  Connect      Connects to specified address(es).\n  \
+             Dump         Dumps all events received from address.\n  \
+             Help         Help tool.\n  \
+             LatencyTest  Connects to the specified address(es) and calculates latency.\n  \
+             PerfTest     Connects to specified address and calculates performance counters.\n  \
+             Qds          A collection of tools ported from the Java qds-tools.\n"
+    ));
     assert!(usage.contains("\nTo get detailed help on some tool use \"Help <tool>\".\n"));
     assert_eq!(stdout(&["-h"]), usage);
     assert_eq!(stdout(&["--help"]), usage);

@@ -374,7 +374,7 @@ options:
   file
 - [x] [PerfTest](tools/src/perf_test.rs) connects to the specified address(es) and calculates performance counters
   (events per second, memory usage, CPU usage, etc.)
-- [ ] LatencyTest connects to the specified address(es) and calculates latency
+- [x] [LatencyTest](tools/src/latency_test.rs) connects to the specified address(es) and calculates latency
 - [x] [Qds](tools/src/qds.rs) collection of tools ported from the Java qds-tools
 - [x] [Help](tools/src/help.rs) shows the help screens of the tools and the help articles
 
@@ -386,6 +386,7 @@ cargo run --release -p dxfeed-graal-tools -- Help contents
 target/release/Tools Connect demo.dxfeed.com:7300 Quote AAPL,IBM
 target/release/Tools Dump "file:quotes.txt[speed=max]" Quote -t quotes-copy.txt
 target/release/Tools PerfTest demo.dxfeed.com:7300 Quote AAPL,IBM -p PerfTest.format=csv
+target/release/Tools LatencyTest demo.dxfeed.com:7300 Quote,Trade AAPL,IBM --interval 5
 target/release/Tools Qds "help connect"
 ```
 
