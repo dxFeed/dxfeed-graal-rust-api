@@ -1,4 +1,7 @@
-# dxFeed Graal Rust API
+<picture>
+ <source media="(prefers-color-scheme: dark)" srcset="docs/images/logo_dark.svg">
+ <img alt="dxFeed" src="docs/images/logo_light.svg">
+</picture>
 
 This package provides access to [dxFeed market data](https://dxfeed.com/market-data/).
 The library is built as a language-specific wrapper over
@@ -7,8 +10,7 @@ which was compiled with [GraalVM Native Image](https://www.graalvm.org/latest/re
 and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) (our flagman API).
 
 > [!WARNING]
-> The project is in **alpha**: the API may change in any release, and only a part of the SDK is covered (see
-> [Current State](#current-state)).
+> The project is in **alpha**: the API may change in any release (see [Current State](#current-state)).
 
 ![Status](https://img.shields.io/badge/status-alpha-red)
 ![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.13.0-yellow)
@@ -23,16 +25,18 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Documentation](#documentation)
 - [Requirements](#requirements)
 - [Installation](#installation)
-- [Building](#building)
-- [Running and Deployment](#running-and-deployment)
+  * [Getting the SDK](#getting-the-sdk)
+  * [Running and Deployment](#running-and-deployment)
 - [Usage](#usage)
+  * [How to connect to QD endpoint](#how-to-connect-to-qd-endpoint)
+  * [How to connect to dxLink](#how-to-connect-to-dxlink)
   * [System Properties](#system-properties)
   * [Threads and Listeners](#threads-and-listeners)
   * [Closing and Exit](#closing-and-exit)
 - [Samples](#samples)
 - [Current State](#current-state)
-- [Development](#development)
-- [License](#license)
+- [How To Develop](HOW_TO_DEVELOP.md)
+- [License](LICENSE)
 
 ## Overview
 
@@ -59,36 +63,84 @@ Then, the resulting dynamic link library (dxFeed Graal-native) is used through
 C [ABI](https://en.wikipedia.org/wiki/Application_binary_interface) (application binary interface), its `dxfg_v4_`
 functions, and we write programming interfaces that describe our business model (similar to Java API).
 
+As a result, we get a full-featured, similar performance as with Java API.
+Regardless of the language, writing the final application logic using API calls will be very similar (only the syntax
+will be amended, *"best practices"*, specific language restrictions).
+
 ## Documentation
 
-- API documentation: `cargo doc --open -p dxfeed-graal`
+Find useful information in our self-service dxFeed Knowledge Base or Rust API documentation:
+
+- dxFeed Graal Rust API documentation: `cargo doc --open -p dxfeed-graal` (`--all-features` adds the
+  [experimental tier](#getting-the-sdk))
 - [dxFeed Knowledge Base](https://kb.dxfeed.com/index.html?lang=en)
   * [Getting Started](https://kb.dxfeed.com/en/getting-started.html)
   * [Troubleshooting](https://kb.dxfeed.com/en/troubleshooting-guidelines.html)
   * [Market Events](https://kb.dxfeed.com/en/data-model/dxfeed-api-market-events.html)
   * [Event Delivery contracts](https://kb.dxfeed.com/en/data-model/model-of-event-publishing.html#event-delivery-contracts)
+  * [dxFeed API Event classes](https://kb.dxfeed.com/en/data-model/model-of-event-publishing.html#dxfeed-api-event-classes)
   * [Exchange Codes](https://kb.dxfeed.com/en/data-model/exchange-codes.html)
+  * [Order Sources](https://kb.dxfeed.com/en/data-model/qd-model-of-market-events.html#order-x)
+  * [Order Book reconstruction](https://kb.dxfeed.com/en/data-model/dxfeed-order-book/order-book-reconstruction.html)
   * [Symbology Guide](https://kb.dxfeed.com/en/data-model/symbology-guide.html)
 
 ## Requirements
 
-64-bit targets only: `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`, `aarch64-unknown-linux-gnu`,
-`x86_64-apple-darwin` and `aarch64-apple-darwin`. Rust 1.88 or newer.
+### Rust
+
+Rust 1.88 or newer, with one of the 64-bit targets `x86_64-pc-windows-msvc`, `x86_64-unknown-linux-gnu`,
+`aarch64-unknown-linux-gnu`, `x86_64-apple-darwin` and `aarch64-apple-darwin`.
 
 ### Windows
 
-x64 only. The SDK library needs the
-[Visual C++ Redistributable for Visual Studio 2015 or newer](https://aka.ms/vs/17/release/vc_redist.x64.exe)
-(`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`).
+Only x64 versions are supported.
+
+| OS                                    | Version        | Architectures |
+|---------------------------------------|----------------|---------------|
+| [Windows][Windows-client]             | 8, 8.1         | x64           |
+| [Windows 10][Windows-client]          | Version 1607+  | x64           |
+| [Windows 11][Windows-client]          | Version 22000+ | x64           |
+| [Windows Server][Windows-Server]      | 2012+          | x64           |
+| [Windows Server Core][Windows-Server] | 2012+          | x64           |
+| [Nano Server][Nano-Server]            | Version 1809+  | x64           |
+
+#### Requirements
+
+* [Visual C++ Redistributable for Visual Studio 2015][vc_redist] or newer (`VCRUNTIME140.dll`, `VCRUNTIME140_1.dll`)
+
+[Windows-client]: https://www.microsoft.com/windows/
+
+[Windows-Server]: https://learn.microsoft.com/windows-server/
+
+[Nano-Server]: https://learn.microsoft.com/windows-server/get-started/getting-started-with-nano-server
+
+[vc_redist]: https://aka.ms/vs/17/release/vc_redist.x64.exe
 
 ### Linux
 
-x64 and aarch64 with [glibc](https://www.gnu.org/software/libc/); musl is not supported. The SDK library needs
-`libz.so.1` and `libpthread.so.0`.
+x64 and aarch64 (arm64) versions are supported.
+
+#### Libc compatibility
+
+- [glibc][glibc]: 2.17+ (from Oracle Linux 7)
+- [musl][musl]: not supported
+
+#### Libpthread and libz compatibility
+
+The SDK library needs `libpthread.so.0` and `libz.so.1`.
+
+[glibc]: https://www.gnu.org/software/libc/
+
+[musl]: https://musl.libc.org/
 
 ### macOS
 
-x64 and Arm64.
+| OS             | Version | Architectures |
+|----------------|---------|---------------|
+| [macOS][macOS] | 10.15+  | x64           |
+| [macOS][macOS] | 11+     | Arm64         |
+
+[macOS]: https://support.apple.com/macos
 
 ## Installation
 
@@ -99,7 +151,7 @@ The crates are not published on crates.io yet. Depend on them by path or by git:
 dxfeed-graal = { path = "../dxfeed-graal-rust-api/dxfeed-graal" }
 ```
 
-## Building
+### Getting the SDK
 
 The build script of `dxfeed-graal-sys` gets SDK 3.13.0 in one of these ways:
 
@@ -123,7 +175,7 @@ filters (`feed_filter`), the ready signal of the event queues (`set_ready_signal
 series transaction models (`with_event_peek`). They may change in a minor release of the SDK.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
-## Running and Deployment
+### Running and Deployment
 
 `cargo run` and `cargo test` find the SDK library on their own. An executable started outside cargo needs the library
 (`DxFeedGraalNativeSdk.dll`, `libDxFeedGraalNativeSdk.so` or `libDxFeedGraalNativeSdk.dylib`) next to it. The
@@ -157,28 +209,53 @@ runs from a directory holding only the executable and the library.
 
 ## Usage
 
-How to connect to a QD endpoint and print quotes until Enter is pressed:
+### How to connect to QD endpoint
 
 ```rust
 use dxfeed_graal::DXEndpoint;
 use dxfeed_graal::event::Quote;
 
 fn main() -> dxfeed_graal::Result<()> {
-    let endpoint = DXEndpoint::create()?;
+    // For token-based authorization, use the following address format:
+    // "demo.dxfeed.com:7300[login=entitle:token]"
+    let endpoint = DXEndpoint::new_builder()
+        .with_property("dxfeed.address", "demo.dxfeed.com:7300")
+        .build()?;
+
+    // Another way to connect the endpoint.
+    // let endpoint = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?;
+
     let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
+
     subscription.add_event_listener(|quotes| {
         for quote in quotes {
             println!("{quote}");
         }
     })?;
+
     subscription.add_symbols(["AAPL"])?;
-    endpoint.connect("demo.dxfeed.com:7300")?;
+
     std::io::stdin().read_line(&mut String::new()).ok();
     endpoint.close_and_await_termination()
 }
 ```
 
-A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, timeNanoPart=0, sequence=0, ...}`.
+<details>
+<summary>Output</summary>
+<br>
+
+```
+I 261106 172639.536 [main] QDFactory - Using QDS-3.356, (C) Devexperts
+I 261106 172639.563 [main] QDFactory - Using scheme com.dxfeed.api.impl.DXFeedScheme JFhzUYbcPr_gDabkoYd4_S0tWsvvKpzBmiN2aRCDnkY
+I 261106 172639.606 [main] MARS - Started JVM self-monitoring
+I 261106 172639.636 [main] MonitoredQDEndpoint - qdrst with collectors [Ticker, Stream, History]
+...
+Quote{AAPL, eventTime=0, time=20261106-172638.000, timeNanoPart=0, sequence=0, bidTime=20261106-172638.000, bidExchange=P, bidPrice=340.43, bidSize=120.0, askTime=20261106-172638.000, askExchange=Q, askPrice=340.95, askSize=160.0}
+Quote{AAPL, eventTime=0, time=20261106-172640.000, timeNanoPart=0, sequence=0, bidTime=20261106-172638.000, bidExchange=P, bidPrice=340.43, bidSize=120.0, askTime=20261106-172640.000, askExchange=P, askPrice=340.95, askSize=80.0}
+Quote{AAPL, eventTime=0, time=20261106-172640.000, timeNanoPart=0, sequence=0, bidTime=20261106-172640.000, bidExchange=P, bidPrice=340.52, bidSize=40.0, askTime=20261106-172640.000, askExchange=P, askPrice=340.95, askSize=80.0}
+```
+
+</details>
 
 - A subscription to one event type, `create_subscription::<Quote>()`, gives its listener `&QuoteRef` values; a
   subscription to several, `create_subscription_with_types(&[EventType::Quote, EventType::Trade])`, gives `EventRef`
@@ -191,6 +268,41 @@ A quote prints as in Java: `Quote{AAPL, eventTime=0, time=20241004-093000.000, t
   that times out returns `Error::Timeout` and cancels the request; dropping a promise does not cancel it, as in Java.
 - `DXFeed::get_instance()` and `DXEndpoint::get_instance()` return the default feed and endpoint of the process,
   configured on first use by the `dxfeed.properties` file and the system properties.
+
+### How to connect to dxLink
+
+```rust
+use dxfeed_graal::event::Quote;
+use dxfeed_graal::{DXEndpoint, system};
+
+fn main() -> dxfeed_graal::Result<()> {
+    // Enable the experimental feature.
+    system::set_property("dxfeed.experimental.dxlink.enable", "true")?;
+    // Set the scheme for dxLink.
+    system::set_property("scheme", "ext:opt:sysprops,resource:dxlink.xml")?;
+
+    // For token-based authorization, use the following address format:
+    // "dxlink:wss://demo.dxfeed.com/market-data/dxlink-ws[login=dxlink:token]"
+    let endpoint = DXEndpoint::new_builder()
+        .with_property("dxfeed.address", "dxlink:wss://demo.dxfeed.com/market-data/dxlink-ws")
+        .build()?;
+
+    let subscription = endpoint.get_feed().create_subscription::<Quote>()?;
+
+    subscription.add_event_listener(|quotes| {
+        for quote in quotes {
+            println!("{quote}");
+        }
+    })?;
+
+    subscription.add_symbols(["AAPL"])?;
+
+    std::io::stdin().read_line(&mut String::new()).ok();
+    endpoint.close_and_await_termination()
+}
+```
+
+To familiarize with the dxLink protocol, please click [here](https://demo.dxfeed.com/market-data/dxlink-ws/debug/#/protocol).
 
 ### System Properties
 
@@ -352,115 +464,182 @@ env DXFEED_dxfeed.address=demo.dxfeed.com:7300 cargo run --example PrintQuoteEve
   demonstrates how to get the price levels and the quotes of a symbol for a period from the Order Reconstruction
   Service (ORCS) with `PriceLevelService`
 
-[deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable (see
-[Running and Deployment](#running-and-deployment)).
+### Deployment
+
+- [x] [deploy](samples/deploy) is an application whose build script deploys the SDK library next to its executable
+  (see [Running and Deployment](#running-and-deployment))
 
 ## Current State
 
+The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, its experimental tier with the feature
+`experimental`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are
+left out.
+
 ### Endpoint Roles
 
-- [x] `Feed`, `OnDemandFeed`, `StreamFeed`
-- [x] `Publisher`, `StreamPublisher`
-- [x] `LocalHub`: events published via its `Publisher` are delivered to its own `Feed` only
+- [x] [FEED](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#FEED) (`Role::Feed`) connects to
+  the remote data feed provider and is optimized for real-time or delayed data processing, this is a default role
+- [x] [STREAM_FEED](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#STREAM_FEED)
+  (`Role::StreamFeed`) is similar to FEED and also connects to the remote data feed provider but is designed for bulk
+  data parsing from files
+- [x] [PUBLISHER](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#PUBLISHER)
+  (`Role::Publisher`) connects to the remote publisher hub (also known as multiplexor) or creates a publisher on the
+  local host ([WriteTapeFileSample](dxfeed-graal/examples/File/WriteTapeFileSample/main.rs))
+- [x] [STREAM_PUBLISHER](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#STREAM_PUBLISHER)
+  (`Role::StreamPublisher`) is similar to PUBLISHER and also connects to the remote publisher hub, but is designed for
+  bulk data publishing
+- [x] [LOCAL_HUB](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#LOCAL_HUB)
+  (`Role::LocalHub`) is a local hub without the ability to establish network connections. Events published via
+  publisher are delivered to local feed only
+- [x] [ON_DEMAND_FEED](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXEndpoint.Role.html#ON_DEMAND_FEED)
+  (`Role::OnDemandFeed`) is similar to FEED, but it is designed to be used with `OnDemandService` for historical data
+  replay only
 
 ### Event Types
 
-- [x] [Quote](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Quote.html)
-- [x] [Trade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Trade.html)
-- [x] [TradeETH](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/TradeETH.html)
-- [x] [Profile](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Profile.html)
-- [x] [Summary](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Summary.html)
-- [x] [Greeks](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Greeks.html)
-- [x] [TheoPrice](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/TheoPrice.html)
-- [x] [Underlying](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Underlying.html)
-- [x] [Series](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Series.html)
-- [x] [NuamTrade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTrade.html)
-- [x] [TimeAndSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/TimeAndSale.html)
+- [x] [Order](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Order.html) is a snapshot of the full
+  available market depth for a symbol
+- [x] [SpreadOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/SpreadOrder.html) is a snapshot of the
+  full available market depth for all spreads
+- [x] [AnalyticOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/AnalyticOrder.html) represents an
+  extension of Order introducing analytic information, e.g., adding iceberg-related information to this order
+- [x] [OrderBase](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderBase.html) holds the common fields
+  of the order events; it is received only, as Java refuses to publish it
+- [x] [Trade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Trade.html) is a snapshot of the price and
+  size of the last trade during regular trading hours and an overall day volume and day turnover
+- [x] [TradeETH](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/TradeETH.html) is a snapshot of the price
+  and size of the last trade during extended trading hours and the extended trading hours day volume and day turnover
+- [x] [Candle](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/candle/Candle.html) - event with open, high, low,
+  and close prices and other information for a specific period
+- [x] [DailyCandle](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/candle/DailyCandle.html) (deprecated in Java)
+  is the former daily candle with additional properties, which have moved to `Candle`
+- [x] [Quote](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Quote.html) is a snapshot of the best bid and
+  ask prices and other fields that change with each quote
+- [x] [Profile](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Profile.html) is a snapshot that contains
+  the security instrument description
+- [x] [Summary](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Summary.html) is a snapshot of the trading
+  session, including session highs, lows, etc.
+- [x] [TimeAndSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/TimeAndSale.html) - represents a trade
+  or other market event with price, like market open/close price, etc.
+- [x] [Greeks](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Greeks.html) is a snapshot of the option
+  price, Black-Scholes volatility, and Greeks
+- [x] [Series](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Series.html) is a snapshot of computed
+  values available for all options series for a given underlying symbol based on options market prices
+- [x] [TheoPrice](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/TheoPrice.html) is a snapshot of the
+  theoretical option price computation that is periodically performed
+  by [dxPrice](http://www.devexperts.com/en/products/price.html) model-free computation
+- [x] [Underlying](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/option/Underlying.html) is a snapshot of
+  computed values available for an option underlying symbol based on the market’s option prices
+- [x] [Message](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Message.html) is an event with an
+  application-specific attachment
+- [x] [TextMessage](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextMessage.html) is a message event
+  with a text payload
+- [x] [Configuration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Configuration.html) is a configuration
+  event with an application-specific attachment and a version
+- [x] [TextConfiguration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextConfiguration.html) is a
+  configuration event with a text payload and a version
+- [x] [OptionSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OptionSale.html) is an event that
+  represents a trade or another market event with the price (for example, market open/close price, etc.) for each
+  option symbol listed under the specified Underlying
+- [x] [OtcMarketsOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OtcMarketsOrder.html) represents
+  an extension of `Order` for the symbols traded on the OTC Markets
+- [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html) (experimental)
+  shows the imbalance between buy and sell orders during auctions
+- [x] [NuamOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamOrder.html) (experimental) is an
+  extension of `Order` for the NUAM exchange
+- [x] [NuamTrade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTrade.html) (experimental) is an
+  extension of `Trade` for the NUAM exchange
 - [x] [NuamTimeAndSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTimeAndSale.html)
-- [x] [OptionSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OptionSale.html)
-- [x] [Candle](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/candle/Candle.html)
-- [x] [DailyCandle](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/candle/DailyCandle.html)
-- [x] [Order](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/Order.html)
-- [x] [AnalyticOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/AnalyticOrder.html)
-- [x] [OtcMarketsOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OtcMarketsOrder.html)
-- [x] [SpreadOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/SpreadOrder.html)
-- [x] [NuamOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamOrder.html)
-- [x] [MarketMaker](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/MarketMaker.html)
-- [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html)
-- [x] [OrderBase](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderBase.html): received
-  only; Java refuses to publish it
-- [x] [Message](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Message.html)
-- [x] [Configuration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/Configuration.html)
-- [x] [TextMessage](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextMessage.html)
-- [x] [TextConfiguration](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/misc/TextConfiguration.html)
+  (experimental) is an extension of `TimeAndSale` for the NUAM exchange
+- [x] [MarketMaker](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/MarketMaker.html) is the bid and ask of
+  a market maker on an exchange
 
-### Features
+All of them print in the format of Java's `toString`, and each has the event symbol and the event time, owned
+(`Event`) or borrowed (`EventRef` and the views). `EventType::get_name`, `FromStr` and `EventType::ALL` name and list
+the types.
 
-- [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
-  endpoint and feed (`get_instance`)
-- [x] Typed and untyped subscriptions, listeners, publishing
+### Subscription Symbols
+
+- [x] String is a string representation of the symbol (`Symbol::String`)
+- [x] [TimeSeriesSubscriptionSymbol](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/osub/TimeSeriesSubscriptionSymbol.html)
+  represents subscription to time-series events (`Symbol::time_series`)
+- [x] [IndexedEventSubscriptionSymbol](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/osub/IndexedEventSubscriptionSymbol.html)
+  represents subscription to a specific source of indexed events (`Symbol::indexed`), with the order sources
+- [x] [WildcardSymbol.ALL](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/osub/WildcardSymbol.html#ALL) represents
+  a *wildcard* subscription to all events of the specific event type (`Symbol::Wildcard`)
+- [x] [CandleSymbol](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/candle/CandleSymbol.html) symbol used with
+  `DXFeedSubscription` to subscribe for `Candle` events, with all its attributes, `CandlePeriod` parsing and
+  `MarketEventSymbols`
+
+### Subscriptions & Models
+
+- [x] [DXFeedSubscription](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXFeedSubscription.html) is a
+  subscription for a set of symbols and event types: typed and untyped, with listeners, change listeners (with
+  `configuration_changed`), the symbols
+  (`set_symbols`, `get_symbols`, `get_decorated_symbols`, `clear`), the aggregation period, the events batch limit,
+  dropped events, executors, and standalone subscriptions attached to feeds; `DXFeedTimeSeriesSubscription` for time
+  series
+- [x] [DXPublisher](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXPublisher.html) publishes events, and its
+  observable subscription tells which symbols are subscribed
+- [x] [GetLastEvent](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXFeed.html#getLastEvent-E-)
+  returns the last event for the specified event instance; also `get_last_event_if_subscribed`, `get_last_events`,
+  `get_last_event_promise` and `get_last_events_promises`
+- [x] [GetTimeSeriesPromise](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/api/DXFeed.html#getTimeSeriesPromise-java.lang.Class-java.lang.Object-long-long-)
+  requests time series events for the specified event type, symbol, and time range; also
+  `get_indexed_events_promise`
+- [x] [Promise](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/promise/Promise.html) with `when_done`,
+  `when_done_async` and `complete`, `Promises::all_of` and `Promises::any_of`; promises created in Rust with
+  `Promise::new` and `Promise::failed`, failed with `complete_exceptionally` and a `JavaExceptionClass`
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
-- [x] Subscription symbols and state: `set_symbols`, `get_symbols`, `get_decorated_symbols`, `clear`, `is_closed`,
-  event types, the aggregation period, the events batch limit, dropped events, executors and standalone
-  subscriptions attached to feeds
-- [x] The event symbol and the event time of any event, owned (`Event`) or borrowed (`EventRef` and the views)
-- [x] Observable subscriptions of publishers and change listeners of subscriptions, with `configuration_changed`
-- [x] Symbols: strings, candle symbols with their attributes, the wildcard, indexed event sources and time series
-- [x] Time series subscriptions, `get_time_series_promise` and `get_indexed_events_promise`
-- [x] `TimeFormat`: parsing and formatting of times like the other APIs
-- [x] Last events: `get_last_event_if_subscribed`, `get_last_event`, `get_last_events`, `get_last_event_promise`
-  and `get_last_events_promises`
-- [x] Promises: `Promise` with `when_done`, `when_done_async` and `complete`, `Promises::all_of` and
-  `Promises::any_of`; promises created in Rust with `Promise::new` and `Promise::failed`, failed with
-  `complete_exceptionally` and a `JavaExceptionClass`
-- [x] Endpoint properties, roles and the default instances, user and password, `AuthToken`, event types and
-  aggregation period info
-- [x] `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
-- [x] Events printed in the format of Java's `toString`
-- [x] `close_and_await_termination`, explicit shutdown and clean process exit
-- [x] Endpoint states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`, `await_not_connected`
-- [x] Event type names: `EventType::get_name`, parsing with `FromStr`, `EventType::ALL`
-- [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
-- [x] Instrument profiles: reading files, URLs and bytes, writing files and bytes with `InstrumentProfileWriter`,
-  typed fields, a collector with generations, a live connection and option chains
-- [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
-- [x] Candle symbols with all their attributes, `CandlePeriod` parsing, `MarketEventSymbols`, order sources
-- [x] Trading schedules: days, sessions, holidays, venues, the schedule defaults, UTC and NYSE, the `accept` of
-  the day and session filters, and custom filters with a Rust predicate
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,
   `IndexedEventTxModel`
 - [x] Market depth model of orders: `MarketDepthModel`
 - [x] List models: `OrderBookModel`, `IndexedEventModel`, `TimeSeriesEventModel` and their `ObservableListModel`
-- [x] On-demand historical data replay: `OnDemandService` and its property change listeners
-- [x] The price levels and the quotes of the Order Reconstruction Service: `PriceLevelService`, `PriceLevelChecker`,
-  `AuthOrderSource` (also created with `AuthOrderSource::create`)
-- [x] Candles and time and sales from the history service: `HistoryEndpoint`
+
+### IPF & Schedule
+
+- [x] [InstrumentProfile](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfile.html) represents basic
+  profile information about a market instrument, with typed fields
+  ([IpfSample](dxfeed-graal/examples/IPF/IpfSample/main.rs))
+- [x] [InstrumentProfileReader](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfileReader.html) reads
+  instrument profiles from files, URLs and bytes using Instrument Profile Format (IPF)
+- [x] [InstrumentProfileWriter](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/InstrumentProfileWriter.html)
+  writes instrument profiles to files and bytes
+- [x] [InstrumentProfileConnection](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/live/InstrumentProfileConnection.html)
+  connects to an instrument profile URL and reads instrument profiles with support of streaming live updates
+- [x] [InstrumentProfileCollector](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/live/InstrumentProfileCollector.html)
+  collects instrument profile updates and provides the live instrument profiles list, with generations
+  ([IpfLiveSample](dxfeed-graal/examples/IPF/IpfLiveSample/main.rs))
+- [x] [OptionChainsBuilder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ipf/option/OptionChainsBuilder.html) builds
+  option chains ([OptionChainSample](dxfeed-graal/examples/IPF/OptionChainSample/main.rs))
+- [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
+- [x] [Schedule](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/schedule/Schedule.html) provides API to retrieve and
+  explore various exchanges’ trading schedules and different financial instrument classes: days, sessions, holidays,
+  venues, the schedule defaults, UTC and NYSE, the `accept` of the day and session filters, and custom filters with a Rust predicate
+  ([ScheduleSample](dxfeed-graal/examples/Schedule/ScheduleSample/main.rs))
+
+### Services
+
+- [x] [OnDemandService](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/ondemand/OnDemandService.html) provides on-demand
+  historical tick data replay controls, with property change listeners
+  ([OnDemandSample](dxfeed-graal/examples/OnDemand/OnDemandSample/main.rs))
+- [x] `PriceLevelService` gets the price levels and the quotes of the Order Reconstruction Service (ORCS), with
+  `PriceLevelChecker` and `AuthOrderSource`
+  ([PriceLevelServiceClientSample](dxfeed-graal/examples/Orcs/PriceLevelServiceClientSample/main.rs))
+- [x] `HistoryEndpoint` gets candles and time and sales from the history service
+  ([CandleDataSample](dxfeed-graal/examples/Candle/CandleDataSample/main.rs))
+
+### Other Features
+
+- [x] System properties, the `dxfeed.system.properties` file and `DXFEED_*` environment variables, the default
+  endpoint and feed (`get_instance`)
+- [x] Endpoint properties, states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`,
+  `await_not_connected`, user and password, `AuthToken`, event types and aggregation period info
+- [x] `TimeFormat`, `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
+- [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
+- [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [x] With the cargo feature `experimental`: feed filters (`DXFeedFilter`, its builder and its tracker with
   listeners), the ready signal of the event queues (an `eventfd` or a Windows event) and the event peek of
   `TimeSeriesTxModel`
-
-The API covers the dxFeed Java API 3.356 wherever SDK 3.13.0 exports it, its experimental tier with the feature
-`experimental`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are left out.
-
-## Development
-
-Regenerate the bindings after an SDK update (needs libclang; set `LIBCLANG_PATH` if another one is found first):
-
-```bash
-cargo run -p xtask -- gen-bindings <unpacked SDK dir>
-```
-
-Check that `samples/deploy` runs outside cargo with only the deployed library next to it, fails without it, and that a
-rebuild does not copy the library again:
-
-```bash
-cargo run -p xtask -- check-deploy
-```
-
-The tests expect no `DXFEED_*` environment variables: the SDK reads them as system properties in every test process.
-
-## License
-
-MPL-2.0, see [LICENSE](LICENSE).
