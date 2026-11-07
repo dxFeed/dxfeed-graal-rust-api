@@ -5,6 +5,13 @@
 //!
 //! `cargo run -p xtask -- check-deploy` builds `WriteTapeFileSample` of the samples and checks that it runs outside
 //! cargo from a directory holding only the executable and the deployed SDK library, and fails without the library.
+//!
+//! `cargo run -p xtask -- release-tag` prints the tag of the workspace version; `release-notes <tag>` checks the tag
+//! against the workspace version and prints its section of `ReleaseNotes.md`; `package <tag> <out dir>` writes the
+//! Tools and Samples archives of this platform from the release build and checks that the unpacked executables run
+//! (see `HOW_TO_RELEASE.md`).
+
+mod release;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -20,9 +27,15 @@ fn main() -> ExitCode {
             gen_bindings(Path::new(sdk_dir)).map(|path| format!("wrote {}", path.display()))
         }
         [task] if task == "check-deploy" => check_deploy(),
+        [task] if task == "release-tag" => release::release_tag(),
+        [task, tag] if task == "release-notes" => release::release_notes(tag),
+        [task, tag, out] if task == "package" => release::package(tag, Path::new(out)),
         _ => {
             eprintln!("usage: cargo run -p xtask -- gen-bindings <unpacked SDK {SDK_VERSION} dir>");
             eprintln!("       cargo run -p xtask -- check-deploy");
+            eprintln!("       cargo run -p xtask -- release-tag");
+            eprintln!("       cargo run -p xtask -- release-notes <tag>");
+            eprintln!("       cargo run -p xtask -- package <tag> <out dir>");
             return ExitCode::from(2);
         }
     };
@@ -155,7 +168,7 @@ fn run_outside_cargo(exe: &Path, library: &Path, temp: &Path) -> Result<(), Stri
     copy(exe, &alone)?;
     let exe_name = exe.file_name().unwrap_or_default();
 
-    let (succeeded, output) = run_sanitized(&with_library.join(exe_name))?;
+    let (succeeded, output) = run_sanitized(&with_library.join(exe_name), &with_library)?;
     let written = fs::read_to_string(with_library.join(SAMPLE_OUTPUT_FILE)).unwrap_or_default();
     if !succeeded || !written.contains(SAMPLE_OUTPUT) {
         return Err(format!(
@@ -163,7 +176,7 @@ fn run_outside_cargo(exe: &Path, library: &Path, temp: &Path) -> Result<(), Stri
             with_library.display()
         ));
     }
-    let (succeeded, output) = run_sanitized(&alone.join(exe_name))?;
+    let (succeeded, output) = run_sanitized(&alone.join(exe_name), &alone)?;
     if succeeded {
         return Err(format!(
             "the executable ran without the library in {}:\n{output}",
@@ -220,10 +233,9 @@ fn rebuild_keeps_library(
     result
 }
 
-/// Runs `exe` in its own directory without loader paths that hold the library, and returns whether it succeeded
-/// and its combined output. Kills it after a minute.
-fn run_sanitized(exe: &Path) -> Result<(bool, String), String> {
-    let dir = exe.parent().unwrap_or(Path::new("."));
+/// Runs `exe` in `dir` without loader paths that hold the library, and returns whether it succeeded and its combined
+/// output. Kills it after a minute.
+fn run_sanitized(exe: &Path, dir: &Path) -> Result<(bool, String), String> {
     let mut command = Command::new(exe);
     command
         .current_dir(dir)
