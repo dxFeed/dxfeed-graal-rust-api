@@ -13,6 +13,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 > The project is in **alpha**: the API may change in any release (see [Current State](#current-state)).
 
 [![Build](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml)
+[![Release](https://img.shields.io/github/v/release/dxFeed/dxfeed-graal-rust-api?include_prereleases)](https://github.com/dxFeed/dxfeed-graal-rust-api/releases)
 ![Status](https://img.shields.io/badge/status-alpha-red)
 ![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.13.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
@@ -38,6 +39,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Samples](#samples)
 - [Current State](#current-state)
 - [How To Develop](HOW_TO_DEVELOP.md)
+- [How To Release](HOW_TO_RELEASE.md), [Release Notes](ReleaseNotes.md)
 - [License](LICENSE)
 
 ## Overview
@@ -380,6 +382,11 @@ options:
 - [x] [Qds](tools/src/qds.rs) collection of tools ported from the Java qds-tools
 - [x] [Help](tools/src/help.rs) shows the help screens of the tools and the help articles
 
+Each [release](https://github.com/dxFeed/dxfeed-graal-rust-api/releases) has the Tools and Samples archives of every
+platform (`dxFeedGraalRustApi-<version>-<arch>-<os>-Tools.zip|.tar.gz`), with the SDK library next to the executables
+in `bin/`; the Linux ones need glibc 2.28 or newer. On macOS, remove the quarantine attribute of the downloaded files
+first: `xattr -d -r com.apple.quarantine <unpacked folder>`.
+
 Build and run it with cargo, or build it once and run `target/release/Tools`, which has the SDK library next to it
 (see [Running and Deployment](#running-and-deployment)):
 
@@ -397,6 +404,9 @@ target/release/Tools Qds "help connect"
 The samples follow the samples of the dxFeed Java API and have the names and groups of the samples of the C++ API.
 Each one is a binary of the `dxfeed-graal-samples` package in `samples/<Group>/<Name>Sample`; started without its
 required arguments, it prints its usage.
+
+The Samples archive of a [release](https://github.com/dxFeed/dxfeed-graal-rust-api/releases) holds all of them built,
+with the SDK library and `dxfeed.system.properties` in its `bin/` (see [Tools](#tools)).
 
 A sample that uses the default feed reads its address from the `dxfeed.system.properties` file in the current
 directory, so run it from its directory, which holds that file:

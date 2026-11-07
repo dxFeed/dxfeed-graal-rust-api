@@ -23,3 +23,8 @@ without the SDK, as on docs.rs) on Linux; on Linux x64 and arm64, Windows x64 an
 tests in debug and release, each with and without `--all-features`, and then `check-deploy`; and `cargo check` on the
 minimum supported Rust version. It uses the toolchain set in the workflow (`RUSTUP_TOOLCHAIN`); update it there together with the code that
 a newer clippy needs.
+
+The release workflow (`.github/workflows/release.yml`, see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md)) also runs on a pull
+request that touches it, the setup action, `xtask`, the tools, the samples, the deployment of the SDK library,
+`ReleaseNotes.md` or the root manifest: it builds and checks the Tools and Samples archives of every platform and
+publishes nothing. Its toolchain (`RUSTUP_TOOLCHAIN`) is the one of `build.yml`; change them together.
