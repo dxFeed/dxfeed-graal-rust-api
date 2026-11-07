@@ -39,11 +39,12 @@ runs:
       shell: bash
       run: echo "DXFEED_GRAAL_SDK_CACHE_DIR=$RUNNER_TEMP/dxfeed-graal-sdk" >> "$GITHUB_ENV"
 
-    # The SDK version and the archive digests live in the build script of dxfeed-graal-sys.
+    # The SDK version and the archive digests live in the build script of dxfeed-graal-sys. The path is the one set
+    # above, not runner.temp, which in a container job is the path on the runner.
     - name: Restore the SDK archive
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
-        path: ${{ runner.temp }}/dxfeed-graal-sdk
+        path: ${{ env.DXFEED_GRAAL_SDK_CACHE_DIR }}
         key: sdk-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('dxfeed-graal-sys/build.rs') }}
 
     - name: Restore the cargo registry
