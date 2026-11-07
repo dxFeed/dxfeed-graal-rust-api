@@ -18,8 +18,7 @@
 //!
 //! Examples and test executables are not covered: they live in other directories and run through cargo. The profile
 //! directory is derived from the build script's `OUT_DIR`, which cargo does not document as stable. Projects that set
-//! `build.build-dir`, or that place executables elsewhere, copy the file from [`library_path`] themselves. macOS has
-//! not been verified yet.
+//! `build.build-dir`, or that place executables elsewhere, copy the file from [`library_path`] themselves.
 
 #![allow(clippy::needless_doctest_main, reason = "the example is a whole build script")]
 

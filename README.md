@@ -205,7 +205,7 @@ library has not changed. On Linux and macOS it also sets the executables' rpath 
 executable together with the library. Cargo examples and tests are not covered; they run through cargo.
 
 For another layout, or when `build.build-dir` moves build scripts out of the target directory, call
-`dxfeed_graal_build::library_path()` and copy the library yourself. The macOS rpath is not verified yet.
+`dxfeed_graal_build::library_path()` and copy the library yourself.
 The [samples](samples) deploy the library this way (see [`samples/build.rs`](samples/build.rs)), and
 `cargo run -p xtask -- check-deploy` checks that one of them runs from a directory holding only the executable and the
 library.
