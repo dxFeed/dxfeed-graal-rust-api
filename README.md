@@ -54,7 +54,7 @@ The names follow the [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overvi
 
 | Crate | Purpose |
 |---|---|
-| `dxfeed-graal-sys` | Raw FFI bindings to SDK 3.14.0; the build script gets and links the SDK |
+| `dxfeed-graal-sys` | Raw FFI bindings to the SDK; the build script gets and links it |
 | `dxfeed-graal` | Safe API: endpoints, feeds, subscriptions, listeners, events, publishing |
 | `dxfeed-graal-build` | Build-script helper that deploys the SDK library next to the application's executables |
 
@@ -164,7 +164,7 @@ the executables of an application (see [Running and Deployment](#running-and-dep
 
 The build script of `dxfeed-graal-sys` gets SDK 3.14.0 in one of these ways:
 
-- `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-3.14.0-<platform>.zip` from the
+- `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-<version>-<platform>.zip` from the
   [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.14.0)). Use it for offline builds.
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
@@ -175,7 +175,7 @@ The build script of `dxfeed-graal-sys` gets SDK 3.14.0 in one of these ways:
   the build directory.
 - With `--no-default-features` and no `DXFEED_GRAAL_SDK_DIR`, the build fails.
 
-The build fails if the SDK headers differ from those of 3.14.0, because the committed bindings fit only that version.
+The build fails if the SDK headers differ from those the committed bindings were generated from.
 `system::get_version()` returns the version of the loaded SDK library, `system::is_feature_supported` tells whether it
 has an optional feature (the `system::feature` names), and `system::get_advanced_revision()` the revision of its
 experimental functions, which matches `system::ADVANCED_REVISION` for the library this crate was built for.
@@ -255,7 +255,7 @@ fn main() -> dxfeed_graal::Result<()> {
 <br>
 
 ```
-I 261106 172639.536 [main] QDFactory - Using QDS-3.356, (C) Devexperts
+I 261106 172639.536 [main] QDFactory - Using QDS-3.357, (C) Devexperts
 I 261106 172639.563 [main] QDFactory - Using scheme com.dxfeed.api.impl.DXFeedScheme JFhzUYbcPr_gDabkoYd4_S0tWsvvKpzBmiN2aRCDnkY
 I 261106 172639.606 [main] MARS - Started JVM self-monitoring
 I 261106 172639.636 [main] MonitoredQDEndpoint - qdrst with collectors [Ticker, Stream, History]
@@ -522,7 +522,7 @@ cd samples/API/PrintQuoteEventsSample
 
 ## Current State
 
-The API covers the dxFeed Java API 3.356 wherever SDK 3.14.0 exports it, its experimental tier with the feature
+The API covers the dxFeed Java API 3.357 wherever the SDK exports it, its experimental tier with the feature
 `experimental`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are
 left out.
 
