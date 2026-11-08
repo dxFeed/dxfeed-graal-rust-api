@@ -19,6 +19,7 @@ on:
       - samples/**
       - dxfeed-graal-build/**
       - dxfeed-graal-sys/build.rs
+      - dxfeed-graal-sys/build/**
       - dxfeed-graal-sys/Cargo.toml
       - ReleaseNotes.md
       - Cargo.toml

@@ -163,7 +163,7 @@ The build script of `dxfeed-graal-sys` gets SDK 3.13.0 in one of these ways:
   [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.13.0)). Use it for offline builds.
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
-  certificate store.
+  certificate store. A timeout, a failed connection or an HTTP 429 or 5xx response is retried, three attempts in all.
 - `DXFEED_GRAAL_SDK_CACHE_DIR`, an absolute path, keeps the downloaded archive in that directory, so a clean build or
   another target directory reuses it instead of downloading 21 MB again. The archive's SHA-256 is checked on every
   reuse; one that does not match is downloaded again with a warning. Without the variable nothing is written outside
