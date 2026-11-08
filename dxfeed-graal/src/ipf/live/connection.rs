@@ -193,6 +193,11 @@ impl InstrumentProfileConnection {
     }
 
     /// Closes the connection; the collector keeps the profiles read (`close`).
+    ///
+    /// The state becomes [`Closed`](ConnectionState::Closed) at once and nothing the connection
+    /// receives afterwards reaches the collector. The background thread and the network connection end when the next
+    /// data arrives (a live service sends a heartbeat every 10 seconds) or at the 60-second read timeout. Closing a
+    /// closed connection does nothing.
     pub fn close(&self) -> Result<()> {
         let c = self.handle.as_ptr();
         // SAFETY: the connection is live.

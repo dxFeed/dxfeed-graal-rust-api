@@ -17,7 +17,7 @@ the section `## vX.Y.Z`. The tag starts the release workflow (`.github/workflows
 On a branch, in a pull request:
 
 1. Set the version in `Cargo.toml` (`[workspace.package] version`), in `dxfeed-graal-sys/Cargo.toml`, which keeps
-   the SDK version as build metadata (`X.Y.Z+sdk.3.13.0`), and in the `dxfeed-graal-sys` dependency of
+   the SDK version as build metadata (`X.Y.Z+sdk.3.14.0`), and in the `dxfeed-graal-sys` dependency of
    `dxfeed-graal/Cargo.toml`; the crate versions follow SemVer of the Rust API, not that of the SDK. Run `cargo check`
    to update `Cargo.lock`.
 2. Add the section `## vX.Y.Z` to the top of `ReleaseNotes.md`.
