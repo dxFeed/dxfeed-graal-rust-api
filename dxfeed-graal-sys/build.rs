@@ -14,6 +14,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+#[cfg(feature = "download")]
+#[path = "build/retry.rs"]
+mod retry;
+
 const SDK_VERSION: &str = "3.13.0";
 const LIB_NAME: &str = "DxFeedGraalNativeSdk";
 const SDK_DIR_VAR: &str = "DXFEED_GRAAL_SDK_DIR";
@@ -76,6 +80,7 @@ fn main() {
 
 fn run() -> Result<()> {
     println!("cargo::rerun-if-changed=build.rs");
+    println!("cargo::rerun-if-changed=build");
     println!("cargo::rerun-if-env-changed=DOCS_RS");
     println!("cargo::rerun-if-env-changed={SDK_DIR_VAR}");
     println!("cargo::rerun-if-env-changed={CACHE_DIR_VAR}");
@@ -313,7 +318,7 @@ fn cached_archive(source: &Source, dir: &Path, name: &str) -> Result<PathBuf> {
 }
 
 /// Removes `.part` files of downloads that were killed midway, which no later build reuses. A part file older than
-/// an hour cannot belong to a running download, which gives up after ten minutes.
+/// an hour cannot belong to a running download: each attempt starts the file afresh and gives up after ten minutes.
 #[cfg(feature = "download")]
 fn remove_stale_parts(dir: &Path, name: &str) {
     let Ok(entries) = fs::read_dir(dir) else { return };
@@ -349,7 +354,12 @@ impl Source {
         let Self { url, expected } = self;
         let hint = format!("or set {SDK_DIR_VAR} to an unpacked copy of {url}");
         let result = match download(url, part) {
-            Err(e) => Err(format!("cannot download {url}: {e}; check the network {hint}")),
+            Err((e, attempts)) => {
+                let plural = if attempts == 1 { "" } else { "s" };
+                Err(format!(
+                    "cannot download {url} after {attempts} attempt{plural}: {e}; check the network {hint}"
+                ))
+            }
             Ok(digest) if digest != *expected => {
                 Err(format!("{url} has SHA-256 {digest}, expected {expected}; {hint}"))
             }
@@ -381,11 +391,10 @@ fn file_digest(path: &Path) -> std::io::Result<String> {
 }
 
 /// Writes the body of `url` to `path` and returns its SHA-256. Uses the proxy environment variables and the
-/// operating system's certificate store.
+/// operating system's certificate store. Tries again after a transient failure, such as a timeout or a 502, which
+/// GitHub release downloads sometimes give; returns the last error and the number of attempts made.
 #[cfg(feature = "download")]
-fn download(url: &str, path: &Path) -> std::result::Result<String, Box<dyn std::error::Error>> {
-    use std::io::{self, Read, Write};
-    use std::time::Duration;
+fn download(url: &str, path: &Path) -> std::result::Result<String, (String, u32)> {
     use ureq::tls::{RootCerts, TlsConfig};
 
     // ureq has no timeouts by default, so a stalled connection would hang the build forever. The global limit
@@ -397,21 +406,61 @@ fn download(url: &str, path: &Path) -> std::result::Result<String, Box<dyn std::
         .timeout_global(Some(Duration::from_secs(10 * 60)))
         .build()
         .into();
-    let mut response = agent.get(url).call()?;
+    retry::retry(
+        retry::ATTEMPTS,
+        || download_once(&agent, url, path),
+        |attempt, error, delay| {
+            println!(
+                "cargo::warning=attempt {attempt} of {} to download {url} failed: {error}; retrying in {} s",
+                retry::ATTEMPTS,
+                delay.as_secs()
+            );
+            std::thread::sleep(delay);
+        },
+    )
+}
+
+/// One attempt of `download`. Starts `path` and the digest afresh, so a retry never keeps bytes of a failed attempt.
+#[cfg(feature = "download")]
+fn download_once(agent: &ureq::Agent, url: &str, path: &Path) -> std::result::Result<String, (retry::Failure, String)> {
+    use std::io::{self, Read, Write};
+
+    let network = |e: ureq::Error| (network_failure(&e), e.to_string());
+    let local = |e: io::Error| {
+        (
+            retry::Failure::Permanent,
+            format!("cannot write {}: {e}", path.display()),
+        )
+    };
+    let mut response = agent.get(url).call().map_err(network)?;
     let mut body = response.body_mut().with_config().limit(256 * 1024 * 1024).reader();
-    let mut file = io::BufWriter::new(fs::File::create(path)?);
+    let mut file = io::BufWriter::new(fs::File::create(path).map_err(local)?);
     let mut hasher = Sha256::new();
     let mut buf = vec![0; 64 * 1024];
     loop {
-        let n = body.read(&mut buf)?;
+        // The reader wraps ureq errors, such as a timeout, in io::Error; From unwraps them again.
+        let n = body.read(&mut buf).map_err(|e| network(ureq::Error::from(e)))?;
         if n == 0 {
             break;
         }
         hasher.update(&buf[..n]);
-        file.write_all(&buf[..n])?;
+        file.write_all(&buf[..n]).map_err(local)?;
     }
-    file.flush()?;
+    file.flush().map_err(local)?;
     Ok(hex(&hasher.finalize()))
+}
+
+/// Timeouts, failed connections and HTTP 429 and 5xx are transient; other statuses, TLS and protocol errors are not.
+#[cfg(feature = "download")]
+fn network_failure(error: &ureq::Error) -> retry::Failure {
+    match error {
+        ureq::Error::StatusCode(status) => retry::status_failure(*status),
+        ureq::Error::Io(e) => retry::io_failure(e.kind()),
+        ureq::Error::Timeout(_) | ureq::Error::HostNotFound | ureq::Error::ConnectionFailed => {
+            retry::Failure::Transient
+        }
+        _ => retry::Failure::Permanent,
+    }
 }
 
 #[cfg(feature = "download")]

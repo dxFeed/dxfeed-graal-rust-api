@@ -17,7 +17,7 @@ readme = "README.md"
 keywords = ["dxfeed", "market-data", "finance", "ffi", "graal"]
 categories = ["external-ffi-bindings", "finance"]
 # What the build of a dependent needs; not the tests.
-include = ["/src/**", "/build.rs", "/README.md"]
+include = ["/src/**", "/build.rs", "/build/**", "/README.md"]
 
 [features]
 default = ["download"]
