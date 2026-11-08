@@ -124,7 +124,7 @@ cargo publish --workspace --locked
 
 If that stops halfway, publish the crates that are not on crates.io yet one by one, in the same order:
 `cargo publish --locked -p <crate>`. Then check the pages of the crates on crates.io and their documentation on
-docs.rs, which builds without the SDK (`DOCS_RS`).
+docs.rs, which builds without the SDK (`DOCS_RS`) for the five supported targets (`[package.metadata.docs.rs]`).
 
 A published version cannot be changed or removed, only yanked (`cargo yank --version X.Y.Z <crate>`), and crates.io
 treats versions that differ only in the build metadata as one version: a new SDK needs a new version of
