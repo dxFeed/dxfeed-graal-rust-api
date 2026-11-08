@@ -122,8 +122,7 @@ pub mod feature {
     pub const CONNECTION_ERRORS: &str = "connection_errors";
 }
 
-/// Returns the version of the SDK release the loaded library belongs to, such as `3.14.0`
-/// (`dxfg_v4_system_get_version`).
+/// Returns the version of the SDK release the loaded library belongs to (`dxfg_v4_system_get_version`).
 pub fn get_version() -> Result<String> {
     // SAFETY: the out-pointer is valid for writes.
     isolate::out_string("System", |t, version| unsafe {
