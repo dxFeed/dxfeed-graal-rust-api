@@ -1,4 +1,4 @@
-//! Gets dxFeed Graal Native SDK 3.13.0 for the target and links it.
+//! Gets dxFeed Graal Native SDK 3.14.0 for the target and links it.
 //!
 //! The SDK comes from, in order: nowhere when `DOCS_RS` is set (no link directives); the unpacked archive in
 //! `DXFEED_GRAAL_SDK_DIR`, whose library is copied into `OUT_DIR`; the GitHub release archive, verified against a
@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 #[path = "build/retry.rs"]
 mod retry;
 
-const SDK_VERSION: &str = "3.13.0";
+const SDK_VERSION: &str = "3.14.0";
 const LIB_NAME: &str = "DxFeedGraalNativeSdk";
 const SDK_DIR_VAR: &str = "DXFEED_GRAAL_SDK_DIR";
 /// An absolute directory where downloaded archives are kept across builds; unset or empty means no cache.
@@ -28,7 +28,7 @@ const SHA256_OVERRIDE_VAR: &str = "DXFEED_GRAAL_SDK_SHA256";
 
 /// SHA-256 of every `*.h` at the SDK root (see `headers_digest`). The committed bindings were generated from these
 /// headers, so an SDK with other headers must not be linked.
-const HEADERS_SHA256: &str = "1f3132bbbb3a5f8d27bccd60035819b9e55e07a61e26d0e3ace8eb12737c19fb";
+const HEADERS_SHA256: &str = "3732376d812855f5545d36d0eab9c2bf5d9878204d6cebdc3fc977ed3f4fdbee";
 
 /// Supported targets: (`target_os`, `target_arch`, `target_env`, archive platform, archive SHA-256).
 const PLATFORMS: &[(&str, &str, &str, &str, &str)] = &[
@@ -37,35 +37,35 @@ const PLATFORMS: &[(&str, &str, &str, &str, &str)] = &[
         "x86_64",
         "msvc",
         "amd64-windows",
-        "7a263cfc52c804e0fef90be4995216df13b6ed7e480e4428b83132061aa18b1c",
+        "516067e54f347b0189a02f16eff6ce7348f5cd1e47b60515a2da1fe85840a31e",
     ),
     (
         "linux",
         "x86_64",
         "gnu",
         "amd64-linux",
-        "e67ddcf1ec445bdaa9386e5d0d074d70f89ba30f4bef4fe16075dd844d26fd82",
+        "3cbd20fb6f7f9c455876b32d966677d16d9d9ca3a9969beffa0a6fe10ebdc35e",
     ),
     (
         "linux",
         "aarch64",
         "gnu",
         "aarch64-linux",
-        "add8acb99c6184bc00ff452413856fb065b7bfb7bd925aa103445f4de9b5f726",
+        "16bc1a89359f6651875b30e40f588583cf1bef6dbf4a32810c8099132e56f211",
     ),
     (
         "macos",
         "x86_64",
         "",
         "x86_64-osx",
-        "5e5bd64005b220932728cfc29a18699d082a6a9f1f38b760572e6d07f75cb934",
+        "00698092464a93a7446fc051030c7cf393654fb643bc8eff592381ec7d34e120",
     ),
     (
         "macos",
         "aarch64",
         "",
         "aarch64-osx",
-        "eab41114c65bacb204cf882c6005d06c5d8c7916d1306e380073654d9155dca8",
+        "21a3a92b74307a1238dbb2b3bffd031293dc8d3ec81ea3dcca9c6d5b09aa9595",
     ),
 ];
 
@@ -153,7 +153,7 @@ impl Target {
     }
 }
 
-/// Checks that `sdk` holds the libraries and the headers of SDK 3.13.0.
+/// Checks that `sdk` holds the libraries and the headers of SDK 3.14.0.
 fn check_sdk(sdk: &Path, target: &Target) -> Result<()> {
     for name in target.libraries().iter().chain(&["dxfg_api.h"]) {
         let path = sdk.join(name);

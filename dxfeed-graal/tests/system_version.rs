@@ -21,6 +21,8 @@ fn every_feature_of_the_headers_is_supported() {
         system::feature::EVENT_QUEUE_READY_SIGNAL,
         system::feature::FEED_FILTER,
         system::feature::TIME_SERIES_TX_MODEL_EVENT_PEEK,
+        system::feature::MESSAGE_CONNECTORS,
+        system::feature::CONNECTION_ERRORS,
     ] {
         assert!(system::is_feature_supported(name).unwrap(), "{name}");
     }
@@ -52,6 +54,14 @@ fn the_feature_names_are_those_of_the_headers() {
     assert_eq!(
         system::feature::TIME_SERIES_TX_MODEL_EVENT_PEEK,
         name(dxfeed_graal_sys::DXFG_V4_FEATURE_TIME_SERIES_TX_MODEL_EVENT_PEEK)
+    );
+    assert_eq!(
+        system::feature::MESSAGE_CONNECTORS,
+        name(dxfeed_graal_sys::DXFG_V4_FEATURE_MESSAGE_CONNECTORS)
+    );
+    assert_eq!(
+        system::feature::CONNECTION_ERRORS,
+        name(dxfeed_graal_sys::DXFG_V4_FEATURE_CONNECTION_ERRORS)
     );
 }
 

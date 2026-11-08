@@ -115,9 +115,14 @@ pub mod feature {
     pub const FEED_FILTER: &str = "feed_filter";
     /// The event peek of the time series transaction model. It is experimental in the SDK.
     pub const TIME_SERIES_TX_MODEL_EVENT_PEEK: &str = "time_series_tx_model_event_peek";
+    /// The message connectors of an endpoint: their addresses, states, connection counts and statistics. Their
+    /// listener is experimental in the SDK.
+    pub const MESSAGE_CONNECTORS: &str = "message_connectors";
+    /// The last connection error of a message connector and of an endpoint. It is experimental in the SDK.
+    pub const CONNECTION_ERRORS: &str = "connection_errors";
 }
 
-/// Returns the version of the SDK release the loaded library belongs to, such as `3.13.0`
+/// Returns the version of the SDK release the loaded library belongs to, such as `3.14.0`
 /// (`dxfg_v4_system_get_version`).
 pub fn get_version() -> Result<String> {
     // SAFETY: the out-pointer is valid for writes.

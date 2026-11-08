@@ -160,7 +160,15 @@ pub fn set_handler(handler: impl Fn(&LogRecord) + Send + Sync + 'static) -> Resu
 
 /// Sets the level of the messages that reach the handler of [`set_handler`], or, without a handler, the console or
 /// the `log.file` file (`InterceptableLogging.setLogLevel`). The `log.level` system property sets the level at the
-/// start; a level set before the first [`set_handler`] applies to the handler too.
+/// start (`INFO` by default); a level set before the first [`set_handler`] applies to the handler too. The SDK also
+/// sets its root logger to the more verbose of this level and that of [`set_err_level`], so the messages below it are
+/// not even created.
+///
+/// SDK 3.14.0 cannot give a handler the messages of the Java levels `FINER` and `CONFIG`, which classes of Java itself
+/// log: the call that logs one returns [`Error::Java`](crate::Error::Java) with a `NullPointerException`, such as
+/// [`DXEndpoint::connect`](crate::DXEndpoint::connect) at the level [`Trace`](LogLevel::Trace) or
+/// [`All`](LogLevel::All). With a handler, use [`Debug`](LogLevel::Debug) or above; the console and the files take
+/// every level.
 #[doc(alias = "setLogLevel")]
 pub fn set_log_level(level: LogLevel) -> Result<()> {
     // No lock is held while the SDK runs: a handler may set the level as well.

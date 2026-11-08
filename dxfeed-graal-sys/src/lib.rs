@@ -12,6 +12,6 @@
 compile_error!("dxfeed-graal-sys supports only 64-bit targets, as the dxFeed Graal Native SDK does");
 
 /// The version of the dxFeed Graal Native SDK these bindings were generated from and the build script links.
-pub const SDK_VERSION: &str = "3.13.0";
+pub const SDK_VERSION: &str = "3.14.0";
 
 include!("bindings.rs");
