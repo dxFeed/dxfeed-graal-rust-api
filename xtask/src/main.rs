@@ -56,7 +56,7 @@ fn gen_bindings(sdk_dir: &Path) -> Result<PathBuf, String> {
     if !header.is_file() {
         return Err(format!("{} not found", header.display()));
     }
-    // The message connector API is new in SDK 3.14.0; a header set without it is an older version.
+    // A header set without the message connector API is from an older SDK.
     if !sdk_dir.join("dxfg_v4_message_connector.h").is_file() {
         return Err(format!(
             "{} is not SDK {SDK_VERSION}: it has no dxfg_v4_message_connector.h",

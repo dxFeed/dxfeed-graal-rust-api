@@ -125,7 +125,7 @@ fn child_handlers_receive_the_log_instead_of_the_console() {
     let endpoint = connect(&silent);
     thread::sleep(Duration::from_secs(1));
     endpoint.close().unwrap();
-    // Not `All`: SDK 3.14.0 fails the calls that log at the Java level `FINER` with a handler.
+    // Not `All`: the SDK fails the calls that log at the Java level `FINER` with a handler.
     logging::set_log_level(LogLevel::Debug).unwrap();
     let address = refused_address();
     let endpoint = connect(&address);
@@ -172,7 +172,7 @@ fn child_a_level_set_before_the_handler_applies_to_it() {
     let endpoint = connect(&silent);
     thread::sleep(Duration::from_secs(1));
     endpoint.close().unwrap();
-    // Not `All`: SDK 3.14.0 fails the calls that log at the Java level `FINER` with a handler.
+    // Not `All`: the SDK fails the calls that log at the Java level `FINER` with a handler.
     logging::set_log_level(LogLevel::Debug).unwrap();
     let address = refused_address();
     let endpoint = connect(&address);

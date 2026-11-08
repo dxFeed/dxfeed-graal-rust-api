@@ -1,4 +1,4 @@
-//! Gets dxFeed Graal Native SDK 3.14.0 for the target and links it.
+//! Gets dxFeed Graal Native SDK for the target and links it.
 //!
 //! The SDK comes from, in order: nowhere when `DOCS_RS` is set (no link directives); the unpacked archive in
 //! `DXFEED_GRAAL_SDK_DIR`, whose library is copied into `OUT_DIR`; the GitHub release archive, verified against a
@@ -153,7 +153,7 @@ impl Target {
     }
 }
 
-/// Checks that `sdk` holds the libraries and the headers of SDK 3.14.0.
+/// Checks that `sdk` holds the libraries and the headers of the SDK.
 fn check_sdk(sdk: &Path, target: &Target) -> Result<()> {
     for name in target.libraries().iter().chain(&["dxfg_api.h"]) {
         let path = sdk.join(name);
