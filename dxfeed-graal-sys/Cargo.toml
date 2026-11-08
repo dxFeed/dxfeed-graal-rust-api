@@ -7,8 +7,17 @@ build = "build.rs"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+# The text of the license in the package.
+license-file = "../LICENSE"
 authors.workspace = true
-publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/dxfeed-graal-sys"
+readme = "README.md"
+keywords = ["dxfeed", "market-data", "finance", "ffi", "graal"]
+categories = ["external-ffi-bindings", "finance"]
+# What the build of a dependent needs; not the tests.
+include = ["/src/**", "/build.rs", "/README.md"]
 
 [features]
 default = ["download"]

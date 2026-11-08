@@ -8,6 +8,9 @@ edition = "2024"
 rust-version = "1.88"
 license = "MPL-2.0"
 authors = ["Devexperts LLC"]
+repository = "https://github.com/dxFeed/dxfeed-graal-rust-api"
+homepage = "https://github.com/dxFeed/dxfeed-graal-rust-api"
+# The tools, the samples and xtask; the crates of the API override it.
 publish = false
 
 [workspace.lints.rust]

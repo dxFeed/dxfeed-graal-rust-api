@@ -4,8 +4,9 @@
 name: Release
 
 # A tag v<major>.<minor>.<patch>[-<suffix>] publishes a GitHub release with the Tools and Samples archives of every
-# platform of the SDK and the notes of the version (HOW_TO_RELEASE.md). Pull requests that touch the release path, and
-# a manual run, build and check the same archives without publishing.
+# platform of the SDK and the notes of the version, then, once approved in the crates-io environment, the crates on
+# crates.io (HOW_TO_RELEASE.md). Pull requests that touch the release path, and a manual run, build and check the same
+# archives without publishing.
 on:
   push:
     tags: [ 'v*.*.*' ]
@@ -172,3 +173,33 @@ jobs:
           draft: ${{ contains(needs.notes.outputs.tag, 'draft') }}
           prerelease: ${{ contains(needs.notes.outputs.tag, '-') }}
           make_latest: ${{ !contains(needs.notes.outputs.tag, '-') }}
+
+  # The crates of the API on crates.io, after the GitHub release. The crates-io environment holds the token
+  # (CARGO_REGISTRY_TOKEN), lets only v* tags in and waits for the approval of its reviewer. A published version is
+  # final, so a draft tag publishes nothing; a version already on crates.io is skipped, so a failed run can be re-run.
+  crates:
+    name: crates.io
+    needs: [ notes, publish ]
+    if: github.event_name == 'push' && github.ref_type == 'tag' && !contains(needs.notes.outputs.tag, 'draft')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: crates-io
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: ./.github/actions/setup
+
+      # One by one in the order of their dependencies; each is built from its package before it is uploaded.
+      - name: Publish
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          for crate in dxfeed-graal-sys dxfeed-graal-build dxfeed-graal; do
+            if output="$(cargo publish --locked -p "$crate" 2>&1)"; then
+              echo "$output"
+            elif grep -qE 'already (exists|uploaded)' <<< "$output"; then
+              echo "$crate: this version is already on crates.io"
+            else
+              echo "$output"
+              exit 1
+            fi
+          done
