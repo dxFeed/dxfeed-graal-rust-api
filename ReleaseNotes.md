@@ -3,6 +3,16 @@
 Each release has a section `## v<version>`; the release workflow publishes that section as the text of the GitHub
 release (see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md)).
 
+## v0.1.1
+
+The first release on crates.io, on dxFeed Graal Native SDK 3.13.0.
+
+* **Crates.** `dxfeed-graal-sys`, `dxfeed-graal` and `dxfeed-graal-build` are published on crates.io, with their
+  documentation on docs.rs: depend on `dxfeed-graal = "0.1"`. The version of `dxfeed-graal-sys` names the SDK in its
+  build metadata (`0.1.1+sdk.3.13.0`).
+* **SDK download.** The build script of `dxfeed-graal-sys` retries a timeout, a failed connection and an HTTP 429 or
+  5xx response, three attempts in all; other failures and a checksum mismatch still fail at once.
+
 ## v0.1.0
 
 The first release of the dxFeed Graal Rust API, on dxFeed Graal Native SDK 3.13.0.

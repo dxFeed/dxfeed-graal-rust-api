@@ -14,6 +14,8 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 
 [![Build](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/dxFeed/dxfeed-graal-rust-api?include_prereleases)](https://github.com/dxFeed/dxfeed-graal-rust-api/releases)
+[![Crates.io](https://img.shields.io/crates/v/dxfeed-graal)](https://crates.io/crates/dxfeed-graal)
+[![docs.rs](https://img.shields.io/docsrs/dxfeed-graal)](https://docs.rs/dxfeed-graal)
 ![Status](https://img.shields.io/badge/status-alpha-red)
 ![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.13.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
@@ -148,12 +150,15 @@ The SDK library needs `libpthread.so.0` and `libz.so.1`.
 
 ## Installation
 
-The crates are not published on crates.io yet. Depend on them by path or by git:
+Add the crate from [crates.io](https://crates.io/crates/dxfeed-graal):
 
 ```toml
 [dependencies]
-dxfeed-graal = { path = "../dxfeed-graal-rust-api/dxfeed-graal" }
+dxfeed-graal = "0.1"
 ```
+
+The API is documented on [docs.rs](https://docs.rs/dxfeed-graal). `dxfeed-graal-build` deploys the SDK library next to
+the executables of an application (see [Running and Deployment](#running-and-deployment)).
 
 ### Getting the SDK
 
