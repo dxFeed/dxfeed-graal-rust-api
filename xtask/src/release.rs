@@ -12,6 +12,7 @@ use crate::{LIBRARY, run_sanitized, suppress_error_dialogs, target_dir, workspac
 
 const PRODUCT: &str = "dxFeedGraalRustApi";
 const NOTES_FILE: &str = "ReleaseNotes.md";
+const SYS_MANIFEST: &str = "dxfeed-graal-sys/Cargo.toml";
 /// The one `dxfeed.system.properties` of the samples archive, the demo feed, as the C++ API installs it.
 const SAMPLE_PROPERTIES: &str = "samples/API/PrintQuoteEventsSample/dxfeed.system.properties";
 /// The sample that checks the samples archive: it runs without a network and writes a tape file.
@@ -49,17 +50,38 @@ pub fn parse_tag(name: &str) -> Result<Tag<'_>, String> {
     Ok(Tag { name, version: rest })
 }
 
-/// The `version` of `[workspace.package]` in the root manifest.
-pub fn workspace_version(manifest: &str) -> Result<String, String> {
-    let mut in_package = false;
+/// The `version` of the `table` (`[package]`, `[workspace.package]`) of a manifest.
+fn table_version<'a>(manifest: &'a str, table: &str) -> Option<&'a str> {
+    let mut in_table = false;
     for line in manifest.lines().map(str::trim) {
         if line.starts_with('[') {
-            in_package = line == "[workspace.package]";
-        } else if in_package && let Some(version) = string_value(line, "version") {
-            return Ok(version.to_owned());
+            in_table = line == table;
+        } else if in_table && let Some(version) = string_value(line, "version") {
+            return Some(version);
         }
     }
-    Err("the root Cargo.toml has no [workspace.package] version".into())
+    None
+}
+
+/// The `version` of `[workspace.package]` in the root manifest.
+pub fn workspace_version(manifest: &str) -> Result<String, String> {
+    table_version(manifest, "[workspace.package]")
+        .map(str::to_owned)
+        .ok_or_else(|| "the root Cargo.toml has no [workspace.package] version".into())
+}
+
+/// Checks that `dxfeed-graal-sys`, whose version is not inherited, has the workspace version; the SDK version is only
+/// its build metadata (`+sdk.X.Y.Z`).
+pub fn check_sys_version(sys_manifest: &str, workspace_version: &str) -> Result<(), String> {
+    let version = table_version(sys_manifest, "[package]").ok_or(format!("{SYS_MANIFEST} has no [package] version"))?;
+    let release = version.split_once('+').map_or(version, |(release, _)| release);
+    if release == workspace_version {
+        Ok(())
+    } else {
+        Err(format!(
+            "{SYS_MANIFEST} has the version {version}, not the workspace version {workspace_version}"
+        ))
+    }
 }
 
 /// Checks that the tag's version is the workspace version.
@@ -137,11 +159,14 @@ pub fn release_tag() -> Result<String, String> {
     Ok(format!("v{version}"))
 }
 
-/// `release-notes <tag>`: checks the tag against the workspace version and returns its notes.
+/// `release-notes <tag>`: checks the tag against the workspace version, and the version of `dxfeed-graal-sys`, and
+/// returns its notes.
 pub fn release_notes(tag: &str) -> Result<String, String> {
     let root = workspace_root();
     let tag = parse_tag(tag)?;
-    check_version(&tag, &workspace_version(&read(&root.join("Cargo.toml"))?)?)?;
+    let version = workspace_version(&read(&root.join("Cargo.toml"))?)?;
+    check_version(&tag, &version)?;
+    check_sys_version(&read(&root.join(SYS_MANIFEST))?, &version)?;
     notes_section(&read(&root.join(NOTES_FILE))?, tag.version).map(|notes| notes.trim_end().to_owned())
 }
 
@@ -349,6 +374,19 @@ mod tests {
             "{samples:?}"
         );
         assert!(notes_section(&read(&root.join(NOTES_FILE)).unwrap(), &version).is_ok());
+        check_sys_version(&read(&root.join(SYS_MANIFEST)).unwrap(), &version).unwrap();
+    }
+
+    #[test]
+    fn the_sys_version_is_the_workspace_version_with_the_sdk_as_metadata() {
+        let manifest = "[package]\nname = \"dxfeed-graal-sys\"\nversion = \"1.2.3+sdk.3.13.0\"\n\n[features]\n";
+        assert!(check_sys_version(manifest, "1.2.3").is_ok());
+        let prerelease = "[package]\nversion = \"1.2.3-rc.1\"\n";
+        assert!(check_sys_version(prerelease, "1.2.3-rc.1").is_ok());
+        let error = check_sys_version(manifest, "1.2.4").unwrap_err();
+        assert!(error.contains("1.2.3+sdk.3.13.0"), "{error}");
+        let no_package = "[features]\nversion = \"1.2.3\"\n";
+        assert!(check_sys_version(no_package, "1.2.3").is_err());
     }
 
     #[test]

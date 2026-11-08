@@ -36,7 +36,7 @@ defaults:
 
 jobs:
   lint:
-    name: fmt and rustdoc
+    name: fmt, rustdoc and packages
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -61,7 +61,14 @@ jobs:
         env:
           RUSTDOCFLAGS: -D warnings
           DOCS_RS: 1
-        run: cargo doc --locked -p dxfeed-graal --no-deps --all-features --target-dir target/docs-rs
+        run: >
+          cargo doc --locked --no-deps --all-features --target-dir target/docs-rs
+          -p dxfeed-graal-sys -p dxfeed-graal-build -p dxfeed-graal
+
+      # The crates of the API as crates.io gets them: packed, then built from the packages (HOW_TO_RELEASE.md). Not
+      # publish --dry-run, which fails once the version is on crates.io.
+      - name: Packages
+        run: cargo package --locked -p dxfeed-graal-sys -p dxfeed-graal-build -p dxfeed-graal
 
   build:
     name: ${{ matrix.name }}
