@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
+use crate::connector::MessageConnector;
 use crate::error::{Error, Result, c_string};
 use crate::event::EventType;
 use crate::executor::Executor;
@@ -656,6 +657,23 @@ impl DXEndpoint {
         // SAFETY: the endpoint is live and the out-pointer is valid for writes.
         call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getState(t, e, &mut state) })?;
         State::from_sys(state)
+    }
+
+    /// The current message connectors of the endpoint, one per address of the address string that it is connected
+    /// to (`QDEndpoint.getConnectors`); see [`MessageConnector`].
+    ///
+    /// Each call reads the connectors anew, so the connectors that a connect to another address replaced are not
+    /// among them. A connect to the same address and [`reconnect`](Self::reconnect) keep the connectors. The list is
+    /// empty for an endpoint that is not connected, such as a new or a disconnected one, for a
+    /// [`LocalHub`](Role::LocalHub) and for a closed endpoint.
+    #[doc(alias = "getConnectors")]
+    pub fn get_connectors(&self) -> Result<Vec<MessageConnector>> {
+        let e = self.state.endpoint.as_ptr();
+        let mut list = ptr::null_mut();
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_DXEndpoint_getConnectors(t, e, &mut list) })?;
+        // SAFETY: the SDK wrote a new list, which is ours.
+        unsafe { MessageConnector::take_list(list) }
     }
 
     /// Adds a listener of state changes; `f` is called with the old and the new state, on a thread of the endpoint's

@@ -113,6 +113,7 @@
 #![warn(missing_docs)]
 
 mod auth_token;
+mod connector;
 mod endpoint;
 mod error;
 mod error_manager;
@@ -146,6 +147,7 @@ mod time_period;
 mod time_zone;
 
 pub use auth_token::AuthToken;
+pub use connector::{MessageConnector, MessageConnectorKind, MessageConnectorState, MessageConnectorStatistics};
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, JavaExceptionClass, Result};
 pub use error_manager::{ErrorInfo, ErrorManager};

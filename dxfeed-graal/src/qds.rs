@@ -13,11 +13,10 @@
 //! ```
 
 use std::ffi::{CString, c_char};
-use std::ptr;
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::{Error, JavaException, Result, c_string};
+use crate::error::{Result, c_string};
 use crate::isolate::{self, call};
 
 /// The QDS tools of the SDK (Java `Tools`).
@@ -31,29 +30,16 @@ impl Tools {
     /// A pattern that contains `.ipf` is the URL of an instrument profile file whose symbols make the set; reading it
     /// may need the network. The order of the symbols is not specified, and `*` stays as is. Returns
     /// [`Error::Java`] for an invalid or empty filter and [`Error::InvalidArgument`] for a NUL byte.
+    ///
+    /// [`Error::Java`]: crate::Error::Java
+    /// [`Error::InvalidArgument`]: crate::Error::InvalidArgument
     #[doc(alias = "parseSymbols")]
     pub fn parse_symbols(symbol_list: &str) -> Result<Vec<String>> {
         let symbol_list = c_string(symbol_list, "the symbol list")?;
-        let mut list = ptr::null_mut();
         // SAFETY: the string is live and the out-pointer is valid for writes.
-        call(|t| unsafe { sys::dxfg_v4_Tools_parseSymbols(t, symbol_list.as_ptr(), &mut list) })?;
-        if list.is_null() {
-            return Err(Error::Java(JavaException::null_result()));
-        }
-        // SAFETY: the SDK filled the list, which is released once after the copy.
-        let symbols = unsafe {
-            let list = &*list;
-            match list.size {
-                size if size <= 0 => Vec::new(),
-                size => std::slice::from_raw_parts(list.elements, size as usize)
-                    .iter()
-                    .map(|&symbol| isolate::string(symbol).into_owned())
-                    .collect(),
-            }
-        };
-        // SAFETY: as above; nothing uses it afterwards.
-        crate::error_manager::report_release("Tools", call(|t| unsafe { sys::dxfg_v4_string_list_release(t, list) }));
-        Ok(symbols)
+        isolate::out_string_list("Tools", |t, list| unsafe {
+            sys::dxfg_v4_Tools_parseSymbols(t, symbol_list.as_ptr(), list)
+        })
     }
 
     /// Runs the qds-tools with command line arguments (`main`): the first argument names the tool, the others are
@@ -65,7 +51,8 @@ impl Tools {
     /// `System.exit`, with the exit code 0 if the tools succeeded and 1 if they failed, as
     /// [`std::process::exit`] does. Call it only from a process that launches a tool.
     ///
-    /// Returns [`Error::InvalidArgument`] for an argument with a NUL byte, before anything runs.
+    /// Returns [`Error::InvalidArgument`](crate::Error::InvalidArgument) for an argument with a NUL byte, before
+    /// anything runs.
     pub fn main<S: AsRef<str>>(args: &[S]) -> Result<()> {
         let args = args
             .iter()
