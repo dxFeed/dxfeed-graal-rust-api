@@ -8,6 +8,8 @@ use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
+#[cfg(feature = "experimental")]
+use crate::connector::ConnectionError;
 use crate::connector::MessageConnector;
 use crate::error::{Error, Result, c_string};
 use crate::event::EventType;
@@ -15,6 +17,8 @@ use crate::executor::Executor;
 use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, call};
+#[cfg(feature = "experimental")]
+use crate::listener::ConnectorListener;
 use crate::listener::{ChangeListeners, StateListener};
 use crate::observable::event_types;
 use crate::publisher::DXPublisher;
@@ -251,6 +255,8 @@ pub(crate) struct EndpointState {
     role: Role,
     closed: AtomicBool,
     state_listeners: Mutex<Vec<(ListenerId, StateListener)>>,
+    #[cfg(feature = "experimental")]
+    connector_listeners: Mutex<Vec<(ListenerId, ConnectorListener)>>,
     /// The change listeners of the publisher's subscriptions by event type, kept until the endpoint is closed.
     publisher_listeners: Mutex<HashMap<EventType, Arc<ChangeListeners>>>,
 }
@@ -284,6 +290,21 @@ impl EndpointState {
         removed
     }
 
+    #[cfg(feature = "experimental")]
+    fn connector_listeners(&self) -> MutexGuard<'_, Vec<(ListenerId, ConnectorListener)>> {
+        crate::lock(&self.connector_listeners)
+    }
+
+    /// Removes a connector listener, then releases it: the remove does not wait for a running call, the release does.
+    #[cfg(feature = "experimental")]
+    fn remove_connector_listener(&self, listener: ConnectorListener) -> Result<()> {
+        let (e, l) = (self.endpoint.as_ptr(), listener.as_ptr());
+        // SAFETY: the endpoint and the listener are live.
+        let removed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_removeMessageConnectorListener(t, e, l) });
+        listener.release();
+        removed
+    }
+
     fn close(&self) -> Result<()> {
         if self.closed.swap(true, Ordering::AcqRel) {
             return Ok(());
@@ -308,6 +329,13 @@ impl Drop for EndpointState {
         for (_, listener) in listeners {
             crate::error_manager::report_release("DXEndpoint", self.remove_state_listener(listener));
         }
+        #[cfg(feature = "experimental")]
+        {
+            let listeners = std::mem::take(&mut *self.connector_listeners());
+            for (_, listener) in listeners {
+                crate::error_manager::report_release("DXEndpoint", self.remove_connector_listener(listener));
+            }
+        }
         crate::error_manager::report_release("DXEndpoint", self.close());
     }
 }
@@ -315,9 +343,10 @@ impl Drop for EndpointState {
 /// A connection to a data source or a local hub (`DXEndpoint`).
 ///
 /// An endpoint, its [`DXFeed`], its [`DXPublisher`] and the subscriptions of the feed share it: cloning any of them is
-/// cheap, and the endpoint stays open while one of them lives. Dropping the last one removes the state listeners,
-/// waiting for their running calls as [`remove_state_listener`](Self::remove_state_listener) does, and closes the
-/// endpoint without waiting for the notifications already scheduled. A chain such as
+/// cheap, and the endpoint stays open while one of them lives. Dropping the last one removes the state listeners (and
+/// the connector listeners of the feature `experimental`), waiting for their running calls as
+/// [`remove_state_listener`](Self::remove_state_listener) does, and closes the endpoint without waiting for the
+/// notifications already scheduled. A chain such as
 /// `let feed = DXEndpoint::create()?.connect("demo.dxfeed.com:7300")?.get_feed();` therefore keeps the endpoint open.
 #[derive(Clone)]
 pub struct DXEndpoint {
@@ -369,6 +398,8 @@ impl DXEndpoint {
                 role,
                 closed: AtomicBool::new(false),
                 state_listeners: Mutex::new(Vec::new()),
+                #[cfg(feature = "experimental")]
+                connector_listeners: Mutex::new(Vec::new()),
                 publisher_listeners: Mutex::new(HashMap::new()),
             }),
         })
@@ -713,6 +744,93 @@ impl DXEndpoint {
             listeners.swap_remove(index).1
         };
         self.state.remove_state_listener(listener)
+    }
+
+    /// Adds a listener of the message connectors of the endpoint (`QDEndpoint.addMessageConnectionListener`): `f` is
+    /// called with a connector after its state changes, also of the connectors that a later
+    /// [`connect`](Self::connect) creates. It is experimental in the SDK.
+    ///
+    /// `f` is called after a connector connects, loses its connection, starts to reconnect, or is replaced or
+    /// closed. It is not called for the states at the add, so read [`get_connectors`](Self::get_connectors) after
+    /// adding it. It reads the current values of the connector, which may be newer than the change that called it:
+    /// fast changes of one connector may come as one call. When the change is a connection error,
+    /// [`MessageConnector::get_last_error`] returns that error in the call already.
+    ///
+    /// The SDK calls all the connector listeners of the process on one thread of its own, one call at a time, so `f`
+    /// should return quickly. Inside `f` the getters of the connector, [`get_connectors`](Self::get_connectors),
+    /// [`connect`](Self::connect), [`disconnect`](Self::disconnect), [`close`](Self::close) and removing a listener
+    /// work; the `await_*` calls return [`Error::InCallback`]. A panic in `f` is caught and goes to
+    /// [`ErrorManager`](crate::ErrorManager); the listener stays active. The listener stays until it is removed or
+    /// the last owner of the endpoint is dropped; a closure that owns the endpoint, its feed or its publisher keeps it
+    /// open. Added to a closed endpoint, it is never called.
+    ///
+    /// ```no_run
+    /// use dxfeed_graal::DXEndpoint;
+    ///
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// let endpoint = DXEndpoint::create()?;
+    /// endpoint.add_message_connector_listener(|connector| {
+    ///     if let (Ok(address), Ok(state)) = (connector.get_address(), connector.get_state()) {
+    ///         println!("{address}: {state}");
+    ///     }
+    ///     if let Ok(Some(error)) = connector.get_last_error() {
+    ///         println!("last error: {} {:?}", error.category, error.message);
+    ///     }
+    /// })?;
+    /// endpoint.connect("demo.dxfeed.com:7300")?;
+    /// # Ok(())
+    /// # }
+    /// ```
+    #[cfg(feature = "experimental")]
+    #[doc(alias = "addMessageConnectionListener")]
+    pub fn add_message_connector_listener(
+        &self,
+        f: impl FnMut(MessageConnector) + Send + 'static,
+    ) -> Result<ListenerId> {
+        let listener = ConnectorListener::new(Box::new(f))?;
+        let (e, l) = (self.state.endpoint.as_ptr(), listener.as_ptr());
+        // SAFETY: the endpoint and the listener are live.
+        if let Err(error) = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_addMessageConnectorListener(t, e, l) }) {
+            listener.release();
+            return Err(error);
+        }
+        let id = ListenerId::next();
+        self.state.connector_listeners().push((id, listener));
+        Ok(id)
+    }
+
+    /// Removes a connector listener. Called outside listeners, it returns once no call of the listener runs; called
+    /// from a listener, it returns at once and the listener is released in the background. So do not hold a lock that
+    /// the closure takes while removing it from another thread. It is experimental in the SDK.
+    ///
+    /// Returns [`Error::InvalidArgument`] if the listener is not a connector listener of this endpoint.
+    #[cfg(feature = "experimental")]
+    #[doc(alias = "removeMessageConnectionListener")]
+    pub fn remove_message_connector_listener(&self, id: ListenerId) -> Result<()> {
+        let listener = {
+            let mut listeners = self.state.connector_listeners();
+            let index = listeners.iter().position(|(i, _)| *i == id).ok_or_else(|| {
+                Error::InvalidArgument(format!("{id:?} is not a message connector listener of this endpoint"))
+            })?;
+            listeners.swap_remove(index).1
+        };
+        self.state.remove_connector_listener(listener)
+    }
+
+    /// The last connection error of the endpoint: the newest error of all its connectors, or `None` when it has had
+    /// no error, which does not mean that it is connected now; see [`ConnectionError`]. It is experimental in the SDK.
+    ///
+    /// The error stays after a connect to another address replaced the connector that recorded it, and after the
+    /// endpoint is closed. Failed connect attempts do not change the [state](Self::get_state) of the endpoint, which
+    /// stays [`Connecting`](State::Connecting) between them. A [state listener](Self::add_state_listener) may be
+    /// called before the error of its change is recorded, so read the error in a
+    /// [connector listener](Self::add_message_connector_listener), or compare its time or count with those seen
+    /// before.
+    #[cfg(feature = "experimental")]
+    pub fn get_last_connection_error(&self) -> Result<Option<ConnectionError>> {
+        let e = self.state.endpoint.as_ptr();
+        // SAFETY: the endpoint is live and the out-pointer is valid for writes.
+        ConnectionError::last(|t, error| unsafe { sys::dxfg_v4_DXEndpoint_getLastConnectionError(t, e, error) })
     }
 
     /// Closes the endpoint for all its handles; it cannot be used afterwards. Closing again does nothing.

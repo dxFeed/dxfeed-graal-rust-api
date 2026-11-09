@@ -81,6 +81,7 @@ sdk_handle!(
     sys::dxfg_v4_auth_token_t,
     sys::dxfg_v4_logging_listener_t,
     sys::dxfg_v4_message_connector_t,
+    sys::dxfg_v4_message_connector_listener_t,
     sys::dxfg_v4_input_stream_t,
     sys::dxfg_v4_price_increments_t,
     sys::dxfg_v4_additional_underlyings_t,

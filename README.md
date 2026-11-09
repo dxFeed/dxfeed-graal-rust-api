@@ -182,7 +182,8 @@ has an optional feature (the `system::feature` names), and `system::get_advanced
 experimental functions, which matches `system::ADVANCED_REVISION` for the library this crate was built for.
 The cargo feature `experimental`, off by default, adds the wrappers of the experimental tier of the SDK: the feed
 filters (`feed_filter`), the ready signal of the event queues (`set_ready_signal`) and the event peek of the time
-series transaction models (`with_event_peek`). They may change in a minor release of the SDK.
+series transaction models (`with_event_peek`), the connector listener and the connection errors (see
+[Message Connectors](#message-connectors)). They may change in a minor release of the SDK.
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
 ### Running and Deployment
@@ -347,6 +348,30 @@ fn main() -> dxfeed_graal::Result<()> {
 
 A connector is a live view: each getter reads it anew, and it answers after a connect to another address replaced it
 or its endpoint was closed, as `DISCONNECTED`. It does not keep its endpoint open.
+
+With the cargo feature `experimental`, `DXEndpoint::add_message_connector_listener` calls a closure with a connector
+after its state changes, and `MessageConnector::get_last_error` and `DXEndpoint::get_last_connection_error` return the
+last failed connect or dropped connection: its time, category (`CONNECT_FAILED`, `HEARTBEAT_TIMEOUT` and others),
+exception and message. The SDK calls all connector listeners on one thread of its own, so return quickly:
+
+```rust
+use dxfeed_graal::DXEndpoint;
+
+fn main() -> dxfeed_graal::Result<()> {
+    let endpoint = DXEndpoint::create()?;
+    endpoint.add_message_connector_listener(|connector| {
+        if let (Ok(address), Ok(state)) = (connector.get_address(), connector.get_state()) {
+            println!("{address}: {state}");
+        }
+        if let Ok(Some(error)) = connector.get_last_error() {
+            println!("last error: {} {:?}", error.category, error.message);
+        }
+    })?;
+    endpoint.connect("demo.dxfeed.com:7300")?;
+    std::io::stdin().read_line(&mut String::new()).ok();
+    endpoint.close_and_await_termination()
+}
+```
 
 ### System Properties
 
@@ -729,5 +754,5 @@ the types.
 - [x] The [Tools](#tools) binary and the QDS tools of the SDK (`qds::Tools`): the symbol list parser and the
   qds-tools runner
 - [x] With the cargo feature `experimental`: feed filters (`DXFeedFilter`, its builder and its tracker with
-  listeners), the ready signal of the event queues (an `eventfd` or a Windows event) and the event peek of
-  `TimeSeriesTxModel`
+  listeners), the ready signal of the event queues (an `eventfd` or a Windows event), the event peek of
+  `TimeSeriesTxModel`, the message connector listener and the last connection errors
