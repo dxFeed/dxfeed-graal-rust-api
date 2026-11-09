@@ -7,10 +7,10 @@ executables are written, and makes Linux and macOS executables look for it in th
 
 ```toml
 [dependencies]
-dxfeed-graal = "0.1"
+dxfeed-graal = "0.2"
 
 [build-dependencies]
-dxfeed-graal-build = "0.1"
+dxfeed-graal-build = "0.2"
 ```
 
 ```rust

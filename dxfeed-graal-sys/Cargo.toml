@@ -1,6 +1,6 @@
 [package]
 name = "dxfeed-graal-sys"
-version = "0.1.1+sdk.3.14.0"
+version = "0.2.0+sdk.3.14.0"
 description = "Raw FFI bindings to the dxFeed Graal Native SDK C API (dxfg_v4_)"
 links = "DxFeedGraalNativeSdk"
 build = "build.rs"
