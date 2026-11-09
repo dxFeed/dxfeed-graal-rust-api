@@ -96,6 +96,29 @@ fn handles_are_released() {
     }
     assert_eq!(live_handles(), before);
 
+    // The connectors are cloned from an SDK list, which is freed apart from them; a connector keeps no endpoint, and
+    // the clones of one connector share its handle.
+    {
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let endpoint = DXEndpoint::create().unwrap();
+        endpoint
+            .connect(&format!("(127.0.0.1:{port})(127.0.0.1:{port})"))
+            .unwrap();
+        let connectors = endpoint.get_connectors().unwrap();
+        assert_eq!(connectors.len(), 2);
+        assert_eq!(live_handles(), before + 3 + 2);
+        let _clone = connectors[0].clone();
+        assert_eq!(live_handles(), before + 3 + 2);
+        drop(endpoint);
+        assert_eq!(live_handles(), before + 2);
+        connectors[1].get_name().unwrap();
+    }
+    assert_eq!(live_handles(), before);
+
     // A model that cannot be built, without a symbol, releases its builders and its listener.
     {
         let result = IndexedTxModel::<Order>::new_builder()

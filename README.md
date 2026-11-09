@@ -34,6 +34,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 - [Usage](#usage)
   * [How to connect to QD endpoint](#how-to-connect-to-qd-endpoint)
   * [How to connect to dxLink](#how-to-connect-to-dxlink)
+  * [Message Connectors](#message-connectors)
   * [System Properties](#system-properties)
   * [Threads and Listeners](#threads-and-listeners)
   * [Closing and Exit](#closing-and-exit)
@@ -313,6 +314,39 @@ fn main() -> dxfeed_graal::Result<()> {
 ```
 
 To familiarize with the dxLink protocol, please click [here](https://demo.dxfeed.com/market-data/dxlink-ws/debug/#/protocol).
+
+### Message Connectors
+
+An endpoint has one message connector per address it is connected to, such as two for `(host1:7300)(host2:7300)`.
+`DXEndpoint::get_connectors` lists them; each `MessageConnector` gives its name, kind, address with the credentials
+masked, the addresses connected now, its state, the open and closed connections, and the bytes and data records read
+and written:
+
+```rust
+use dxfeed_graal::DXEndpoint;
+
+fn main() -> dxfeed_graal::Result<()> {
+    let endpoint = DXEndpoint::create()?;
+    endpoint.connect("demo.dxfeed.com:7300")?;
+    std::thread::sleep(std::time::Duration::from_secs(5));
+    for connector in endpoint.get_connectors()? {
+        let statistics = connector.get_statistics()?;
+        println!(
+            "{} {} {} {:?}: {} bytes, {} data records read",
+            connector.get_name()?,
+            connector.get_address()?,
+            connector.get_state()?,
+            connector.get_current_addresses()?,
+            statistics.read_bytes,
+            statistics.read_data_records
+        );
+    }
+    endpoint.close_and_await_termination()
+}
+```
+
+A connector is a live view: each getter reads it anew, and it answers after a connect to another address replaced it
+or its endpoint was closed, as `DISCONNECTED`. It does not keep its endpoint open.
 
 ### System Properties
 
@@ -687,6 +721,7 @@ the types.
   endpoint and feed (`get_instance`)
 - [x] Endpoint properties, states and state listeners, `reconnect`, `disconnect_and_clear`, `await_processed`,
   `await_not_connected`, user and password, `AuthToken`, event types and aggregation period info
+- [x] [Message connectors](#message-connectors) of an endpoint: their addresses, states, connections and statistics
 - [x] `TimeFormat`, `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal

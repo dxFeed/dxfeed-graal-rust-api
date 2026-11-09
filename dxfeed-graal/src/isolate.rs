@@ -428,6 +428,33 @@ pub(crate) fn out_optional_string(
     Ok(Some(copy))
 }
 
+/// Calls an SDK function that writes a new list of strings to its out-pointer, copies the strings and releases the
+/// list; a NULL list is an error and a NULL string is empty. `what` names the caller in a report of a failed release.
+pub(crate) fn out_string_list(
+    what: &'static str,
+    f: impl FnOnce(Thread, *mut *mut sys::dxfg_v4_string_list) -> i32,
+) -> Result<Vec<String>> {
+    let mut list = ptr::null_mut();
+    call(|t| f(t, &mut list))?;
+    if list.is_null() {
+        return Err(Error::Java(JavaException::null_result()));
+    }
+    // SAFETY: the SDK wrote a list of `size` NUL-terminated strings or NULLs, released right after copying.
+    let strings = unsafe {
+        let list = &*list;
+        match usize::try_from(list.size) {
+            Ok(size) if size > 0 && !list.elements.is_null() => std::slice::from_raw_parts(list.elements, size)
+                .iter()
+                .map(|&s| string(s).into_owned())
+                .collect(),
+            _ => Vec::new(),
+        }
+    };
+    // SAFETY: the list came from the SDK to the caller and is released once.
+    crate::error_manager::report_release(what, call(|t| unsafe { sys::dxfg_v4_string_list_release(t, list) }));
+    Ok(strings)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
