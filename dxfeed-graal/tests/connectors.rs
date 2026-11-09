@@ -288,3 +288,414 @@ fn kinds_and_states_print_as_the_sdk_constants() {
     .collect();
     assert_eq!(states, ["CONNECTING", "CONNECTED", "DISCONNECTED"]);
 }
+
+/// The experimental connector listener and connection errors.
+#[cfg(feature = "experimental")]
+mod experimental {
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::sync::mpsc::{self, RecvTimeoutError};
+    use std::sync::{Arc, Mutex, OnceLock};
+    use std::time::{Duration, Instant};
+
+    use dxfeed_graal::{
+        ConnectionError, ConnectionErrorCategory, DXEndpoint, Error, ErrorManager, MessageConnector,
+        MessageConnectorState,
+    };
+
+    use super::{TIMEOUT, free_port, listening_publisher, only_connector, wait_until};
+
+    /// Waits until `connector` has an error with at least `count` errors.
+    fn wait_for_error(connector: &MessageConnector, count: i64) -> ConnectionError {
+        let mut last = None;
+        wait_until("a connection error", || {
+            last = connector.get_last_error().unwrap();
+            last.as_ref().is_some_and(|error| error.count >= count)
+        });
+        last.unwrap()
+    }
+
+    /// Whether the sender of `receiver` is dropped within [`TIMEOUT`], ignoring what it still sends.
+    fn sender_dropped<T>(receiver: &mpsc::Receiver<T>) -> bool {
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            match receiver.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
+                Ok(_) => continue,
+                Err(RecvTimeoutError::Disconnected) => return true,
+                Err(RecvTimeoutError::Timeout) => return false,
+            }
+        }
+    }
+
+    #[test]
+    fn a_listener_sees_a_connector_connect() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        let (sender, states) = mpsc::channel();
+        feed.add_message_connector_listener(move |connector| {
+            let _ = sender.send((connector.get_address().unwrap(), connector.get_state().unwrap()));
+        })
+        .unwrap();
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        loop {
+            let (address, state) = states
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("no CONNECTED call");
+            assert_eq!(address, format!("127.0.0.1:{port}"));
+            if state == MessageConnectorState::Connected {
+                break;
+            }
+        }
+        drop(publisher);
+    }
+
+    #[test]
+    fn no_call_runs_or_follows_once_a_listener_is_removed() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        let in_call = Arc::new(AtomicBool::new(false));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let (sender, entered) = mpsc::channel();
+        let id = {
+            let (in_call, calls) = (in_call.clone(), calls.clone());
+            feed.add_message_connector_listener(move |_| {
+                in_call.store(true, Ordering::SeqCst);
+                calls.fetch_add(1, Ordering::SeqCst);
+                let _ = sender.send(());
+                std::thread::sleep(Duration::from_millis(300));
+                in_call.store(false, Ordering::SeqCst);
+            })
+            .unwrap()
+        };
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        entered.recv_timeout(TIMEOUT).expect("no call");
+        // Removing waits for the running call.
+        feed.remove_message_connector_listener(id).unwrap();
+        assert!(!in_call.load(Ordering::SeqCst));
+        let seen = calls.load(Ordering::SeqCst);
+        assert!(sender_dropped(&entered));
+        // New changes call nothing.
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        feed.disconnect().unwrap();
+        std::thread::sleep(Duration::from_millis(500));
+        assert_eq!(calls.load(Ordering::SeqCst), seen);
+        assert!(matches!(
+            feed.remove_message_connector_listener(id),
+            Err(Error::InvalidArgument(_))
+        ));
+        drop(publisher);
+    }
+
+    #[test]
+    fn a_panicking_listener_keeps_being_called() {
+        let feed = DXEndpoint::create().unwrap();
+        let (sender, calls) = mpsc::channel();
+        feed.add_message_connector_listener(move |_| {
+            let _ = sender.send(());
+            panic!("test panic in a connector listener");
+        })
+        .unwrap();
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        calls.recv_timeout(TIMEOUT).expect("no first call");
+        // The disconnect after the panicking call is a change too.
+        feed.disconnect().unwrap();
+        calls.recv_timeout(TIMEOUT).expect("no call after the panic");
+        wait_until("the panic report", || {
+            ErrorManager::get_errors().iter().any(|error| {
+                error.component == "DXEndpoint" && error.message.contains("test panic in a connector listener")
+            })
+        });
+    }
+
+    #[test]
+    fn calls_inside_the_listener_work_and_it_removes_itself_at_once() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        let id = Arc::new(OnceLock::new());
+        let (sender, results) = mpsc::channel();
+        let listener_id = {
+            let (inner, id) = (feed.clone(), id.clone());
+            feed.add_message_connector_listener(move |connector| {
+                let started = Instant::now();
+                let connectors = inner.get_connectors().map(|connectors| connectors.len());
+                let name = connector.get_name();
+                let error = connector.get_last_error();
+                let awaited = inner.await_processed();
+                let removed = inner.remove_message_connector_listener(*id.get().unwrap());
+                let _ = sender.send((
+                    connectors.is_ok(),
+                    name.is_ok(),
+                    error.is_ok(),
+                    matches!(awaited, Err(Error::InCallback)),
+                    removed.is_ok(),
+                    started.elapsed(),
+                ));
+            })
+            .unwrap()
+        };
+        id.set(listener_id).unwrap();
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        let (connectors, name, error, awaited, removed, elapsed) = results.recv_timeout(TIMEOUT).expect("no call");
+        assert!(connectors && name && error && awaited && removed);
+        assert!(elapsed < Duration::from_secs(5), "{elapsed:?}");
+        // The listener is gone: its closure, with the sender, is released.
+        assert!(sender_dropped(&results));
+        drop(publisher);
+    }
+
+    #[test]
+    fn the_listener_disconnects_and_closes_its_endpoint() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        let (sender, results) = mpsc::channel();
+        let id = {
+            let inner = feed.clone();
+            feed.add_message_connector_listener(move |connector| match connector.get_state() {
+                Ok(MessageConnectorState::Connected) => {
+                    let _ = sender.send(("disconnect", inner.disconnect().is_ok()));
+                }
+                Ok(MessageConnectorState::Disconnected) if inner.get_connectors().is_ok_and(|c| c.is_empty()) => {
+                    let _ = sender.send(("close", inner.close().is_ok()));
+                }
+                _ => {}
+            })
+            .unwrap()
+        };
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        assert_eq!(results.recv_timeout(TIMEOUT), Ok(("disconnect", true)));
+        assert_eq!(results.recv_timeout(TIMEOUT), Ok(("close", true)));
+        wait_until("the endpoint to close", || {
+            feed.get_state().unwrap() == dxfeed_graal::State::Closed
+        });
+        // The closure owns a clone of the endpoint; removing the listener lets it go.
+        feed.remove_message_connector_listener(id).unwrap();
+        drop(publisher);
+    }
+
+    #[test]
+    fn dropping_the_last_endpoint_inside_the_listener_returns() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        let holder = Arc::new(Mutex::new(None::<DXEndpoint>));
+        let (sender, dropped) = mpsc::channel();
+        {
+            let holder = holder.clone();
+            feed.add_message_connector_listener(move |_| {
+                let endpoint = holder.lock().unwrap().take();
+                if let Some(endpoint) = endpoint {
+                    drop(endpoint);
+                    let _ = sender.send(());
+                }
+            })
+            .unwrap();
+        }
+        // The holder gets the only owner; the listener, called after the connect returns, drops it.
+        let mut held = holder.lock().unwrap();
+        held.insert(feed).connect(&format!("127.0.0.1:{port}")).unwrap();
+        drop(held);
+        dropped
+            .recv_timeout(TIMEOUT)
+            .expect("the drop inside the listener did not return");
+        drop(publisher);
+    }
+
+    #[test]
+    fn dropping_the_endpoint_removes_its_listeners() {
+        let feed = DXEndpoint::create().unwrap();
+        let (sender, calls) = mpsc::channel::<()>();
+        feed.add_message_connector_listener(move |_| {
+            let _ = sender.send(());
+        })
+        .unwrap();
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        drop(feed);
+        assert!(sender_dropped(&calls));
+    }
+
+    #[test]
+    fn a_listener_added_to_a_closed_endpoint_is_never_called() {
+        let feed = DXEndpoint::create().unwrap();
+        feed.close().unwrap();
+        let (sender, calls) = mpsc::channel::<()>();
+        let id = feed
+            .add_message_connector_listener(move |_| {
+                let _ = sender.send(());
+            })
+            .unwrap();
+        assert!(feed.connect(&format!("127.0.0.1:{}", free_port())).is_ok());
+        assert!(feed.get_connectors().unwrap().is_empty());
+        assert_eq!(
+            calls.recv_timeout(Duration::from_millis(500)),
+            Err(RecvTimeoutError::Timeout)
+        );
+        feed.remove_message_connector_listener(id).unwrap();
+        assert!(sender_dropped(&calls));
+    }
+
+    #[test]
+    fn a_failed_connect_is_a_connect_failed_error() {
+        let feed = DXEndpoint::create().unwrap();
+        assert_eq!(feed.get_last_connection_error().unwrap(), None);
+        let address = format!("127.0.0.1:{}", free_port());
+        feed.connect(&address).unwrap();
+        let connector = only_connector(&feed);
+        let error = wait_for_error(&connector, 1);
+        assert_eq!(error.category, ConnectionErrorCategory::ConnectFailed, "{error:?}");
+        assert!(!error.dropped, "{error:?}");
+        assert_eq!(error.exception_class_name.as_deref(), Some("java.net.ConnectException"));
+        assert_eq!(error.address, address);
+        assert!(error.time > 0);
+        let endpoint_error = feed.get_last_connection_error().unwrap().expect("no endpoint error");
+        assert_eq!(endpoint_error.category, ConnectionErrorCategory::ConnectFailed);
+        assert_eq!(endpoint_error.address, address);
+    }
+
+    #[test]
+    fn a_connector_keeps_its_error_after_the_endpoint_is_closed() {
+        let feed = DXEndpoint::create().unwrap();
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        let connector = only_connector(&feed);
+        let error = wait_for_error(&connector, 1);
+        feed.close().unwrap();
+        assert!(feed.get_last_connection_error().unwrap().is_some());
+        drop(feed);
+        let kept = connector.get_last_error().unwrap().expect("no error after the close");
+        assert!(kept.count >= error.count);
+        assert_eq!(kept.category, ConnectionErrorCategory::ConnectFailed);
+    }
+
+    #[test]
+    fn a_connection_closed_by_the_publisher_is_a_dropped_error() {
+        let (publisher, port) = listening_publisher();
+        let feed = DXEndpoint::create().unwrap();
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        let connector = only_connector(&feed);
+        wait_until("the connector to connect", || {
+            connector.get_state().unwrap() == MessageConnectorState::Connected
+        });
+        assert_eq!(connector.get_last_error().unwrap(), None);
+        publisher.close().unwrap();
+        let mut last = None;
+        wait_until("a dropped error", || {
+            last = connector.get_last_error().unwrap();
+            last.as_ref().is_some_and(|error| error.dropped)
+        });
+        let error = last.unwrap();
+        assert!(
+            matches!(
+                error.category,
+                ConnectionErrorCategory::ClosedByRemote | ConnectionErrorCategory::Io
+            ),
+            "{error:?}"
+        );
+    }
+
+    #[test]
+    fn a_silent_peer_gives_a_heartbeat_timeout() {
+        let server = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = server.local_addr().unwrap().port();
+        // Accepts the connections and keeps them open without sending a byte.
+        std::thread::spawn(move || {
+            let mut streams = Vec::new();
+            for stream in server.incoming() {
+                streams.push(stream);
+            }
+        });
+        let feed = DXEndpoint::create().unwrap();
+        feed.connect(&format!("127.0.0.1:{port}[heartbeatTimeout=1]")).unwrap();
+        let connector = only_connector(&feed);
+        let mut last = None;
+        wait_until("a heartbeat timeout", || {
+            last = connector.get_last_error().unwrap();
+            last.as_ref()
+                .is_some_and(|error| error.category == ConnectionErrorCategory::HeartbeatTimeout)
+        });
+        let error = last.unwrap();
+        assert!(error.dropped, "{error:?}");
+        assert_eq!(error.exception_class_name, None);
+    }
+
+    #[test]
+    fn an_error_hides_the_credentials() {
+        let feed = DXEndpoint::create().unwrap();
+        feed.connect(&format!("127.0.0.1:{}[user=rustuser,password=rustsecret]", free_port()))
+            .unwrap();
+        let error = wait_for_error(&only_connector(&feed), 1);
+        assert!(error.address.starts_with("127.0.0.1:"), "{error:?}");
+        let text = format!("{} {:?}", error.address, error.message);
+        assert!(!text.contains("rustsecret"), "{text}");
+        assert!(!text.contains("rustuser"), "{text}");
+    }
+
+    #[test]
+    fn a_later_success_keeps_the_last_error() {
+        let feed = DXEndpoint::create().unwrap();
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        let failed = only_connector(&feed);
+        let error = wait_for_error(&failed, 1);
+        let (publisher, port) = listening_publisher();
+        feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+        let connector = only_connector(&feed);
+        wait_until("the connector to connect", || {
+            connector.get_state().unwrap() == MessageConnectorState::Connected
+        });
+        assert_eq!(connector.get_last_error().unwrap(), None);
+        let kept = feed.get_last_connection_error().unwrap().expect("the error is gone");
+        assert_eq!(kept.address, error.address);
+        assert!(failed.get_last_error().unwrap().is_some());
+        drop(publisher);
+    }
+
+    #[test]
+    fn the_error_is_recorded_before_the_listener_is_called() {
+        let feed = DXEndpoint::create().unwrap();
+        let (sender, errors) = mpsc::channel();
+        feed.add_message_connector_listener(move |connector| {
+            let _ = sender.send(connector.get_last_error().unwrap());
+        })
+        .unwrap();
+        feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
+        let deadline = Instant::now() + TIMEOUT;
+        // The calls before the failure see no error; the call of the first failure sees it, not only a later one.
+        loop {
+            let error = errors
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("no call with an error");
+            if let Some(error) = error {
+                assert_eq!(error.category, ConnectionErrorCategory::ConnectFailed);
+                assert_eq!(error.count, 1, "{error:?}");
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn categories_print_as_the_sdk_constants() {
+        let categories: Vec<String> = [
+            ConnectionErrorCategory::Other,
+            ConnectionErrorCategory::Dns,
+            ConnectionErrorCategory::ConnectFailed,
+            ConnectionErrorCategory::ReadTimeout,
+            ConnectionErrorCategory::HeartbeatTimeout,
+            ConnectionErrorCategory::ClosedByRemote,
+            ConnectionErrorCategory::Tls,
+            ConnectionErrorCategory::Io,
+        ]
+        .iter()
+        .map(ConnectionErrorCategory::to_string)
+        .collect();
+        assert_eq!(
+            categories,
+            [
+                "OTHER",
+                "DNS",
+                "CONNECT_FAILED",
+                "READ_TIMEOUT",
+                "HEARTBEAT_TIMEOUT",
+                "CLOSED_BY_REMOTE",
+                "TLS",
+                "IO"
+            ]
+        );
+    }
+}

@@ -119,6 +119,37 @@ fn handles_are_released() {
     }
     assert_eq!(live_handles(), before);
 
+    // A connector listener owns one handle, released when it is removed or its endpoint is dropped, also when it was
+    // added to a closed endpoint; a connector that a call gets is released when the closure drops it.
+    #[cfg(feature = "experimental")]
+    {
+        let endpoint = DXEndpoint::create().unwrap();
+        endpoint.close().unwrap();
+        let id = endpoint.add_message_connector_listener(|_| {}).unwrap();
+        assert_eq!(live_handles(), before + 3 + 1);
+        endpoint.remove_message_connector_listener(id).unwrap();
+        assert_eq!(live_handles(), before + 3);
+        drop(endpoint);
+        assert_eq!(live_handles(), before);
+
+        let port = std::net::TcpListener::bind("127.0.0.1:0")
+            .unwrap()
+            .local_addr()
+            .unwrap()
+            .port();
+        let endpoint = DXEndpoint::create().unwrap();
+        let (sender, calls) = std::sync::mpsc::channel();
+        endpoint
+            .add_message_connector_listener(move |connector| {
+                let _ = sender.send(connector.get_name().is_ok());
+            })
+            .unwrap();
+        endpoint.connect(&format!("127.0.0.1:{port}")).unwrap();
+        assert_eq!(calls.recv_timeout(std::time::Duration::from_secs(20)), Ok(true));
+        drop(endpoint);
+        assert_eq!(live_handles(), before);
+    }
+
     // A model that cannot be built, without a symbol, releases its builders and its listener.
     {
         let result = IndexedTxModel::<Order>::new_builder()

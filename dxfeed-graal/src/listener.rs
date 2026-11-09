@@ -10,6 +10,8 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use dxfeed_graal_sys as sys;
 
+#[cfg(feature = "experimental")]
+use crate::connector::MessageConnector;
 use crate::endpoint::State;
 use crate::error::{Error, Result};
 #[cfg(feature = "experimental")]
@@ -61,6 +63,10 @@ pub(crate) type FilterClosure = dyn FnMut() + Send;
 #[cfg(feature = "experimental")]
 pub(crate) type PeekClosure = dyn FnMut(EventRef<'_>) + Send;
 
+/// The closure of a listener of the message connectors of an endpoint: it gets the connector whose state changed.
+#[cfg(feature = "experimental")]
+pub(crate) type ConnectorClosure = dyn FnMut(MessageConnector) + Send;
+
 /// A listener of a subscription.
 pub(crate) type EventListener = Listener<sys::dxfg_v4_feed_event_listener_t, EventClosure>;
 
@@ -94,6 +100,10 @@ pub(crate) type ListListener = Listener<sys::dxfg_v4_observable_list_model_liste
 /// A listener of a feed filter tracker.
 #[cfg(feature = "experimental")]
 pub(crate) type FilterListener = Listener<sys::dxfg_v4_feed_filter_listener_t, FilterClosure>;
+
+/// A listener of the message connectors of an endpoint.
+#[cfg(feature = "experimental")]
+pub(crate) type ConnectorListener = Listener<sys::dxfg_v4_message_connector_listener_t, ConnectorClosure>;
 
 /// The change listeners of a subscription.
 pub(crate) type ChangeListeners = Listeners<sys::dxfg_v4_observable_subscription_change_listener_t, ChangeClosure>;
@@ -262,6 +272,18 @@ impl FilterListener {
             // SAFETY: as for event listeners, with `filter_trampoline`.
             Handle::create(|t, out| unsafe {
                 sys::dxfg_v4_DXFeedFilterListener_new(t, Some(filter_trampoline), user_data, out)
+            })
+        })
+    }
+}
+
+#[cfg(feature = "experimental")]
+impl ConnectorListener {
+    pub(crate) fn new(closure: Box<ConnectorClosure>) -> Result<Self> {
+        Self::create(closure, |user_data| {
+            // SAFETY: as for event listeners, with `connector_trampoline`.
+            Handle::create(|t, out| unsafe {
+                sys::dxfg_v4_MessageConnectorListener_new(t, Some(connector_trampoline), user_data, out)
             })
         })
     }
@@ -716,6 +738,29 @@ unsafe extern "C" fn filter_trampoline(thread: *mut sys::graal_isolatethread_t, 
             "a feed filter listener",
             Nested::Warn,
             |closure| closure(),
+        )
+    };
+}
+
+#[cfg(feature = "experimental")]
+unsafe extern "C" fn connector_trampoline(
+    thread: *mut sys::graal_isolatethread_t,
+    connector: *mut sys::dxfg_v4_message_connector_t,
+    user_data: *mut c_void,
+) {
+    // SAFETY: `user_data` is the state of a connector listener.
+    unsafe {
+        dispatch::<ConnectorClosure>(
+            thread,
+            user_data,
+            "DXEndpoint",
+            "a message connector listener",
+            Nested::Warn,
+            // SAFETY: the connector handle is live during the call; the closure gets a clone of its own.
+            |closure| match MessageConnector::clone_raw(connector) {
+                Ok(connector) => closure(connector),
+                Err(error) => crate::ErrorManager::report_error("DXEndpoint", &error),
+            },
         )
     };
 }

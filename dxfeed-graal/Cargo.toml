@@ -22,8 +22,9 @@ include = ["/src/**", "/build.rs", "/tests/**"]
 dxfeed-graal-sys = { version = "0.1.1", path = "../dxfeed-graal-sys" }
 
 [features]
-# The experimental tier of the SDK: the feed filters, the ready signal of the event queues and the event peek of the
-# time series transaction models. They may change in a minor release of the SDK.
+# The experimental tier of the SDK: the feed filters, the ready signal of the event queues, the event peek of the time
+# series transaction models, the message connector listener and the connection errors. They may change in a minor
+# release of the SDK.
 experimental = []
 
 [package.metadata.docs.rs]
