@@ -19,7 +19,7 @@ categories = ["api-bindings", "finance"]
 include = ["/src/**", "/build.rs", "/tests/**"]
 
 [dependencies]
-dxfeed-graal-sys = { version = "0.2.0", path = "../dxfeed-graal-sys" }
+dxfeed-graal-sys = { version = "0.2.1", path = "../dxfeed-graal-sys" }
 
 [features]
 # The experimental tier of the SDK: the feed filters, the ready signal of the event queues, the event peek of the time
