@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 #[path = "build/retry.rs"]
 mod retry;
 
-const SDK_VERSION: &str = "3.14.0";
+const SDK_VERSION: &str = "3.15.0";
 const LIB_NAME: &str = "DxFeedGraalNativeSdk";
 const SDK_DIR_VAR: &str = "DXFEED_GRAAL_SDK_DIR";
 /// An absolute directory where downloaded archives are kept across builds; unset or empty means no cache.
@@ -37,35 +37,35 @@ const PLATFORMS: &[(&str, &str, &str, &str, &str)] = &[
         "x86_64",
         "msvc",
         "amd64-windows",
-        "516067e54f347b0189a02f16eff6ce7348f5cd1e47b60515a2da1fe85840a31e",
+        "f62ee1b76e5dc019ee2b3db53dc0c47da3599a52355f4c93871fb584edddad0f",
     ),
     (
         "linux",
         "x86_64",
         "gnu",
         "amd64-linux",
-        "3cbd20fb6f7f9c455876b32d966677d16d9d9ca3a9969beffa0a6fe10ebdc35e",
+        "cc963025638d21200351f6f6f336fbc7efe6202d1ae7a9379302a4dde6db185d",
     ),
     (
         "linux",
         "aarch64",
         "gnu",
         "aarch64-linux",
-        "16bc1a89359f6651875b30e40f588583cf1bef6dbf4a32810c8099132e56f211",
+        "e0664dfdefe97bbd936b877b6a68b6f49ae2e28df2b894f7c3d7f67ff445f5b0",
     ),
     (
         "macos",
         "x86_64",
         "",
         "x86_64-osx",
-        "00698092464a93a7446fc051030c7cf393654fb643bc8eff592381ec7d34e120",
+        "2197019879a5639fbd0ef407aa1fed424becec954a10c6488817ec7790dfce68",
     ),
     (
         "macos",
         "aarch64",
         "",
         "aarch64-osx",
-        "21a3a92b74307a1238dbb2b3bffd031293dc8d3ec81ea3dcca9c6d5b09aa9595",
+        "31a6fe5c3f3bd549560100da7c0c913b0f11f19120aa574a0f2295b5fbbaa75f",
     ),
 ];
 
