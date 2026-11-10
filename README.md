@@ -17,7 +17,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 [![Crates.io](https://img.shields.io/crates/v/dxfeed-graal)](https://crates.io/crates/dxfeed-graal)
 [![docs.rs](https://img.shields.io/docsrs/dxfeed-graal)](https://docs.rs/dxfeed-graal)
 ![Status](https://img.shields.io/badge/status-alpha-red)
-![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.14.0-yellow)
+![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.15.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-blueviolet)
 [![License](https://img.shields.io/badge/license-MPL--2.0-orange)](LICENSE)
@@ -163,10 +163,10 @@ the executables of an application (see [Running and Deployment](#running-and-dep
 
 ### Getting the SDK
 
-The build script of `dxfeed-graal-sys` gets SDK 3.14.0 in one of these ways:
+The build script of `dxfeed-graal-sys` gets SDK 3.15.0 in one of these ways:
 
 - `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-<version>-<platform>.zip` from the
-  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.14.0)). Use it for offline builds.
+  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.15.0)). Use it for offline builds.
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
   certificate store. A timeout, a failed connection or an HTTP 429 or 5xx response is retried, three attempts in all.
@@ -396,6 +396,10 @@ ${env:DXFEED_dxfeed.address} = "demo.dxfeed.com:7300"
 
 `system::set_property("dxfeed.address", ...)` sets a property in code. Most properties take effect only when they are
 set before the first endpoint is created.
+
+A `tls+` address checks the certificate of the server against the root CAs of the JDK that builds the SDK. To trust
+other roots, set `javax.net.ssl.trustStore` to a trust store file (and `javax.net.ssl.trustStorePassword`, if it has
+one) before the first TLS connection.
 
 ### Threads and Listeners
 
