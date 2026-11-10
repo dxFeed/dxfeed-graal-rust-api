@@ -3,6 +3,19 @@
 Each release has a section `## v<version>`; the release workflow publishes that section as the text of the GitHub
 release (see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md)).
 
+## v0.2.1
+
+The release on dxFeed Graal Native SDK 3.15.0; the API is the same as in 0.2.0.
+
+* **SDK.** The crates use SDK 3.15.0, built with GraalVM 25.5 (JDK 25.0.5); the version of `dxfeed-graal-sys` names it
+  (`0.2.1+sdk.3.15.0`). Its headers are those of SDK 3.14.0, so the bindings do not change.
+* **TLS.** The SDK trusts the root CAs of JDK 25.0.5 unless `javax.net.ssl.trustStore` is set: it no longer trusts the
+  eMudhra and Comodo roots that this JDK removes and rejects the blocked eMudhra TLS CAs G3B, so a connection to a
+  server whose certificate chains up to one of them fails the TLS handshake. The macOS x86-64 library is still built
+  with JDK 25.0.1, with the trust store of GraalVM 25.5 but without the distrust rules that later JDKs implement in
+  code (the Chunghwa ePKI Root CA).
+* **Logging.** A handler of `logging::set_handler` still cannot take the levels `Trace` and `All`.
+
 ## v0.2.0
 
 The release on dxFeed Graal Native SDK 3.14.0.
