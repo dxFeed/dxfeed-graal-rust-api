@@ -37,6 +37,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
   * [Message Connectors](#message-connectors)
   * [System Properties](#system-properties)
   * [Threads and Listeners](#threads-and-listeners)
+  * [Async](#async)
   * [Closing and Exit](#closing-and-exit)
 - [Tools](#tools)
 - [Samples](#samples)
@@ -418,6 +419,35 @@ one) before the first TLS connection.
   does dropping the last owner of an endpoint with state listeners. So do not hold a lock that a closure takes while
   doing that from another thread.
 
+### Async
+
+`Promise` and `AnyOf` implement `IntoFuture`: async code awaits them on any executor (tokio, async-std, smol or
+another). The crate depends on no runtime, and the futures need no cargo feature.
+
+```rust
+let quote = feed.get_last_event_promise::<Quote>("AAPL")?.await?;
+```
+
+- The future keeps its promise: `cancel()` makes it ready at once with a `CancellationException`, so a timeout is a
+  timer of the runtime plus `cancel()`. With tokio:
+
+  ```rust
+  let mut quote = feed.get_last_event_promise::<Quote>("AAPL")?.into_future();
+  let quote = tokio::select! {
+      result = &mut quote => result?,
+      _ = tokio::time::sleep(Duration::from_secs(10)) => {
+          quote.cancel()?;
+          return Err(Error::Timeout);
+      }
+  };
+  ```
+
+- Dropping a future does not cancel the request, as dropping a promise does not.
+- The handler of a feed request runs on the executor of its endpoint: with a `ManualExecutor`, the future becomes ready
+  inside `process_all_pending`. Closing the endpoint does not complete a pending request, so its future stays pending
+  until it is cancelled.
+- `system::shutdown()` makes the pending futures ready with `Error::ShutDown`.
+
 ### Closing and Exit
 
 - `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
@@ -427,7 +457,7 @@ one) before the first TLS connection.
 - The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
   longer called and destructors no longer call the SDK.
 - `system::shutdown()` is an advanced function with no counterpart in the other dxFeed APIs. It stops all listeners,
-  waiting for the running calls, and closes all endpoints of the process. Afterwards
+  waiting for the running calls, closes all endpoints of the process and ends the pending futures. Afterwards
   nothing new can be created (`Error::ShutDown`), while existing values can still be closed and dropped. It cannot be
   called from a listener (`Error::InCallback`). While it runs, an endpoint on a `ManualExecutor` needs another thread
   calling `process_all_pending`.
@@ -704,6 +734,8 @@ the types.
 - [x] [Promise](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/promise/Promise.html) with `when_done`,
   `when_done_async` and `complete`, `Promises::all_of` and `Promises::any_of`; promises created in Rust with
   `Promise::new` and `Promise::failed`, failed with `complete_exceptionally` and a `JavaExceptionClass`
+- [x] Async: `Promise` and `AnyOf` are awaited with `.await` on any executor (`IntoFuture`), with `cancel()` on the
+  future and `Error::ShutDown` on `system::shutdown()`
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,

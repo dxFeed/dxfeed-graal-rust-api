@@ -2,11 +2,15 @@
 
 #![allow(dead_code)] // Each test binary uses a part.
 
+use std::future::{Future, IntoFuture};
 use std::io::Read;
+use std::pin::{Pin, pin};
 use std::process::{Command, Stdio};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
-use std::thread;
+use std::task::{Context, Poll, Wake, Waker};
+use std::thread::{self, Thread};
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{
@@ -120,6 +124,81 @@ impl Hub {
         self.publisher.publish_events(events).unwrap();
         self.executor.process_all_pending().unwrap();
     }
+}
+
+/// A waker that counts its calls and unparks the thread that created it.
+pub struct CountingWaker {
+    thread: Thread,
+    wakes: AtomicUsize,
+    wakes_by_ref: AtomicUsize,
+}
+
+impl CountingWaker {
+    /// A waker of the current thread.
+    pub fn new() -> Arc<Self> {
+        Arc::new(CountingWaker {
+            thread: thread::current(),
+            wakes: AtomicUsize::new(0),
+            wakes_by_ref: AtomicUsize::new(0),
+        })
+    }
+
+    /// The calls of `wake`.
+    pub fn wakes(&self) -> usize {
+        self.wakes.load(Ordering::SeqCst)
+    }
+
+    /// The calls of `wake_by_ref`.
+    pub fn wakes_by_ref(&self) -> usize {
+        self.wakes_by_ref.load(Ordering::SeqCst)
+    }
+
+    /// All calls: `wake` and `wake_by_ref`.
+    pub fn total(&self) -> usize {
+        self.wakes() + self.wakes_by_ref()
+    }
+}
+
+impl Wake for CountingWaker {
+    fn wake(self: Arc<Self>) {
+        self.wakes.fetch_add(1, Ordering::SeqCst);
+        self.thread.unpark();
+    }
+
+    fn wake_by_ref(self: &Arc<Self>) {
+        self.wakes_by_ref.fetch_add(1, Ordering::SeqCst);
+        self.thread.unpark();
+    }
+}
+
+/// Polls `future` once with `waker`.
+pub fn poll_with<F: Future + Unpin>(future: &mut F, waker: &Arc<CountingWaker>) -> Poll<F::Output> {
+    let waker = Waker::from(Arc::clone(waker));
+    Pin::new(future).poll(&mut Context::from_waker(&waker))
+}
+
+/// Runs `future` on this thread with `waker` until it is ready; `None` if it is not within `timeout`.
+pub fn block_on_with<F: IntoFuture>(future: F, waker: &Arc<CountingWaker>, timeout: Duration) -> Option<F::Output> {
+    let mut future = pin!(future.into_future());
+    let deadline = Instant::now() + timeout;
+    let waker = Waker::from(Arc::clone(waker));
+    let mut context = Context::from_waker(&waker);
+    loop {
+        if let Poll::Ready(output) = future.as_mut().poll(&mut context) {
+            return Some(output);
+        }
+        let now = Instant::now();
+        if now >= deadline {
+            return None;
+        }
+        // A wake unparks the thread; a spurious unpark only polls again.
+        thread::park_timeout(deadline - now);
+    }
+}
+
+/// Runs `future` on this thread until it is ready; panics if it is not within 10 seconds.
+pub fn block_on<F: IntoFuture>(future: F) -> F::Output {
+    block_on_with(future, &CountingWaker::new(), Duration::from_secs(10)).expect("the future is not ready within 10 s")
 }
 
 /// An item a listener receives, copied into an owned event.

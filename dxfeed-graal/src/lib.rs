@@ -91,6 +91,26 @@
 //! calls, except inside a callback, and so does dropping the last owner of an endpoint with state listeners. So do not
 //! hold a lock that a closure takes while doing that from another thread.
 //!
+//! # Async
+//!
+//! [`Promise`] and [`AnyOf`] implement [`IntoFuture`], so async code awaits them instead of
+//! blocking a thread in [`wait`](Promise::wait). The futures work on any executor (tokio, async-std, smol or another);
+//! the crate depends on no runtime and needs no cargo feature for them:
+//!
+//! ```no_run
+//! use dxfeed_graal::event::Quote;
+//! use dxfeed_graal::{DXFeed, Result};
+//!
+//! async fn last_quote(feed: &DXFeed) -> Result<Quote> {
+//!     feed.get_last_event_promise::<Quote>("AAPL")?.await
+//! }
+//! ```
+//!
+//! A [`PromiseFuture`] keeps its promise: [`cancel`](PromiseFuture::cancel) makes it ready at once, so a timer of the
+//! runtime that cancels it is the async timeout. Dropping the future does not cancel the request, closing the endpoint
+//! leaves a pending request pending, and [`system::shutdown`] makes pending futures ready with [`Error::ShutDown`]. A
+//! worker thread of the runtime that polls a future is attached to the isolate, as any thread that calls the SDK is.
+//!
 //! # Errors
 //!
 //! Every fallible call returns [`Result`]. A Java exception becomes [`Error::Java`] with its class, message, stack
@@ -142,6 +162,7 @@ mod subscription;
 mod subscription_controller;
 mod symbol;
 pub mod system;
+mod terminate;
 mod time_format;
 mod time_period;
 mod time_zone;
@@ -161,7 +182,7 @@ pub use feed::DXFeed;
 #[doc(hidden)]
 pub use handle::live_handles;
 pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
-pub use promise::{AnyOf, Promise, PromiseResult, Promises};
+pub use promise::{AnyOf, AnyOfFuture, Promise, PromiseFuture, PromiseResult, Promises};
 pub use publisher::DXPublisher;
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
 pub use subscription_controller::SubscriptionController;
