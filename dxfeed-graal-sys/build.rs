@@ -18,7 +18,7 @@ use sha2::{Digest, Sha256};
 #[path = "build/retry.rs"]
 mod retry;
 
-const SDK_VERSION: &str = "3.15.0";
+const SDK_VERSION: &str = "3.16.0";
 const LIB_NAME: &str = "DxFeedGraalNativeSdk";
 const SDK_DIR_VAR: &str = "DXFEED_GRAAL_SDK_DIR";
 /// An absolute directory where downloaded archives are kept across builds; unset or empty means no cache.
@@ -28,7 +28,7 @@ const SHA256_OVERRIDE_VAR: &str = "DXFEED_GRAAL_SDK_SHA256";
 
 /// SHA-256 of every `*.h` at the SDK root (see `headers_digest`). The committed bindings were generated from these
 /// headers, so an SDK with other headers must not be linked.
-const HEADERS_SHA256: &str = "3732376d812855f5545d36d0eab9c2bf5d9878204d6cebdc3fc977ed3f4fdbee";
+const HEADERS_SHA256: &str = "74138035fc63ba6c855ec65eb9bbe14e6aeeff61ac68561df914e43b77efa59f";
 
 /// Supported targets: (`target_os`, `target_arch`, `target_env`, archive platform, archive SHA-256).
 const PLATFORMS: &[(&str, &str, &str, &str, &str)] = &[
@@ -37,35 +37,35 @@ const PLATFORMS: &[(&str, &str, &str, &str, &str)] = &[
         "x86_64",
         "msvc",
         "amd64-windows",
-        "f62ee1b76e5dc019ee2b3db53dc0c47da3599a52355f4c93871fb584edddad0f",
+        "a1866cb8176ddc2428f882be50e1b877ba94f8a9f6646f5f8439e936ea4913a5",
     ),
     (
         "linux",
         "x86_64",
         "gnu",
         "amd64-linux",
-        "cc963025638d21200351f6f6f336fbc7efe6202d1ae7a9379302a4dde6db185d",
+        "b7eef6512bcc059f4c3629f288c7a8abfded0c7efa880aa63060ba5431484350",
     ),
     (
         "linux",
         "aarch64",
         "gnu",
         "aarch64-linux",
-        "e0664dfdefe97bbd936b877b6a68b6f49ae2e28df2b894f7c3d7f67ff445f5b0",
+        "c9d3e2841309ba8de8cb8412dae03d263ccc0a299933bb4758a32abe81c4a077",
     ),
     (
         "macos",
         "x86_64",
         "",
         "x86_64-osx",
-        "2197019879a5639fbd0ef407aa1fed424becec954a10c6488817ec7790dfce68",
+        "2a37f734742bd02139e9fec634b2356369c5b002233a33580c4f5c01c7529bfd",
     ),
     (
         "macos",
         "aarch64",
         "",
         "aarch64-osx",
-        "31a6fe5c3f3bd549560100da7c0c913b0f11f19120aa574a0f2295b5fbbaa75f",
+        "516046ec33d3fdddf0cfd86968fe3b76b8d3030f3677bd04de43fee9e96bbc8d",
     ),
 ];
 

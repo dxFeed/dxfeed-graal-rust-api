@@ -18,7 +18,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode, Stdio};
 use std::time::{Duration, Instant};
 
-const SDK_VERSION: &str = "3.15.0";
+const SDK_VERSION: &str = "3.16.0";
 
 fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();

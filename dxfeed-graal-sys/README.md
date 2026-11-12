@@ -1,7 +1,7 @@
 # dxfeed-graal-sys
 
 Raw FFI bindings to the C API (`dxfg_v4_` functions) of the
-[dxFeed Graal Native SDK](https://github.com/dxFeed/dxfeed-graal-native-sdk) 3.15.0. Use the safe API of the
+[dxFeed Graal Native SDK](https://github.com/dxFeed/dxfeed-graal-native-sdk) 3.16.0. Use the safe API of the
 [`dxfeed-graal`](https://crates.io/crates/dxfeed-graal) crate instead, unless you need the raw functions.
 
 The bindings are generated and committed, so the build needs neither libclang nor the SDK headers. The build script
