@@ -177,18 +177,18 @@ dependencies = [
 
 [[package]]
 name = "dxfeed-graal"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "dxfeed-graal-sys",
 ]
 
 [[package]]
 name = "dxfeed-graal-build"
-version = "0.2.1"
+version = "0.3.0"
 
 [[package]]
 name = "dxfeed-graal-samples"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "dxfeed-graal",
  "dxfeed-graal-build",
@@ -196,7 +196,7 @@ dependencies = [
 
 [[package]]
 name = "dxfeed-graal-sys"
-version = "0.2.1+sdk.3.15.0"
+version = "0.3.0+sdk.3.16.0"
 dependencies = [
  "sha2",
  "ureq",
@@ -205,7 +205,7 @@ dependencies = [
 
 [[package]]
 name = "dxfeed-graal-tools"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "dxfeed-graal",
  "dxfeed-graal-build",

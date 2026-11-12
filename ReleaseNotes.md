@@ -3,6 +3,22 @@
 Each release has a section `## v<version>`; the release workflow publishes that section as the text of the GitHub
 release (see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md)).
 
+## v0.3.0
+
+The release on dxFeed Graal Native SDK 3.16.0.
+
+* **SDK.** The crates use SDK 3.16.0; the version of `dxfeed-graal-sys` names it (`0.3.0+sdk.3.16.0`). Depend on
+  `dxfeed-graal = "0.3"`. The bindings change only in their doc comments.
+* **Logging.** A handler of `logging::set_handler` works with `logging::set_log_level` at `Trace` and `All`: it gets
+  the Java level `FINER` as `Trace` and `CONFIG` as `Debug`. Before, a call that logged at `FINER`, such as
+  `DXEndpoint::connect`, failed with a `NullPointerException` while a handler was set.
+* **Endpoint roles.** The SDK deprecates `dxfg_v4_DXEndpoint_getInstanceWithRole`, which creates a new endpoint on
+  every call, and drops it in SDK 4.0.0. `DXEndpoint::get_instance_with_role` does not call it: it returns the
+  default endpoint of the SDK for `Role::Feed` and keeps one endpoint per other role, created with
+  `dxfg_v4_DXEndpoint_createWithRole`.
+* **Properties files.** `dxfg_v4_DXEndpoint_Builder_withProperties` of the SDK now closes the file it reads.
+  `DXEndpointBuilder::with_properties` of `dxfeed-graal` sets the properties one by one and does not use it.
+
 ## v0.2.1
 
 The release on dxFeed Graal Native SDK 3.15.0; the API is the same as in 0.2.0.
