@@ -1,0 +1,60 @@
+//! What [`system::shutdown`](crate::system::shutdown) ends besides the SDK: the pending futures of promises.
+
+use std::panic::{self, AssertUnwindSafe};
+use std::sync::{Arc, Mutex, Weak};
+
+/// Something that [`system::shutdown`](crate::system::shutdown) ends.
+pub(crate) trait Terminate: Send + Sync {
+    /// Ends it; does nothing if it has ended.
+    fn terminate(&self);
+}
+
+/// The live entries, and whether shutdown has begun.
+struct Registry {
+    shut_down: bool,
+    entries: Vec<Weak<dyn Terminate>>,
+    /// The length at which the next insertion drops the dead entries first.
+    prune_at: usize,
+}
+
+const MIN_PRUNE_AT: usize = 64;
+
+static REGISTRY: Mutex<Registry> = Mutex::new(Registry {
+    shut_down: false,
+    entries: Vec::new(),
+    prune_at: MIN_PRUNE_AT,
+});
+
+/// Registers `entry` for shutdown, or ends it at once if shutdown has begun. The registry keeps it weakly.
+pub(crate) fn register<T: Terminate + 'static>(entry: &Arc<T>) {
+    {
+        let mut registry = crate::lock(&REGISTRY);
+        if !registry.shut_down {
+            if registry.entries.len() >= registry.prune_at {
+                registry.entries.retain(|entry| entry.strong_count() > 0);
+                registry.prune_at = (registry.entries.len() * 2).max(MIN_PRUNE_AT);
+            }
+            let entry: Weak<T> = Arc::downgrade(entry);
+            registry.entries.push(entry);
+            return;
+        }
+    }
+    entry.terminate();
+}
+
+/// Ends the registered entries and every one registered later. The entries are ended outside the lock; a panic of
+/// one, such as of the waker of a future, goes to [`ErrorManager`](crate::ErrorManager) and the others are still ended.
+pub(crate) fn terminate_all() {
+    let entries = {
+        let mut registry = crate::lock(&REGISTRY);
+        registry.shut_down = true;
+        std::mem::take(&mut registry.entries)
+    };
+    for entry in entries.iter().filter_map(Weak::upgrade) {
+        crate::error_manager::report_panic(
+            "System",
+            "a waker at shutdown",
+            panic::catch_unwind(AssertUnwindSafe(|| entry.terminate())),
+        );
+    }
+}

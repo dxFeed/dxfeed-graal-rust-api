@@ -17,6 +17,11 @@ use crate::feed::DXFeed;
 use crate::handle::Handle;
 use crate::isolate::{self, CallbackScope, Thread, call};
 
+mod future;
+
+use future::Signal;
+pub use future::{AnyOfFuture, PromiseFuture};
+
 /// What `dxfg_v4_Promise_awaitWithoutException` returns when the wait timed out (`DXFG_PROMISE_AWAIT_TIMED_OUT`).
 const AWAIT_TIMED_OUT: i32 = 1;
 
@@ -28,6 +33,9 @@ const AWAIT_TIMED_OUT: i32 = 1;
 /// [`is_done`](Self::is_done), [`is_cancelled`](Self::is_cancelled) and [`cancel`](Self::cancel) do not block, and
 /// [`when_done`](Self::when_done) runs a closure when it is done. [`Promises`] combines promises. Dropping a promise
 /// does not cancel the request, as in Java. The promise keeps the endpoint of its feed open while it lives.
+///
+/// In async code, `promise.await` gives the result without blocking a thread: the promise turns into a
+/// [`PromiseFuture`], which keeps [`cancel`](PromiseFuture::cancel) at hand.
 pub struct Promise<T: PromiseResult> {
     handle: Handle<sys::dxfg_v4_promise_t>,
     /// The feeds whose endpoints the promise keeps open: that of its request, or those of the promises of
@@ -466,7 +474,7 @@ impl Promises {
         }
         let state = Arc::new(AnyOfState {
             promises,
-            first: Mutex::new(None),
+            first: Mutex::new(First::default()),
             done: Condvar::new(),
         });
         for (index, promise) in state.promises.iter().enumerate() {
@@ -484,7 +492,8 @@ impl Promises {
 /// The first of several promises to be done, from [`Promises::any_of`]: it is done when one of them is, and its
 /// result is the index and the result of that one.
 ///
-/// It owns the promises. Dropping it does not cancel them, as in Java.
+/// It owns the promises. Dropping it does not cancel them, as in Java. In async code, `any_of.await` gives the index
+/// and the result through an [`AnyOfFuture`].
 pub struct AnyOf<T: PromiseResult> {
     state: Arc<AnyOfState<T>>,
 }
@@ -492,21 +501,31 @@ pub struct AnyOf<T: PromiseResult> {
 /// The state of an [`AnyOf`], which the handlers of its promises share.
 struct AnyOfState<T: PromiseResult> {
     promises: Vec<Promise<T>>,
-    /// The index of the first promise done.
-    first: Mutex<Option<usize>>,
+    first: Mutex<First>,
     done: Condvar,
 }
 
+/// The first promise done of an [`AnyOf`], and the signal of its future.
+#[derive(Default)]
+struct First {
+    /// The index of the first promise done.
+    index: Option<usize>,
+    /// The signal of the [`AnyOfFuture`]: the first promise done completes it after cancelling the others; a future
+    /// made later completes it at once.
+    signal: Option<Arc<Signal>>,
+}
+
 impl<T: PromiseResult> AnyOfState<T> {
-    /// Notes that the promise at `index` is done; the first one cancels the others.
+    /// Notes that the promise at `index` is done; the first one cancels the others, then completes the future.
     fn complete(&self, index: usize) {
-        {
+        let signal = {
             let mut first = crate::lock(&self.first);
-            if first.is_some() {
+            if first.index.is_some() {
                 return;
             }
-            *first = Some(index);
-        }
+            first.index = Some(index);
+            first.signal.take()
+        };
         self.done.notify_all();
         for (other, promise) in self.promises.iter().enumerate() {
             if other != index
@@ -515,6 +534,23 @@ impl<T: PromiseResult> AnyOfState<T> {
                 crate::ErrorManager::report_error("Promise", &error);
             }
         }
+        // A cancellation may run handlers on this thread: the future is woken after them.
+        if let Some(signal) = signal {
+            signal.finish(None);
+        }
+    }
+
+    /// Completes `signal` when a promise is done, at once if one is.
+    fn attach(&self, signal: Arc<Signal>) {
+        let done = {
+            let mut first = crate::lock(&self.first);
+            if first.index.is_none() {
+                first.signal = Some(signal);
+                return;
+            }
+            signal
+        };
+        done.finish(None);
     }
 }
 
@@ -526,7 +562,7 @@ impl<T: PromiseResult> AnyOf<T> {
 
     /// The index of the first promise done, `None` while all are pending.
     pub fn get_done_index(&self) -> Option<usize> {
-        *crate::lock(&self.state.first)
+        crate::lock(&self.state.first).index
     }
 
     /// Whether one of the promises is done (`Promise.isDone`).
@@ -561,7 +597,7 @@ impl<T: PromiseResult> AnyOf<T> {
         let (first, waited) = self
             .state
             .done
-            .wait_timeout_while(first, timeout, |first| first.is_none())
+            .wait_timeout_while(first, timeout, |first| first.index.is_none())
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         drop(first);
         if waited.timed_out() {
@@ -580,7 +616,7 @@ impl<T: PromiseResult> AnyOf<T> {
         drop(
             self.state
                 .done
-                .wait_while(first, |first| first.is_none())
+                .wait_while(first, |first| first.index.is_none())
                 .unwrap_or_else(std::sync::PoisonError::into_inner),
         );
         self.get_result()?.ok_or(Error::Timeout)

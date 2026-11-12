@@ -154,7 +154,8 @@ pub fn is_feature_supported(name: &str) -> Result<bool> {
 
 /// Shuts the SDK down (`dxfg_v4_system_shutdown`): stops the calls of all listeners, waiting for the running ones,
 /// then closes all endpoints and waits for their termination. It also closes all event queues, also those created
-/// later, which ends their polls. It cannot be undone.
+/// later, which ends their polls, and makes the pending futures of promises ready with [`Error::ShutDown`], also those
+/// created later; the promises themselves stay pending. It cannot be undone.
 ///
 /// It is an advanced function with no counterpart in the other dxFeed APIs, for an orderly stop of everything at once.
 /// An application usually closes its endpoints with
@@ -181,7 +182,10 @@ pub fn shutdown() -> Result<()> {
     isolate::set_shut_down();
     if isolate::isolate_created() {
         // SAFETY: no arguments besides the isolate thread.
-        call(|t| unsafe { sys::dxfg_v4_system_shutdown(t) })?;
+        let shut_down = call(|t| unsafe { sys::dxfg_v4_system_shutdown(t) });
+        // The SDK leaves pending promises pending: their futures end here, also when it failed.
+        crate::terminate::terminate_all();
+        shut_down?;
         // Listeners removed inside callbacks are released before this returns.
         listener::drain_release_thread();
     }
