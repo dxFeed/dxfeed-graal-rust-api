@@ -39,6 +39,16 @@ impl DXFeed {
         Arc::ptr_eq(&self.state, &other.state)
     }
 
+    /// Whether it is the feed of `endpoint`.
+    pub(crate) fn is_of(&self, endpoint: &EndpointState) -> bool {
+        std::ptr::eq(Arc::as_ptr(&self.state), endpoint)
+    }
+
+    /// Whether its endpoint has been closed through the crate.
+    pub(crate) fn is_closed(&self) -> bool {
+        self.state.is_closed()
+    }
+
     pub(crate) fn new(state: Arc<EndpointState>) -> Self {
         DXFeed { state }
     }

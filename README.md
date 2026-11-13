@@ -185,6 +185,8 @@ The cargo feature `experimental`, off by default, adds the wrappers of the exper
 filters (`feed_filter`), the ready signal of the event queues (`set_ready_signal`) and the event peek of the time
 series transaction models (`with_event_peek`), the connector listener and the connection errors (see
 [Message Connectors](#message-connectors)). They may change in a minor release of the SDK.
+The cargo feature `stream`, off by default, implements the `futures_core::Stream` trait for the event streams (see
+[Async](#async)).
 On docs.rs (`DOCS_RS` set) nothing is downloaded or linked.
 
 ### Running and Deployment
@@ -448,6 +450,28 @@ let quote = feed.get_last_event_promise::<Quote>("AAPL")?.await?;
   until it is cancelled.
 - `system::shutdown()` makes the pending futures ready with `Error::ShutDown`.
 
+A subscription turns into an `EventStream` of owned events, which owns the subscription. Make the stream before adding
+symbols: the SDK refuses a listener of a subscription that has symbols.
+
+```rust
+let mut quotes = feed.create_subscription::<Quote>()?.into_stream()?;
+quotes.subscription().add_symbols(["AAPL", "IBM"])?;
+while let Some(quote) = quotes.next().await {
+    println!("{quote}");
+}
+```
+
+- The listener of the stream copies each batch into a buffer and wakes the task once; it never waits for the consumer.
+  The buffer holds 65 536 events by default and drops the oldest ones when more come, counting them in `dropped()`;
+  `into_stream_with(StreamOptions::bounded(n))` changes the capacity, and `StreamOptions::unbounded()` keeps every event.
+- An untyped stream (`create_subscription_with_types`) yields `Event` and skips the events of types the crate does not
+  map, counting them in `skipped()`.
+- The stream yields `None` after its buffered events once it is closed with `close()`, its subscription is closed, the
+  endpoints of all the feeds of its subscription are closed, or `system::shutdown()` runs. Dropping the stream closes its
+  subscription.
+- With the cargo feature `stream`, `EventStream` implements `futures_core::Stream`, for the `StreamExt` of `futures` or
+  `tokio-stream`.
+
 ### Closing and Exit
 
 - `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
@@ -457,7 +481,8 @@ let quote = feed.get_last_event_promise::<Quote>("AAPL")?.await?;
 - The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
   longer called and destructors no longer call the SDK.
 - `system::shutdown()` is an advanced function with no counterpart in the other dxFeed APIs. It stops all listeners,
-  waiting for the running calls, closes all endpoints of the process and ends the pending futures. Afterwards
+  waiting for the running calls, closes all endpoints of the process and ends the pending futures and the event
+  streams. Afterwards
   nothing new can be created (`Error::ShutDown`), while existing values can still be closed and dropped. It cannot be
   called from a listener (`Error::InCallback`). While it runs, an endpoint on a `ManualExecutor` needs another thread
   calling `process_all_pending`.
@@ -735,7 +760,8 @@ the types.
   `when_done_async` and `complete`, `Promises::all_of` and `Promises::any_of`; promises created in Rust with
   `Promise::new` and `Promise::failed`, failed with `complete_exceptionally` and a `JavaExceptionClass`
 - [x] Async: `Promise` and `AnyOf` are awaited with `.await` on any executor (`IntoFuture`), with `cancel()` on the
-  future and `Error::ShutDown` on `system::shutdown()`
+  future and `Error::ShutDown` on `system::shutdown()`; subscriptions turn into streams of owned events
+  (`EventStream`, `futures_core::Stream` with the feature `stream`) with a bounded buffer that drops the oldest events
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,

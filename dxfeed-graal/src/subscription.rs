@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::ops::Deref;
 use std::ptr;
 use std::sync::atomic::{AtomicI64, AtomicU64, Ordering};
-use std::sync::{Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use dxfeed_graal_sys as sys;
 
@@ -48,8 +48,9 @@ pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, EventListener)>>,
     change_listeners: ChangeListeners,
-    /// The feeds it is attached to; dropped last, as they may close their endpoints.
-    feeds: Mutex<Vec<DXFeed>>,
+    /// The feeds it is attached to; dropped last, as they may close their endpoints. Its event stream looks at them
+    /// when an endpoint closes.
+    feeds: Arc<Mutex<Vec<DXFeed>>>,
     _item: PhantomData<fn() -> E>,
 }
 
@@ -84,9 +85,14 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
             handle,
             listeners: Mutex::new(Vec::new()),
             change_listeners: ChangeListeners::new("a change listener of this subscription"),
-            feeds: Mutex::new(feeds),
+            feeds: Arc::new(Mutex::new(feeds)),
             _item: PhantomData,
         }
+    }
+
+    /// The feeds it is attached to, shared with its event stream.
+    pub(crate) fn shared_feeds(&self) -> &Arc<Mutex<Vec<DXFeed>>> {
+        &self.feeds
     }
 
     pub(crate) fn as_ptr(&self) -> *mut sys::dxfg_v4_subscription_t {
@@ -264,11 +270,15 @@ impl<E: SubscriptionItem> DXFeedSubscription<E> {
     /// Closes the subscription: it detaches from the feeds and lets go of them, and its listeners get no new events,
     /// except possibly one batch already under way. Closing again does nothing.
     pub fn close(&self) -> Result<()> {
-        let mut feeds = crate::lock(&self.feeds);
-        let s = self.handle.as_ptr();
-        // SAFETY: the subscription is live.
-        call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })?;
-        feeds.clear();
+        let released = {
+            let mut feeds = crate::lock(&self.feeds);
+            let s = self.handle.as_ptr();
+            // SAFETY: the subscription is live.
+            call(|t| unsafe { sys::dxfg_v4_DXFeedSubscription_close(t, s) })?;
+            std::mem::take(&mut *feeds)
+        };
+        // The last feed of an endpoint closes it, which looks at the feeds of the event streams: not under the lock.
+        drop(released);
         Ok(())
     }
 
