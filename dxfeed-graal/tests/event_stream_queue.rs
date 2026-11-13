@@ -564,6 +564,8 @@ fn awaited_close_of_one_endpoint_keeps_the_stream() {
     assert!(terminated.recv_timeout(LONG).unwrap());
     let quote = next_quote(&mut stream);
     assert_eq!((quote.symbol.as_str(), quote.bid_price), ("S0", 2.0));
+    // The last poll of the drain may still run for a moment.
+    settle();
 
     publish_bids(&second, "S1", &[1.0, 2.0, 3.0]);
     if stream.buffered() != 0 {

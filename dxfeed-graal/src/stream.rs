@@ -108,6 +108,9 @@ impl Default for StreamOptions {
     }
 }
 
+/// The timeout of a poll that drains the event queue of a stream for an endpoint that awaits its termination.
+const DRAIN_POLL: Duration = Duration::from_millis(10);
+
 /// The limit of a poll of the event queue of a stream.
 const BATCH: usize = 1024;
 
@@ -551,19 +554,26 @@ impl<E: SubscriptionItem> Queue<E> {
             return;
         };
         loop {
-            let finishing = {
+            let (finishing, timeout) = {
                 let mut state = self.lock();
                 loop {
                     if state.closed {
                         return;
                     }
-                    if state.finishing || !state.draining.is_empty() || state.demand {
-                        break state.finishing;
+                    if state.finishing {
+                        break (true, Some(Duration::ZERO));
+                    }
+                    if state.demand {
+                        break (false, None);
+                    }
+                    // A wake-up goes to a poll that returns events, so the drain must not rely on one to end: it
+                    // polls with a short timeout and looks at the requests again.
+                    if !state.draining.is_empty() {
+                        break (false, Some(DRAIN_POLL));
                     }
                     state = self.requests.wait(state).unwrap_or_else(PoisonError::into_inner);
                 }
             };
-            let timeout = finishing.then_some(Duration::ZERO);
             match source.poll_items(timeout, BATCH) {
                 Ok(PollResult::Events((batch, skipped))) => {
                     let waker = self.push(batch, skipped, Some(source.get_dropped_events()));
@@ -580,7 +590,7 @@ impl<E: SubscriptionItem> Queue<E> {
                     let _ = source.close();
                     return wake(self.end_with(Some(source.get_dropped_events())));
                 }
-                // A wake-up: look at the requests again.
+                // A wake-up, or the timeout of a drain: look at the requests again.
                 Ok(PollResult::NoEvents) => {}
                 Ok(PollResult::Closed) | Err(Error::ShutDown) => {
                     return wake(self.end_with(Some(source.get_dropped_events())));
