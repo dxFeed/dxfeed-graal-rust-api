@@ -156,6 +156,15 @@
 //! The stream ends when it or its subscription is closed, when its endpoints are closed and on [`system::shutdown`].
 //! The cargo feature `stream` implements `futures_core::Stream` for it.
 //!
+//! The models stream whole items into a [`ModelStream`](model::ModelStream), built in place of their listener:
+//! `build_stream` of the builders of [`IndexedTxModel`](model::IndexedTxModel) and
+//! [`TimeSeriesTxModel`](model::TimeSeriesTxModel) yields a [`Transaction`](model::Transaction) per transaction or
+//! snapshot, and `build_stream` of [`MarketDepthModel`](model::MarketDepthModel) or
+//! [`OrderBookModel::into_stream`](model::OrderBookModel::into_stream) yields [`BookSides`](model::BookSides), the
+//! whole book after a change. A model stream never splits an item: when its consumer lags, a snapshot drops the
+//! buffered transactions of its source and a book replaces the buffered book, and otherwise the buffer grows. It ends
+//! as an event stream does.
+//!
 //! # Errors
 //!
 //! Every fallible call returns [`Result`]. A Java exception becomes [`Error::Java`] with its class, message, stack

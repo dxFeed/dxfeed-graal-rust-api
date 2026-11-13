@@ -9,15 +9,17 @@ use std::sync::{Arc, Condvar, Mutex};
 use std::thread::{self, JoinHandle, ThreadId};
 use std::time::{Duration, Instant};
 
-use super::{IndexedTxModel, IndexedTxModelBuilder};
-use crate::error::Result;
+use super::stream::Buffer;
+use super::{BookSides, IndexedTxModel, IndexedTxModelBuilder, ModelStream};
+use crate::error::{Error, Result};
 use crate::event::{EventFlags, EventKind, Events, IndexedEventSource, OrderEvent, Scope, Side};
 use crate::feed::DXFeed;
 use crate::isolate;
 use crate::symbol::Symbol;
 
-/// The listener of a market depth model: the buy side, then the sell side.
-type DepthClosure<O> = dyn FnMut(&[O], &[O]) + Send;
+/// The listener of a market depth model: the buy side, then the sell side, shared, so that a stream keeps them as they
+/// are.
+type DepthClosure<O> = dyn FnMut(&Arc<[O]>, &Arc<[O]>) + Send;
 
 /// A model of the order book of a symbol: the buy orders sorted from the best (highest) price down and the sell orders
 /// from the best (lowest) price up, at most [`get_depth_limit`](Self::get_depth_limit) of each (`MarketDepthModel`).
@@ -224,8 +226,8 @@ impl<O: OrderEvent + EventKind + Sync> MarketDepthModelBuilder<O> {
     /// best price, at most the depth limit of each. A panic in `f` is caught and goes to
     /// [`ErrorManager`](crate::ErrorManager).
     #[doc(alias = "withListener")]
-    pub fn with_listener(mut self, f: impl FnMut(&[O], &[O]) + Send + 'static) -> Self {
-        self.listener = Some(Box::new(f));
+    pub fn with_listener(mut self, mut f: impl FnMut(&[O], &[O]) + Send + 'static) -> Self {
+        self.listener = Some(Box::new(move |buy: &Arc<[O]>, sell: &Arc<[O]>| f(buy, sell)));
         self
     }
 
@@ -260,6 +262,39 @@ impl<O: OrderEvent + EventKind + Sync> MarketDepthModelBuilder<O> {
         }));
         let tx = builder.build()?;
         Ok(MarketDepthModel { shared, tx: Some(tx) })
+    }
+
+    /// Builds the model with a [`ModelStream`] of its books in place of a listener; the stream owns the model.
+    ///
+    /// Returns [`Error::InvalidArgument`] if a listener is set with [`with_listener`](Self::with_listener), and the
+    /// errors of [`build`](Self::build).
+    pub fn build_stream(mut self) -> Result<ModelStream<BookSides<O>, MarketDepthModel<O>>>
+    where
+        O: Send + 'static,
+    {
+        if self.listener.is_some() {
+            return Err(Error::InvalidArgument(
+                "a stream takes the place of the listener of the model; build it without with_listener".into(),
+            ));
+        }
+        let buffer = Buffer::of_books();
+        let sink = Arc::clone(&buffer);
+        self.listener = Some(Box::new(move |buy: &Arc<[O]>, sell: &Arc<[O]>| {
+            sink.push(BookSides {
+                buy: Arc::clone(buy),
+                sell: Arc::clone(sell),
+            });
+        }));
+        let model = self.build()?;
+        // The transactional model ends the stream when it is closed, and holds the feed.
+        let core = &model
+            .tx
+            .as_ref()
+            .expect("a built model has its transactional model")
+            .core;
+        core.close_hook.set(&buffer);
+        let feeds = Arc::clone(&core.feeds);
+        Ok(ModelStream::new(buffer, model, MarketDepthModel::close, &feeds))
     }
 }
 
