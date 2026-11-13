@@ -483,6 +483,29 @@ while let Some(quote) = quotes.next().await {
 - With the cargo feature `stream`, `EventStream` implements `futures_core::Stream`, for the `StreamExt` of `futures` or
   `tokio-stream`.
 
+The models stream whole items into a `ModelStream`, which owns the model and gives it with `model()` for changes. It is
+built in place of the listener: `build_stream()` of the builder, or `OrderBookModel::into_stream()`.
+
+```rust
+let mut orders = IndexedTxModel::<Order>::new_builder()
+    .with_feed(&feed)
+    .with_symbol("AAPL")
+    .with_sources([OrderSource::NTV])
+    .build_stream()?;
+while let Some(tx) = orders.next().await {
+    println!("{} from {}: {} orders", if tx.is_snapshot { "snapshot" } else { "update" }, tx.source, tx.events.len());
+}
+```
+
+- `IndexedTxModel` and `TimeSeriesTxModel` yield a `Transaction` per call of their listener: the source, the owned
+  events and whether they are a snapshot. A transaction or a snapshot is never split.
+- `MarketDepthModel` and `OrderBookModel` yield `BookSides`, the whole buy and sell sides after a change.
+- The listener never waits for the consumer. When the consumer lags, a snapshot drops the buffered transactions of its
+  source and a book replaces the buffered book, both counted in `superseded()`; otherwise the buffer of transactions
+  grows until the consumer takes them.
+- A model stream ends as an event stream does: on `close()` (which closes the model), when the model is closed, when the
+  endpoints of all its feeds are closed, or on `system::shutdown()`. Dropping it closes the model.
+
 ### Closing and Exit
 
 - `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
@@ -773,7 +796,9 @@ the types.
 - [x] Async: `Promise` and `AnyOf` are awaited with `.await` on any executor (`IntoFuture`), with `cancel()` on the
   future and `Error::ShutDown` on `system::shutdown()`; subscriptions turn into streams of owned events
   (`EventStream`, `futures_core::Stream` with the feature `stream`) with a bounded buffer that drops the oldest events,
-  or over the event queue of the subscription, with the conflation of the SDK while the consumer lags
+  or over the event queue of the subscription, with the conflation of the SDK while the consumer lags; the
+  transactional models, the market depth model and the order book model stream whole transactions and books
+  (`ModelStream`)
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,

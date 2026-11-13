@@ -2,11 +2,14 @@
 
 use std::fmt;
 use std::str::FromStr;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use dxfeed_graal_sys as sys;
 
+use super::stream::{Buffer, CloseHook};
+use super::{BookSides, ModelStream};
+use crate::ErrorManager;
 use crate::error::{Error, Result, c_string};
 use crate::event::{Order, Scope};
 use crate::executor::Executor;
@@ -162,10 +165,13 @@ impl FromStr for OrderBookModelFilter {
 pub struct OrderBookModel {
     handle: Handle<sys::dxfg_v4_order_book_model_t>,
     listeners: OrderBookListeners,
-    /// The feeds the model is attached to; dropped last, as they may close their endpoints.
-    feeds: Mutex<Vec<DXFeed>>,
+    /// The feeds the model is attached to; dropped last, as they may close their endpoints. Shared with the stream of
+    /// the model, if any, which watches their endpoints.
+    feeds: Arc<Mutex<Vec<DXFeed>>>,
     /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
     closed: AtomicBool,
+    /// Ends the stream of the model, if any, when the model is closed.
+    close_hook: CloseHook,
 }
 
 impl OrderBookModel {
@@ -178,9 +184,37 @@ impl OrderBookModel {
         Ok(OrderBookModel {
             handle,
             listeners: OrderBookListeners::new("a listener of this order book model"),
-            feeds: Mutex::new(Vec::new()),
+            feeds: Arc::new(Mutex::new(Vec::new())),
             closed: AtomicBool::new(false),
+            close_hook: CloseHook::default(),
         })
+    }
+
+    /// Turns the model into a [`ModelStream`] of its books: after each change, the stream gets both sides, as
+    /// [`get_buy_orders`](Self::get_buy_orders) and [`get_sell_orders`](Self::get_sell_orders) show them. The stream
+    /// owns the model; change it through [`ModelStream::model`].
+    ///
+    /// The first book comes with the first change after this call, so a model that shows orders already gets its book
+    /// with the next one; set the symbol and attach the model after it, or through the stream. The listeners added
+    /// before stay. An error in reading the sides goes to [`ErrorManager`](crate::ErrorManager) and skips that book.
+    pub fn into_stream(self) -> Result<ModelStream<BookSides<Order>, OrderBookModel>> {
+        let buffer = Buffer::of_books();
+        let (buy, sell) = (self.get_buy_orders()?, self.get_sell_orders()?);
+        let sink = Arc::clone(&buffer);
+        self.add_listener(move || match (buy.to_vec(), sell.to_vec()) {
+            (Ok(buy), Ok(sell)) => sink.push(BookSides {
+                buy: buy.into(),
+                sell: sell.into(),
+            }),
+            (Err(error), _) | (_, Err(error)) => ErrorManager::report_error("OrderBookModel", &error),
+        })?;
+        self.close_hook.set(&buffer);
+        // A model closed before has no listener and did not fire the hook; a close from now on fires it.
+        if self.closed.load(Ordering::Acquire) {
+            self.close_hook.fire();
+        }
+        let feeds = Arc::clone(&self.feeds);
+        Ok(ModelStream::new(buffer, self, OrderBookModel::close, &feeds))
     }
 
     /// Attaches the model to `feed`, which then delivers the orders of its symbol (`attach`). The model keeps the
@@ -206,12 +240,16 @@ impl OrderBookModel {
     /// Detaches the model from all feeds for good, lets go of them and removes its listeners; closing it again does
     /// nothing (`close`). Dropping the model closes it too.
     pub fn close(&self) -> Result<()> {
-        let mut feeds = crate::lock(&self.feeds);
-        self.close_model()?;
-        self.closed.store(true, Ordering::Release);
-        feeds.clear();
+        let feeds = {
+            let mut feeds = crate::lock(&self.feeds);
+            self.close_model()?;
+            self.closed.store(true, Ordering::Release);
+            std::mem::take(&mut *feeds)
+        };
+        // The last feed of an endpoint closes it, which looks at the feeds of the streams: not under the lock.
         drop(feeds);
         self.remove_listeners();
+        self.close_hook.fire();
         Ok(())
     }
 

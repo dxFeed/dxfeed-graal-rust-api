@@ -24,6 +24,9 @@
 //! # Ok(())
 //! # }
 //! ```
+//!
+//! For async code, `build_stream` builds a model with a [`ModelStream`] of its whole transactions or books in place
+//! of the listener; [`OrderBookModel::into_stream`] turns an order book model into one.
 
 use std::fmt;
 use std::marker::PhantomData;
@@ -32,7 +35,7 @@ use std::sync::{Arc, Mutex};
 
 use dxfeed_graal_sys as sys;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 #[cfg(feature = "experimental")]
 use crate::event::EventRef;
 use crate::event::{EventKind, Events, IndexedEvent, IndexedEventSource, TimeSeriesEvent};
@@ -53,12 +56,16 @@ mod indexed_event;
 mod list;
 mod market_depth;
 mod order_book;
+mod stream;
 
 pub use event_model::{IndexedEventModel, TimeSeriesEventModel};
 pub use indexed_event::{IndexedEventTxModel, IndexedEventTxModelBuilder};
 pub use list::ObservableListModel;
 pub use market_depth::{MarketDepthModel, MarketDepthModelBuilder};
 pub use order_book::{OrderBookModel, OrderBookModelFilter};
+pub use stream::{BookSides, ModelStream, Transaction};
+
+use stream::{Buffer, CloseHook};
 
 type Thread = *mut sys::graal_isolatethread_t;
 /// A setter of an SDK builder: it writes the builder to use next to its out-pointer.
@@ -221,8 +228,9 @@ impl Settings {
                 handle,
                 listener: Mutex::new(listener),
                 _executor: self.executor,
-                feeds: Mutex::new(self.feed.into_iter().collect()),
+                feeds: Arc::new(Mutex::new(self.feed.into_iter().collect())),
                 closed: AtomicBool::new(false),
+                close_hook: CloseHook::default(),
             }),
             Err(e) => {
                 if let Some(listener) = listener {
@@ -232,6 +240,41 @@ impl Settings {
             }
         }
     }
+}
+
+/// Sets the listener of `settings` to fill a buffer of transactions of events of type `E`, for a stream of the model;
+/// fails if a listener is set already.
+fn stream_listener<E: EventKind + Send + 'static>(settings: &mut Settings) -> Result<Arc<Buffer<Transaction<E>>>> {
+    if settings.listener.is_some() {
+        return Err(Error::InvalidArgument(
+            "a stream takes the place of the listener of the model; build it without with_listener".into(),
+        ));
+    }
+    let buffer = Buffer::of_transactions();
+    let sink = Arc::clone(&buffer);
+    settings.listener = Some(Box::new(move |source, events: Events<'_>, is_snapshot| {
+        let events = events.typed::<E>().filter_map(crate::event::owned::<E>).collect();
+        sink.push(Transaction {
+            source,
+            events,
+            is_snapshot,
+        });
+    }));
+    Ok(buffer)
+}
+
+/// The stream of transactions of a built model: the close of `core` ends `buffer`, which watches the endpoints of the
+/// feeds of the model.
+fn tx_stream<K: Kind, E: Send + 'static, M>(
+    buffer: Arc<Buffer<Transaction<E>>>,
+    core: impl Fn(&M) -> &Core<K>,
+    model: M,
+    close: fn(&M) -> Result<()>,
+) -> ModelStream<Transaction<E>, M> {
+    let core = core(&model);
+    core.close_hook.set(&buffer);
+    let feeds = Arc::clone(&core.feeds);
+    ModelStream::new(buffer, model, close, &feeds)
 }
 
 /// Applies a setter of an SDK builder and returns the builder to use next; the previous handle is released.
@@ -247,10 +290,13 @@ struct Core<K: Kind> {
     /// In a mutex, so that the model is `Sync`; only `Drop` takes it.
     listener: Mutex<Option<TxListener>>,
     _executor: Option<Arc<Handle<sys::dxfg_v4_executor_t>>>,
-    /// The feeds the model is attached to; dropped last, as they may close their endpoints.
-    feeds: Mutex<Vec<DXFeed>>,
+    /// The feeds the model is attached to; dropped last, as they may close their endpoints. Shared with the stream of
+    /// the model, if any, which watches their endpoints.
+    feeds: Arc<Mutex<Vec<DXFeed>>>,
     /// Set by `close` under the lock of `feeds`, so that a later `attach` does not keep its feed.
     closed: AtomicBool,
+    /// Ends the stream of the model, if any, when the model is closed.
+    close_hook: CloseHook,
 }
 
 impl<K: Kind> Core<K> {
@@ -287,10 +333,15 @@ impl<K: Kind> Core<K> {
 
     /// Closes the model and lets go of its feeds.
     fn close(&self) -> Result<()> {
-        let mut feeds = crate::lock(&self.feeds);
-        self.close_model()?;
-        self.closed.store(true, Ordering::Release);
-        feeds.clear();
+        let feeds = {
+            let mut feeds = crate::lock(&self.feeds);
+            self.close_model()?;
+            self.closed.store(true, Ordering::Release);
+            std::mem::take(&mut *feeds)
+        };
+        // The last feed of an endpoint closes it, which looks at the feeds of the streams: not under the lock.
+        drop(feeds);
+        self.close_hook.fire();
         Ok(())
     }
 
@@ -563,6 +614,21 @@ impl<E: IndexedEvent + EventKind> IndexedTxModelBuilder<E> {
             _event: PhantomData,
         })
     }
+
+    /// Builds the model with a [`ModelStream`] of its transactions in place of a listener; the stream owns the model.
+    ///
+    /// Returns [`Error::InvalidArgument`] if a listener is set with [`with_listener`](Self::with_listener), and the
+    /// errors of [`build`](Self::build).
+    pub fn build_stream(mut self) -> Result<ModelStream<Transaction<E>, IndexedTxModel<E>>> {
+        let buffer = stream_listener::<E>(&mut self.settings)?;
+        let model = self.build()?;
+        Ok(tx_stream(
+            buffer,
+            |model: &IndexedTxModel<E>| &model.core,
+            model,
+            IndexedTxModel::close,
+        ))
+    }
 }
 
 /// The order of the events of a snapshot of a [`TimeSeriesTxModel`] (`TimeSeriesTxModel.SortOrder`).
@@ -805,5 +871,20 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
             _event_peek: event_peek,
             _event: PhantomData,
         })
+    }
+
+    /// Builds the model with a [`ModelStream`] of its transactions in place of a listener; the stream owns the model.
+    ///
+    /// Returns [`Error::InvalidArgument`] if a listener is set with [`with_listener`](Self::with_listener), and the
+    /// errors of [`build`](Self::build).
+    pub fn build_stream(mut self) -> Result<ModelStream<Transaction<E>, TimeSeriesTxModel<E>>> {
+        let buffer = stream_listener::<E>(&mut self.settings)?;
+        let model = self.build()?;
+        Ok(tx_stream(
+            buffer,
+            |model: &TimeSeriesTxModel<E>| &model.core,
+            model,
+            TimeSeriesTxModel::close,
+        ))
     }
 }

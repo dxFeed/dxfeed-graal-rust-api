@@ -477,13 +477,7 @@ impl<E: SubscriptionItem> Queue<E> {
     /// Whether the subscription is attached to a feed of `endpoint` (to any feed when it is `None`), and whether the
     /// endpoints of all its feeds are closed then.
     fn feeds_of(&self, endpoint: Option<&EndpointState>) -> (bool, bool) {
-        let Some(feeds) = self.feeds.upgrade() else {
-            return (false, false);
-        };
-        let feeds = crate::lock(&feeds);
-        let attached =
-            !feeds.is_empty() && endpoint.is_none_or(|endpoint| feeds.iter().any(|feed| feed.is_of(endpoint)));
-        (attached, attached && feeds.iter().all(DXFeed::is_closed))
+        feeds_of(&self.feeds, endpoint)
     }
 
     /// Ends the stream if the endpoints of all the feeds of the subscription are closed and, when `endpoint` is given,
@@ -603,6 +597,17 @@ impl<E: SubscriptionItem> Queue<E> {
             }
         }
     }
+}
+
+/// Whether `feeds` hold a feed of `endpoint` (any feed when it is `None`), and whether the endpoints of all of them are
+/// closed then; `(false, false)` once the owner of the feeds is gone.
+pub(crate) fn feeds_of(feeds: &Weak<Mutex<Vec<DXFeed>>>, endpoint: Option<&EndpointState>) -> (bool, bool) {
+    let Some(feeds) = feeds.upgrade() else {
+        return (false, false);
+    };
+    let feeds = crate::lock(&feeds);
+    let attached = !feeds.is_empty() && endpoint.is_none_or(|endpoint| feeds.iter().any(|feed| feed.is_of(endpoint)));
+    (attached, attached && feeds.iter().all(DXFeed::is_closed))
 }
 
 /// The address of `endpoint`, which tells it apart from the other endpoints while it is alive.

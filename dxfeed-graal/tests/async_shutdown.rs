@@ -9,9 +9,23 @@ use std::task::{Context, Poll, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::event::Quote;
+use dxfeed_graal::event::{Order, OrderSource, Quote, Side};
+use dxfeed_graal::model::{IndexedTxModel, MarketDepthModel};
 use dxfeed_graal::{Error, ErrorManager, EventStream, Promise, Promises, StreamOptions, system};
 use support::{CountingWaker, Hub, block_on_with, is_child, poll_with, quote, quote_with_bid, run_child};
+
+/// A buy order of the NTV book of `TX`, a transaction of its own.
+fn order(index: i64) -> Order {
+    let mut order = Order {
+        index,
+        price: 100.0,
+        size: 1.0,
+        ..Order::new("TX")
+    };
+    order.set_source(OrderSource::NTV).unwrap();
+    order.set_order_side(Side::Buy);
+    order
+}
 
 /// A stream of quotes over the event queue of its subscription.
 fn queue_stream(hub: &Hub) -> EventStream<Quote> {
@@ -82,6 +96,29 @@ fn child_shutdown_ends_pending_futures() {
     }
     assert_eq!(queued.buffered(), 1);
     assert!(poll_stream(&mut queue_waiting, &stream_waker).is_pending());
+    // A model stream with a buffered transaction, and a book stream waiting for a book.
+    let mut orders = IndexedTxModel::<Order>::new_builder()
+        .with_feed(&hub.feed)
+        .with_symbol("TX")
+        .build_stream()
+        .unwrap();
+    let mut depth = MarketDepthModel::<Order>::new_builder()
+        .with_feed(&hub.feed)
+        .with_symbol("DEPTH")
+        .build_stream()
+        .unwrap();
+    hub.publisher.publish_events(&[order(1).into()]).unwrap();
+    let first = block_on_with(orders.next(), &stream_waker, Duration::from_secs(10));
+    assert!(matches!(first, Some(Some(_))), "{first:?}");
+    hub.publisher.publish_events(&[order(2).into()]).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while orders.buffered() == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(orders.buffered(), 1);
+    let depth_waker = CountingWaker::new();
+    let polled = depth.poll_next(&mut Context::from_waker(&Waker::from(Arc::clone(&depth_waker))));
+    assert!(polled.is_pending());
     ErrorManager::clear_errors();
     // Futures made on another thread while shutdown runs.
     let racing: Vec<Promise<()>> = (0..200).map(|_| Promise::new().unwrap()).collect();
@@ -102,9 +139,18 @@ fn child_shutdown_ends_pending_futures() {
         block_on_with(queue_waiting.next(), &stream_waker, long),
         Some(None)
     ));
+    // The model streams end, the buffered transaction first.
+    let mut cx = Context::from_waker(Waker::noop());
+    assert!(matches!(orders.poll_next(&mut cx), Poll::Ready(Some(_))));
+    assert!(matches!(orders.poll_next(&mut cx), Poll::Ready(None)));
+    assert_eq!(depth_waker.total(), 1);
+    assert!(matches!(depth.poll_next(&mut cx), Poll::Ready(None)));
+    drop((orders, depth));
     let errors = ErrorManager::get_errors();
     assert!(
-        errors.iter().all(|error| error.component != "DXFeedSubscription"),
+        errors
+            .iter()
+            .all(|error| !["DXFeedSubscription", "TxModel", "MarketDepthModel"].contains(&error.component.as_str())),
         "{errors:?}"
     );
     assert!(matches!(
