@@ -862,7 +862,8 @@ impl DXEndpoint {
     /// queue first, and never call it on the polling thread (see
     /// [`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor)). An
     /// [`EventStream`](crate::EventStream) over an event queue ([`StreamOptions::event_queue`](crate::StreamOptions::event_queue))
-    /// needs no such care: it takes the events that its queue holds into its buffer.
+    /// and a [`TaggedEventStream`](crate::TaggedEventStream) need no such care: they take the events that their queue
+    /// holds into their buffer, and the latter runs the work of the executor of its queue meanwhile.
     #[doc(alias = "closeAndAwaitTermination")]
     pub fn close_and_await_termination(&self) -> Result<()> {
         if isolate::in_callback() {

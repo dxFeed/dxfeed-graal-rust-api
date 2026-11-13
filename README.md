@@ -483,6 +483,34 @@ while let Some(quote) = quotes.next().await {
 - With the cargo feature `stream`, `EventStream` implements `futures_core::Stream`, for the `StreamExt` of `futures` or
   `tokio-stream`.
 
+A `SharedEventQueue` turns into a `TaggedEventStream` of the events of all its subscriptions, each with the tag it was
+attached with:
+
+```rust
+let mut events = SharedEventQueue::new()?.into_stream()?;
+let quotes = feed.create_subscription::<Quote>()?;
+let trades = feed.create_subscription::<Trade>()?;
+events.queue().attach(&quotes, 1)?;
+events.queue().attach(&trades, 2)?;
+quotes.add_symbols(["AAPL"])?;
+trades.add_symbols(["AAPL"])?;
+while let Some((tag, event)) = events.next().await {
+    println!("{tag}: {event}");
+}
+```
+
+- The stream owns the queue but not the subscriptions: keep them, as dropping one closes it.
+- It polls the queue as an event-queue stream does: on a thread of the stream, only while a task waits for events, so
+  the SDK conflates the lasting events meanwhile. The work of the executor of the queue (`queue().get_executor()`), such
+  as the listeners of the models built with it, runs in those polls; it waits while no task waits for events. So a call
+  that waits for that work, such as `detach_subscription_and_clear()` of a subscription with that executor, never
+  returns in the task that consumes the stream.
+- It skips the events of types the crate does not map (`skipped()`) and counts the events that the SDK lost
+  (`dropped()`). `close_and_await_termination()` of an endpoint does not wait for the consumer.
+- It yields `None` after its buffered events once it is closed with `close()`, its queue is closed, or
+  `system::shutdown()` runs; closing an endpoint does not end it. Dropping it closes the queue. With the feature
+  `stream` it implements `futures_core::Stream`.
+
 The models stream whole items into a `ModelStream`, which owns the model and gives it with `model()` for changes. It is
 built in place of the listener: `build_stream()` of the builder, or `OrderBookModel::into_stream()`.
 
@@ -796,9 +824,9 @@ the types.
 - [x] Async: `Promise` and `AnyOf` are awaited with `.await` on any executor (`IntoFuture`), with `cancel()` on the
   future and `Error::ShutDown` on `system::shutdown()`; subscriptions turn into streams of owned events
   (`EventStream`, `futures_core::Stream` with the feature `stream`) with a bounded buffer that drops the oldest events,
-  or over the event queue of the subscription, with the conflation of the SDK while the consumer lags; the
-  transactional models, the market depth model and the order book model stream whole transactions and books
-  (`ModelStream`)
+  or over the event queue of the subscription, with the conflation of the SDK while the consumer lags; a
+  `SharedEventQueue` turns into a stream of events with tags (`TaggedEventStream`); the transactional models, the
+  market depth model and the order book model stream whole transactions and books (`ModelStream`)
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,

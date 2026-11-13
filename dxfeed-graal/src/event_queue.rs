@@ -25,8 +25,10 @@
 //!   polling thread.
 //!
 //! For async code, [`StreamOptions::event_queue`](crate::StreamOptions::event_queue) makes an
-//! [`EventStream`](crate::EventStream) over the queue of its subscription, polled on a thread of the stream only while a
-//! task waits for events.
+//! [`EventStream`](crate::EventStream) over the queue of its subscription, and [`SharedEventQueue::into_stream`] a
+//! [`TaggedEventStream`](crate::TaggedEventStream) over a shared queue; each is polled on a thread of the stream only
+//! while a task waits for events, and while an endpoint awaits its termination, so that the queue of a stream needs no
+//! close before `close_and_await_termination`.
 //!
 //! With the cargo feature `experimental`, a queue also has a ready signal (`set_ready_signal`): an OS object that the
 //! SDK makes ready when the queue has work, so that an event loop polls with the timeout zero on its own thread.
@@ -58,11 +60,12 @@ use std::time::Duration;
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
-use crate::event::sdk_event::{take_event_list, take_owned_list, take_tagged_event_list};
+use crate::event::sdk_event::{take_event_list, take_owned_list, take_owned_tagged_list, take_tagged_event_list};
 use crate::event::{Event, SubscriptionItem};
 use crate::executor::Executor;
 use crate::handle::Handle;
 use crate::isolate::{self, call, check, with_thread};
+use crate::stream::Source;
 use crate::subscription::DXFeedSubscription;
 
 /// The result of a poll.
@@ -140,11 +143,12 @@ impl<E: SubscriptionItem> EventQueue<E> {
     pub unsafe fn set_ready_signal(&self, signal: ReadySignal) -> Result<()> {
         set_ready_signal(&self.handle, signal)
     }
+}
 
-    /// Polls as [`poll`](Self::poll) does, but copies the events as an [`EventStream`](crate::EventStream) does: an
-    /// event that the crate does not map is skipped and counted instead of failing the poll. The events and the
-    /// skipped count come as one batch, which may hold no events when all were skipped.
-    pub(crate) fn poll_items(&self, timeout: Option<Duration>, limit: usize) -> Result<PollResult<(Vec<E>, u64)>> {
+impl<E: SubscriptionItem> Source for EventQueue<E> {
+    type Item = E;
+
+    fn poll_items(&self, timeout: Option<Duration>, limit: usize) -> Result<PollResult<(Vec<E>, u64)>> {
         let q = self.handle.as_ptr();
         let (timeout, limit) = (timeout_millis(timeout), limit_of(limit));
         let mut list = ptr::null_mut();
@@ -156,6 +160,18 @@ impl<E: SubscriptionItem> EventQueue<E> {
             Polled::NoEvents => PollResult::NoEvents,
             Polled::Closed => PollResult::Closed,
         })
+    }
+
+    fn wake_up(&self) -> Result<()> {
+        wake_up(&self.handle)
+    }
+
+    fn close(&self) -> Result<()> {
+        close(&self.handle)
+    }
+
+    fn get_dropped_events(&self) -> Result<i64> {
+        dropped_events(&self.handle)
     }
 }
 
@@ -296,6 +312,36 @@ impl SharedEventQueue {
     #[doc(alias = "setReadySignal")]
     pub unsafe fn set_ready_signal(&self, signal: ReadySignal) -> Result<()> {
         set_ready_signal(&self.handle, signal)
+    }
+}
+
+impl Source for SharedEventQueue {
+    type Item = (i64, Event);
+
+    fn poll_items(&self, timeout: Option<Duration>, limit: usize) -> Result<PollResult<(Vec<(i64, Event)>, u64)>> {
+        let q = self.handle.as_ptr();
+        let (timeout, limit) = (timeout_millis(timeout), limit_of(limit));
+        let mut list = ptr::null_mut();
+        // SAFETY: the queue is live; the out-pointer is valid for writes.
+        let result = poll(|t| unsafe { sys::dxfg_v4_EventQueue_pollTagged(t, q, timeout, limit, &mut list) })?;
+        Ok(match result {
+            // SAFETY: on events the SDK returned a list that is ours.
+            Polled::Events => PollResult::Events(unsafe { take_owned_tagged_list(list) }),
+            Polled::NoEvents => PollResult::NoEvents,
+            Polled::Closed => PollResult::Closed,
+        })
+    }
+
+    fn wake_up(&self) -> Result<()> {
+        wake_up(&self.handle)
+    }
+
+    fn close(&self) -> Result<()> {
+        close(&self.handle)
+    }
+
+    fn get_dropped_events(&self) -> Result<i64> {
+        dropped_events(&self.handle)
     }
 }
 
