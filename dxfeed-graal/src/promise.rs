@@ -36,6 +36,58 @@ const AWAIT_TIMED_OUT: i32 = 1;
 ///
 /// In async code, `promise.await` gives the result without blocking a thread: the promise turns into a
 /// [`PromiseFuture`], which keeps [`cancel`](PromiseFuture::cancel) at hand.
+///
+/// # Examples
+///
+/// Wait for the last quote of a symbol, at most 5 seconds:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use std::time::Duration;
+///
+/// use dxfeed_graal::{DXFeed, Error};
+/// use dxfeed_graal::event::Quote;
+///
+/// match DXFeed::get_instance()?.get_last_event_promise::<Quote>("AAPL")?.wait(Duration::from_secs(5)) {
+///     Ok(quote) => println!("{quote}"),
+///     Err(Error::Timeout) => println!("no quote in 5 seconds"),
+///     Err(e) => return Err(e),
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Or get it in a closure, without blocking the thread:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::Quote;
+///
+/// let promise = DXFeed::get_instance()?.get_last_event_promise::<Quote>("AAPL")?;
+/// promise.when_done(|promise| match promise.get_result() {
+///     Ok(Some(quote)) => println!("{quote}"),
+///     Ok(None) => {}
+///     Err(e) => eprintln!("no quote: {e}"),
+/// })?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// Or await it in async code, on any runtime:
+///
+/// ```no_run
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::Quote;
+///
+/// async fn print_last_quote(feed: &DXFeed) -> dxfeed_graal::Result<()> {
+///     let quote = feed.get_last_event_promise::<Quote>("AAPL")?.await?;
+///     println!("{quote}");
+///     Ok(())
+/// }
+/// ```
+///
+/// [`Promises::all_of`] waits for the promises of several symbols together.
 pub struct Promise<T: PromiseResult> {
     handle: Handle<sys::dxfg_v4_promise_t>,
     /// The feeds whose endpoints the promise keeps open: that of its request, or those of the promises of
@@ -139,6 +191,25 @@ impl<T: PromiseResult> Promise<T> {
     /// [`complete_exceptionally`](Self::complete_exceptionally) or [`cancel`](Self::cancel); the handlers that
     /// [`when_done`](Self::when_done) adds before then run on the thread that does so, before that call returns. The
     /// promise keeps no endpoint open.
+    ///
+    /// # Examples
+    ///
+    /// An application promise of a quote; completing it runs the handlers added before:
+    ///
+    /// ```
+    /// # fn main() -> dxfeed_graal::Result<()> {
+    /// use std::time::Duration;
+    ///
+    /// use dxfeed_graal::Promise;
+    /// use dxfeed_graal::event::Quote;
+    ///
+    /// let promise = Promise::<Quote>::new()?;
+    /// promise.when_done(|promise| println!("done: {}", promise.has_result().unwrap_or(false)))?;
+    /// promise.complete(&Quote::new("AAPL"))?;
+    /// assert_eq!(promise.wait(Duration::ZERO)?.symbol, "AAPL");
+    /// # Ok(())
+    /// # }
+    /// ```
     pub fn new() -> Result<Self> {
         // SAFETY: the out-pointer is valid for writes.
         let handle = Handle::create(|t, out| unsafe { sys::dxfg_v4_Promise_new(t, out) })?;
@@ -421,6 +492,55 @@ unsafe extern "C" fn when_done_trampoline<T: PromiseResult>(
 }
 
 /// The combinations of promises (`Promises`).
+///
+/// # Examples
+///
+/// The last quotes of several symbols, waited for together; the timeout cancels them all, so a symbol without a quote
+/// by then shows as cancelled:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use std::time::Duration;
+///
+/// use dxfeed_graal::event::Quote;
+/// use dxfeed_graal::{DXFeed, Error, Promises};
+///
+/// let feed = DXFeed::get_instance()?;
+/// let symbols = ["AAPL", "IBM", "MSFT"];
+/// let promises = symbols
+///     .iter()
+///     .map(|symbol| feed.get_last_event_promise::<Quote>(*symbol))
+///     .collect::<dxfeed_graal::Result<Vec<_>>>()?;
+/// match Promises::all_of(&promises)?.wait(Duration::from_secs(10)) {
+///     Ok(()) | Err(Error::Timeout) => {}
+///     Err(e) => return Err(e),
+/// }
+/// for (symbol, promise) in symbols.iter().zip(&promises) {
+///     match promise.get_result() {
+///         Ok(quote) => println!("{symbol}: {quote:?}"),
+///         Err(e) => println!("{symbol}: {e}"),
+///     }
+/// }
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The first of two requests to complete; the other is cancelled:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use std::time::Duration;
+///
+/// use dxfeed_graal::event::Quote;
+/// use dxfeed_graal::{DXFeed, Promises};
+///
+/// let feed = DXFeed::get_instance()?;
+/// let promises = vec![feed.get_last_event_promise::<Quote>("AAPL")?, feed.get_last_event_promise::<Quote>("IBM")?];
+/// let (index, quote) = Promises::any_of(promises)?.wait(Duration::from_secs(10))?;
+/// println!("#{index} came first: {quote}");
+/// # Ok(())
+/// # }
+/// ```
 #[derive(Debug)]
 pub enum Promises {}
 

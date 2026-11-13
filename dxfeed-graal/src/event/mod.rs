@@ -3,6 +3,74 @@
 //! Every event type has an owned struct, such as [`Quote`], with pub fields and `new(symbol)`, and a view, such as
 //! [`QuoteRef`], that a listener receives: it reads the SDK's memory in place and is valid during the call only. The
 //! views have an accessor per field; both print the text of Java's `toString`.
+//!
+//! # Examples
+//!
+//! A listener reads the fields of the views in place and copies what it keeps with `to_owned()`:
+//!
+//! ```no_run
+//! # fn main() -> dxfeed_graal::Result<()> {
+//! use std::sync::{Arc, Mutex};
+//!
+//! use dxfeed_graal::DXFeed;
+//! use dxfeed_graal::event::Quote;
+//!
+//! let last = Arc::new(Mutex::new(None::<Quote>));
+//! let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
+//! let kept = Arc::clone(&last);
+//! subscription.add_event_listener(move |quotes| {
+//!     for quote in quotes {
+//!         println!("{}: bid {} ask {}", quote.symbol(), quote.bid_price(), quote.ask_price());
+//!         *kept.lock().unwrap() = Some(quote.to_owned());
+//!     }
+//! })?;
+//! subscription.add_symbols(["AAPL"])?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! An owned event is built with `new(symbol)` and its pub fields, for example to publish it with
+//! [`DXPublisher`](crate::DXPublisher):
+//!
+//! ```
+//! use dxfeed_graal::event::Quote;
+//!
+//! let mut quote = Quote::new("AAPL");
+//! quote.bid_price = 187.5;
+//! quote.ask_price = 187.6;
+//! assert_eq!(quote.symbol, "AAPL");
+//! ```
+//!
+//! The indexed events, such as orders, carry [`EventFlags`] that mark the snapshots and the transactions of their
+//! source. The models of [`model`](crate::model) apply them; a plain subscription sees them as they come:
+//!
+//! ```no_run
+//! # fn main() -> dxfeed_graal::Result<()> {
+//! use dxfeed_graal::DXFeed;
+//! use dxfeed_graal::event::{EventFlags, Order};
+//!
+//! let subscription = DXFeed::get_instance()?.create_subscription::<Order>()?;
+//! subscription.add_event_listener(|orders| {
+//!     for order in orders {
+//!         let flags = order.event_flags();
+//!         if flags.contains(EventFlags::SNAPSHOT_BEGIN) {
+//!             println!("a snapshot of {} from {} begins", order.symbol(), order.source());
+//!         }
+//!         if flags.contains(EventFlags::REMOVE_EVENT) {
+//!             println!("order {} is removed", order.index());
+//!         } else {
+//!             println!("{} {} @ {}", order.order_side(), order.size(), order.price());
+//!         }
+//!     }
+//! })?;
+//! subscription.add_symbols(["AAPL"])?;
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! A subscription to several types gives an [`EventRef`] to match; see
+//! [`DXFeedSubscription`](crate::DXFeedSubscription). The examples of [`Quote`], [`Trade`], [`TimeAndSale`],
+//! [`Order`], [`Candle`] and [`Series`] show their main fields; the other types are read the same way.
 
 #[macro_use]
 mod table;

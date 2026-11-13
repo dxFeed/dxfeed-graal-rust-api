@@ -22,15 +22,53 @@ use crate::schedule::SessionFilter;
 /// writes it, such as `=d` for `=1d`, and an attribute given to [`value_of_with`](Self::value_of_with) goes before the
 /// first one whose key is greater, or goes away with its default value. Two symbols are equal when their texts are.
 ///
-/// ```no_run
+/// # Examples
+///
+/// A symbol from its text, or from a base symbol and attributes:
+///
+/// ```
 /// # fn main() -> dxfeed_graal::Result<()> {
-/// use dxfeed_graal::event::{CandlePeriod, CandleSymbol};
+/// use dxfeed_graal::event::{
+///     CandleAttribute, CandleExchange, CandlePeriod, CandlePrice, CandleSession, CandleSymbol, CandleType,
+/// };
 ///
 /// assert_eq!(CandleSymbol::value_of("AAPL{=1d}")?.as_str(), "AAPL{=d}");
 /// assert_eq!(CandleSymbol::value_of_with("AAPL", [CandlePeriod::DAY])?.as_str(), "AAPL{=d}");
+///
+/// // The 5-minute candles of the bid prices of AAPL on the exchange Q, in the regular trading hours.
+/// let symbol = CandleSymbol::value_of_with(
+///     "AAPL",
+///     [
+///         CandleAttribute::Exchange(CandleExchange::value_of('Q')),
+///         CandleAttribute::Period(CandlePeriod::value_of(5.0, CandleType::Minute)),
+///         CandleAttribute::Price(CandlePrice::Bid),
+///         CandleAttribute::Session(CandleSession::Regular),
+///     ],
+/// )?;
+/// assert_eq!(symbol.as_str(), "AAPL&Q{=5m,price=bid,tho=true}");
 /// # Ok(())
 /// # }
 /// ```
+///
+/// The attributes of a symbol, with their defaults for the missing ones:
+///
+/// ```
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::{CandleExchange, CandlePrice, CandleSymbol, CandleType};
+///
+/// let symbol = CandleSymbol::value_of("IBM{=1h,price=mark}")?;
+/// assert_eq!(symbol.as_str(), "IBM{=h,price=mark}");
+/// assert_eq!(symbol.get_base_symbol(), "IBM");
+/// assert_eq!(symbol.get_period().get_type(), CandleType::Hour);
+/// assert_eq!(symbol.get_period().get_period_interval_millis(), 3_600_000);
+/// assert_eq!(symbol.get_price(), CandlePrice::Mark);
+/// assert_eq!(symbol.get_exchange(), CandleExchange::COMPOSITE);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A subscription takes a candle symbol as it is, or as a [`Symbol::time_series`](crate::Symbol::time_series) to
+/// get the candles from a time on; see [`DXFeedTimeSeriesSubscription`](crate::DXFeedTimeSeriesSubscription).
 #[derive(Debug, Clone)]
 pub struct CandleSymbol {
     symbol: String,

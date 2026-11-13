@@ -19,6 +19,29 @@ use crate::subscription::ListenerId;
 /// The list changes as the model receives events; [`to_vec`](Self::to_vec) copies what it holds now, and its
 /// listeners are called after each change. Once the model is closed or dropped, the list keeps its last events but no
 /// longer changes, and its listeners are not called. Dropping the list removes and releases its listeners.
+///
+/// # Examples
+///
+/// The sell side of an order book, whose listener sees the whole list, best price first, after each change; the
+/// listener of the [`OrderBookModel`](super::OrderBookModel) example copies a list with `to_vec` instead:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::model::OrderBookModel;
+///
+/// let model = OrderBookModel::new()?;
+/// model.set_symbol(Some("AAPL"))?;
+/// let sell_orders = model.get_sell_orders()?;
+/// sell_orders.add_listener(|orders| {
+///     if let Some(best) = orders.into_iter().next() {
+///         println!("best ask: {} x {}", best.price(), best.size());
+///     }
+/// })?;
+/// model.attach(DXFeed::get_instance()?)?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct ObservableListModel<E: EventKind> {
     handle: Handle<sys::dxfg_v4_observable_list_model_t>,
     listeners: ListListeners,

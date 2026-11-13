@@ -80,7 +80,8 @@ will be amended, *"best practices"*, specific language restrictions).
 Find useful information in our self-service dxFeed Knowledge Base or Rust API documentation:
 
 - dxFeed Graal Rust API documentation: `cargo doc --open -p dxfeed-graal` (`--all-features` adds the
-  [experimental tier](#getting-the-sdk))
+  [experimental tier](#getting-the-sdk)); [How-to examples](https://docs.rs/dxfeed-graal/latest/dxfeed_graal/#how-to)
+  on docs.rs
 - [dxFeed Knowledge Base](https://kb.dxfeed.com/index.html?lang=en)
   * [Getting Started](https://kb.dxfeed.com/en/getting-started.html)
   * [Troubleshooting](https://kb.dxfeed.com/en/troubleshooting-guidelines.html)
@@ -223,6 +224,11 @@ The [samples](samples) deploy the library this way (see [`samples/build.rs`](sam
 library.
 
 ## Usage
+
+Short examples of the common tasks (subscriptions, indexed, wildcard and candle symbols, promises, models, reading
+events) are in the [How-to section](https://docs.rs/dxfeed-graal/latest/dxfeed_graal/#how-to) of the API
+documentation (`cargo doc --open -p dxfeed-graal` for the version you build); the [samples](#samples) are complete
+programs.
 
 ### How to connect to QD endpoint
 
