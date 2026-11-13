@@ -3,6 +3,37 @@
 Each release has a section `## v<version>`; the release workflow publishes that section as the text of the GitHub
 release (see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md)).
 
+## v0.4.0
+
+The release on dxFeed Graal Native SDK 3.16.0, as 0.3.0, with async APIs. The futures and streams work on any
+executor (tokio, async-std, smol or another); the crate depends on no runtime.
+
+* **SDK.** The crates use SDK 3.16.0; the version of `dxfeed-graal-sys` is `0.4.0+sdk.3.16.0` and its bindings do not
+  change. Depend on `dxfeed-graal = "0.4"`.
+* **Promises.** `Promise` and `AnyOf` implement `IntoFuture`, so async code awaits them instead of blocking in `wait`.
+  `PromiseFuture::cancel` makes the future ready at once, so a timer of the runtime that cancels it is the async
+  timeout; dropping the future does not cancel the request. `system::shutdown` makes pending futures ready with
+  `Error::ShutDown`.
+* **Event streams.** `DXFeedSubscription::into_stream` and `DXFeedTimeSeriesSubscription::into_stream` turn a
+  subscription into an `EventStream` of owned events. Its buffer drops and counts the oldest events when it is full;
+  `into_stream_with` takes `StreamOptions`: `bounded` with another capacity, `unbounded`, or `event_queue`, with which
+  the events stay in the SDK until a task waits for them and the SDK conflates the lasting ones meanwhile.
+* **Shared event queues.** `SharedEventQueue::into_stream` makes a `TaggedEventStream` of `(tag, Event)`: the events of
+  all the subscriptions attached to the queue, taken only while a task waits; the work of the executor of the queue
+  runs in those polls.
+* **Model streams.** `build_stream` of the builders of `IndexedTxModel` and `TimeSeriesTxModel` makes a `ModelStream`
+  of `Transaction`s, one per transaction or snapshot; `build_stream` of `MarketDepthModelBuilder` and
+  `OrderBookModel::into_stream` make a `ModelStream` of `BookSides`, the whole book after a change. A model stream
+  never splits an item: when its consumer lags, a snapshot drops the buffered transactions of its source and a book
+  replaces the buffered book.
+* **End of a stream.** A stream ends when it is closed, when its subscription, queue or model is closed, when all its
+  endpoints are closed (not for a `TaggedEventStream`, whose subscriptions may come from any endpoint) and on
+  `system::shutdown`. An endpoint that awaits its termination does not wait for the consumer of a stream.
+* **Feature `stream`.** It implements `futures_core::Stream` for `EventStream`, `TaggedEventStream` and `ModelStream`;
+  without it they have their own `next` and `poll_next`.
+* **Docs.** The crate docs index common tasks and give examples of subscriptions, symbols, promises, the transaction
+  models and the main events; the crate docs and the README have an Async section.
+
 ## v0.3.0
 
 The release on dxFeed Graal Native SDK 3.16.0.

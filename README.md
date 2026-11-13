@@ -157,7 +157,7 @@ Add the crate from [crates.io](https://crates.io/crates/dxfeed-graal):
 
 ```toml
 [dependencies]
-dxfeed-graal = "0.3"
+dxfeed-graal = "0.4"
 ```
 
 The API is documented on [docs.rs](https://docs.rs/dxfeed-graal). `dxfeed-graal-build` deploys the SDK library next to
