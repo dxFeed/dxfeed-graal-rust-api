@@ -231,3 +231,41 @@ pub(crate) unsafe fn take_tagged_event_list(list: *mut sys::dxfg_v4_tagged_event
     drop(guard);
     events
 }
+
+/// Copies the events of a list with tags as [`take_tagged_event_list`] does, but skips the events that the crate does
+/// not map, as an event stream does, and returns their number with the copies.
+///
+/// # Safety
+///
+/// `list` must be NULL or a live SDK list with tags that the caller owns and nothing else releases.
+pub(crate) unsafe fn take_owned_tagged_list(list: *mut sys::dxfg_v4_tagged_event_list) -> (Vec<(i64, Event)>, u64) {
+    let Some(list) = NonNull::new(list) else {
+        return (Vec::new(), 0);
+    };
+    // SAFETY: the caller guarantees that the list is live.
+    let raw = unsafe { list.as_ref() };
+    let len = usize::try_from(raw.size).unwrap_or(0);
+    LIVE.fetch_add(len, Ordering::SeqCst);
+    let guard = SdkTaggedEventList(list, len);
+    if len == 0 || raw.elements.is_null() || raw.tags.is_null() {
+        return (Vec::new(), 0);
+    }
+    // SAFETY: a live list holds `size` events and `size` tags, live while the guard lives.
+    let (elements, tags) = unsafe {
+        (
+            std::slice::from_raw_parts(raw.elements, len),
+            std::slice::from_raw_parts(raw.tags, len),
+        )
+    };
+    let mut events = Vec::with_capacity(len);
+    let mut skipped = 0;
+    for (&event, &tag) in elements.iter().zip(tags) {
+        // SAFETY: the events of a live list are live, and the view is copied before the guard is dropped.
+        match unsafe { <Event as Sealed>::item(event) }.and_then(|e| e.to_owned()) {
+            Some(event) => events.push((tag, event)),
+            None => skipped += 1,
+        }
+    }
+    drop(guard);
+    (events, skipped)
+}

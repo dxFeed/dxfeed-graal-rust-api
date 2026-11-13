@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::{Order, OrderSource, Quote, Side};
+use dxfeed_graal::event_queue::SharedEventQueue;
 use dxfeed_graal::model::{IndexedTxModel, MarketDepthModel};
 use dxfeed_graal::{Error, ErrorManager, EventStream, Promise, Promises, StreamOptions, system};
 use support::{CountingWaker, Hub, block_on_with, is_child, poll_with, quote, quote_with_bid, run_child};
@@ -96,6 +97,12 @@ fn child_shutdown_ends_pending_futures() {
     }
     assert_eq!(queued.buffered(), 1);
     assert!(poll_stream(&mut queue_waiting, &stream_waker).is_pending());
+    // A stream of a shared queue, waiting.
+    let mut tagged = SharedEventQueue::new().unwrap().into_stream().unwrap();
+    let tagged_quotes = hub.feed.create_subscription::<Quote>().unwrap();
+    tagged.queue().attach(&tagged_quotes, 1).unwrap();
+    let polled = tagged.poll_next(&mut Context::from_waker(&Waker::from(Arc::clone(&stream_waker))));
+    assert!(polled.is_pending());
     // A model stream with a buffered transaction, and a book stream waiting for a book.
     let mut orders = IndexedTxModel::<Order>::new_builder()
         .with_feed(&hub.feed)
@@ -139,6 +146,8 @@ fn child_shutdown_ends_pending_futures() {
         block_on_with(queue_waiting.next(), &stream_waker, long),
         Some(None)
     ));
+    assert!(matches!(block_on_with(tagged.next(), &stream_waker, long), Some(None)));
+    drop((tagged, tagged_quotes));
     // The model streams end, the buffered transaction first.
     let mut cx = Context::from_waker(Waker::noop());
     assert!(matches!(orders.poll_next(&mut cx), Poll::Ready(Some(_))));
@@ -148,9 +157,9 @@ fn child_shutdown_ends_pending_futures() {
     drop((orders, depth));
     let errors = ErrorManager::get_errors();
     assert!(
-        errors
-            .iter()
-            .all(|error| !["DXFeedSubscription", "TxModel", "MarketDepthModel"].contains(&error.component.as_str())),
+        errors.iter().all(|error| {
+            !["DXFeedSubscription", "EventQueue", "TxModel", "MarketDepthModel"].contains(&error.component.as_str())
+        }),
         "{errors:?}"
     );
     assert!(matches!(

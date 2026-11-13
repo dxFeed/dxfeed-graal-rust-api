@@ -156,6 +156,11 @@
 //! The stream ends when it or its subscription is closed, when its endpoints are closed and on [`system::shutdown`].
 //! The cargo feature `stream` implements `futures_core::Stream` for it.
 //!
+//! A [`SharedEventQueue`](event_queue::SharedEventQueue) turns into a [`TaggedEventStream`] with
+//! [`into_stream`](event_queue::SharedEventQueue::into_stream): it yields the events of all the subscriptions attached
+//! to the queue with their tags, takes them only while the consumer waits, as an event-queue stream does, and runs the
+//! work of the executor of the queue meanwhile. It ends when it or its queue is closed and on [`system::shutdown`].
+//!
 //! The models stream whole items into a [`ModelStream`](model::ModelStream), built in place of their listener:
 //! `build_stream` of the builders of [`IndexedTxModel`](model::IndexedTxModel) and
 //! [`TimeSeriesTxModel`](model::TimeSeriesTxModel) yields a [`Transaction`](model::Transaction) per transaction or
@@ -239,7 +244,7 @@ pub use handle::live_handles;
 pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
 pub use promise::{AnyOf, AnyOfFuture, Promise, PromiseFuture, PromiseResult, Promises};
 pub use publisher::DXPublisher;
-pub use stream::{EventStream, StreamOptions};
+pub use stream::{EventStream, StreamOptions, TaggedEventStream};
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
 pub use subscription_controller::SubscriptionController;
 pub use symbol::Symbol;

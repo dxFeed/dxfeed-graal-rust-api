@@ -13,7 +13,7 @@ use crate::endpoint::EndpointState;
 use crate::error::{Error, Result};
 use crate::error_manager::{self, ErrorManager};
 use crate::event::{Event, SubscriptionItem};
-use crate::event_queue::{EventQueue, PollResult};
+use crate::event_queue::{EventQueue, PollResult, SharedEventQueue};
 use crate::feed::DXFeed;
 use crate::observable::ObservableSubscriptionChangeListener;
 use crate::subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription};
@@ -158,7 +158,7 @@ const BATCH: usize = 1024;
 /// ```
 #[must_use = "a stream does nothing unless polled; dropping it closes its subscription"]
 pub struct EventStream<E: SubscriptionItem = Event, S: AsRef<DXFeedSubscription<E>> = DXFeedSubscription<E>> {
-    queue: Arc<Queue<E>>,
+    queue: Arc<Queue<EventQueue<E>>>,
     subscription: S,
 }
 
@@ -210,22 +210,12 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> EventStream<E, S> {
         } else {
             None
         };
-        let queue = Arc::new(Queue {
-            state: Mutex::new(State {
-                items: VecDeque::new(),
-                closed: false,
-                waker: None,
-                dropped: 0,
-                skipped: 0,
-                demand: false,
-                draining: Vec::new(),
-                finishing: false,
-            }),
-            capacity: options.capacity,
-            feeds: Arc::downgrade(base.shared_feeds()),
+        let queue = Arc::new(Queue::new(
+            options.capacity,
+            Feeds::Of(Arc::downgrade(base.shared_feeds())),
             source,
-            requests: Condvar::new(),
-        });
+            "DXFeedSubscription",
+        ));
         // Registered first, so that a shutdown that runs meanwhile ends the stream.
         terminate::register(&queue);
         if queue.source.is_none() {
@@ -249,11 +239,7 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> EventStream<E, S> {
         }
         queue.check_feeds(None);
         if queue.source.is_some() {
-            let helper = queue.clone();
-            thread::Builder::new()
-                .name("dxfeed-event-stream".into())
-                .spawn(move || helper.run())
-                .map_err(|e| Error::Io(Arc::new(e)))?;
+            spawn(&queue)?;
         }
         Ok(EventStream { queue, subscription })
     }
@@ -272,45 +258,18 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> EventStream<E, S> {
     /// and the stream goes on, returns [`Poll::Pending`] and wakes the task of `cx` when an event comes or the stream
     /// ends. After `None`, it returns `None` again.
     pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<E>> {
-        let (replaced, requested) = {
-            let mut state = self.queue.lock();
-            if let Some(event) = state.items.pop_front() {
-                return Poll::Ready(Some(event));
-            }
-            if state.closed {
-                return Poll::Ready(None);
-            }
-            let requested = self.queue.source.is_some() && !std::mem::replace(&mut state.demand, true);
-            let replaced = match &mut state.waker {
-                Some(waker) if waker.will_wake(cx.waker()) => None,
-                waker => waker.replace(cx.waker().clone()),
-            };
-            (replaced, requested)
-        };
-        if requested {
-            self.queue.requests.notify_one();
-        }
-        // The waker of another task is dropped after the lock, as its drop may run any code.
-        drop(replaced);
-        Poll::Pending
+        self.queue.poll_next(cx)
     }
 
     /// Ends the stream and closes its subscription. The buffered events are still taken; the events that come later
     /// are discarded, and those that the event queue of the stream holds are dropped and counted in
     /// [`dropped`](Self::dropped). Closing again does nothing.
     pub fn close(&self) -> Result<()> {
-        let closed = match &self.queue.source {
-            Some(source) => {
-                let closed = source.close();
-                wake(self.queue.end_with(Some(source.get_dropped_events())));
-                // Lets the thread of the stream exit now rather than when the stream is dropped.
-                self.queue.requests.notify_one();
-                closed
-            }
-            None => {
-                self.queue.terminate();
-                Ok(())
-            }
+        let closed = if self.queue.source.is_some() {
+            self.queue.close_source()
+        } else {
+            self.queue.terminate();
+            Ok(())
         };
         closed.and(self.subscription.as_ref().close())
     }
@@ -343,29 +302,14 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>> + Unpin> futures_core:
 
     /// The buffered events, and no upper bound until the stream has ended.
     fn size_hint(&self) -> (usize, Option<usize>) {
-        let state = self.queue.lock();
-        let buffered = state.items.len();
-        (buffered, state.closed.then_some(buffered))
+        self.queue.size_hint()
     }
 }
 
 impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> Drop for EventStream<E, S> {
     fn drop(&mut self) {
-        // Ended without a wake, as nothing polls it any more; the subscription is dropped after this with no lock
-        // held, as that waits for a running call of the listener.
-        let waker = {
-            let mut state = self.queue.lock();
-            state.closed = true;
-            state.items.clear();
-            state.waker.take()
-        };
-        drop(waker);
-        if let Some(source) = &self.queue.source {
-            // The thread of the stream exits: at once if it waits for a request, after its poll otherwise, which the
-            // close ends. It is not joined, as this may run on it, in its wake.
-            self.queue.requests.notify_one();
-            let _ = source.close();
-        }
+        // The subscription is dropped after this with no lock held, as that waits for a running call of the listener.
+        self.queue.release();
     }
 }
 
@@ -382,16 +326,183 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> fmt::Debug for EventS
     }
 }
 
+/// The events of the subscriptions attached to a [`SharedEventQueue`], each with the tag of its subscription, as owned
+/// events for async code: taken with [`next`](Self::next) or, with the cargo feature `stream`, through the
+/// `futures_core::Stream` trait.
+///
+/// It is made by [`SharedEventQueue::into_stream`] and owns the queue, which [`queue`](Self::queue) gives to attach
+/// subscriptions and to lend its executor; never poll it then, as the stream does. It does not own the subscriptions:
+/// keep them, as dropping one closes it. It yields the events as [`SharedEventQueue::poll`] returns them,
+/// `(tag, event)`, but skips the events of types that the crate does not map and counts them in
+/// [`skipped`](Self::skipped).
+///
+/// A thread of the stream polls the queue only while a task waits for events and the buffer of the stream is empty,
+/// and moves at most about 1 024 events into the buffer at a time, as with
+/// [`StreamOptions::event_queue`]: meanwhile the SDK conflates the lasting events, such as quotes, and keeps the other
+/// ones in the buffers of the subscriptions; [`dropped`](Self::dropped) counts the events that the SDK lost. The work
+/// of the executor of the queue, such as the listeners of the models built with it, runs in those polls, on the thread
+/// of the stream: it waits while no task waits for events. So the calls that wait for that work, such as
+/// [`DXFeed::detach_subscription_and_clear`] of a subscription with that executor, never return in the task that
+/// consumes the stream, nor anywhere while no task waits for its events. While an endpoint awaits its termination
+/// ([`DXEndpoint::close_and_await_termination`](crate::DXEndpoint::close_and_await_termination)), the thread takes
+/// what the queue holds into the buffer, without conflating it, and runs the work of the executor.
+///
+/// The stream ends, yielding `None` after the buffered events, when it is [closed](Self::close), when its queue is
+/// closed, and when [`system::shutdown`](crate::system::shutdown) runs. Closing an endpoint does not end it, as
+/// subscriptions of any endpoint may be attached to the queue. Dropping the stream closes the queue; the executors
+/// that it lent then run their work at once, on the posting thread, without calling the listeners of the application.
+///
+/// # Example
+///
+/// ```no_run
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::{Quote, Trade};
+/// use dxfeed_graal::event_queue::SharedEventQueue;
+///
+/// async fn print_events(feed: &DXFeed) -> dxfeed_graal::Result<()> {
+///     let mut events = SharedEventQueue::new()?.into_stream()?;
+///     let quotes = feed.create_subscription::<Quote>()?;
+///     let trades = feed.create_subscription::<Trade>()?;
+///     events.queue().attach(&quotes, 1)?;
+///     events.queue().attach(&trades, 2)?;
+///     quotes.add_symbols(["AAPL"])?;
+///     trades.add_symbols(["AAPL"])?;
+///     while let Some((tag, event)) = events.next().await {
+///         println!("{tag}: {event}");
+///     }
+///     Ok(())
+/// }
+/// ```
+#[must_use = "a stream does nothing unless polled; dropping it closes its queue"]
+pub struct TaggedEventStream {
+    queue: Arc<Queue<SharedEventQueue>>,
+}
+
+impl SharedEventQueue {
+    /// Turns the queue into a stream of owned events with their tags. The subscriptions already attached stay
+    /// attached; attach more through [`TaggedEventStream::queue`].
+    ///
+    /// A thread that cannot be started is [`Error::Io`]; the queue is closed then.
+    pub fn into_stream(self) -> Result<TaggedEventStream> {
+        let queue = Arc::new(Queue::new(None, Feeds::Any, Some(self), "EventQueue"));
+        // Registered first, so that a shutdown that runs meanwhile ends the stream.
+        terminate::register(&queue);
+        let stream = TaggedEventStream { queue };
+        spawn(&stream.queue)?;
+        Ok(stream)
+    }
+}
+
+impl TaggedEventStream {
+    /// The queue of the stream, to attach subscriptions, to lend its executor and to read its dropped count. Do not
+    /// poll it: the polls of the stream would take turns with yours. Closing it ends the stream.
+    pub fn queue(&self) -> &SharedEventQueue {
+        self.queue
+            .source
+            .as_ref()
+            .expect("the stream of a shared queue has its queue")
+    }
+
+    /// The next event with its tag, or `None` once the stream has ended and its buffer is empty.
+    pub async fn next(&mut self) -> Option<(i64, Event)> {
+        poll_fn(|cx| self.poll_next(cx)).await
+    }
+
+    /// Takes the next event with its tag, as [`EventStream::poll_next`] does.
+    pub fn poll_next(&mut self, cx: &mut Context<'_>) -> Poll<Option<(i64, Event)>> {
+        self.queue.poll_next(cx)
+    }
+
+    /// Ends the stream and closes its queue. The buffered events are still taken; those that the queue holds are
+    /// dropped and counted in [`dropped`](Self::dropped). Closing again does nothing.
+    pub fn close(&self) -> Result<()> {
+        self.queue.close_source()
+    }
+
+    /// The number of the events in the buffer.
+    pub fn buffered(&self) -> usize {
+        self.queue.lock().items.len()
+    }
+
+    /// The number of the events that the SDK lost so far (`getDroppedEvents` of the queue).
+    pub fn dropped(&self) -> u64 {
+        self.queue.lock().dropped
+    }
+
+    /// The number of the events skipped so far because the crate does not map their type
+    /// ([`EventRef::Other`](crate::EventRef::Other)).
+    pub fn skipped(&self) -> u64 {
+        self.queue.lock().skipped
+    }
+}
+
+#[cfg(feature = "stream")]
+impl futures_core::Stream for TaggedEventStream {
+    type Item = (i64, Event);
+
+    fn poll_next(self: std::pin::Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<(i64, Event)>> {
+        TaggedEventStream::poll_next(self.get_mut(), cx)
+    }
+
+    /// The buffered events, and no upper bound until the stream has ended.
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        self.queue.size_hint()
+    }
+}
+
+impl Drop for TaggedEventStream {
+    fn drop(&mut self) {
+        self.queue.release();
+    }
+}
+
+impl fmt::Debug for TaggedEventStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let state = self.queue.lock();
+        f.debug_struct("TaggedEventStream")
+            .field("buffered", &state.items.len())
+            .field("closed", &state.closed)
+            .field("dropped", &state.dropped)
+            .field("skipped", &state.skipped)
+            .finish()
+    }
+}
+
+/// An event queue that the thread of a stream polls.
+pub(crate) trait Source: Send + Sync + 'static {
+    /// What a poll yields for each event.
+    type Item: Send + 'static;
+
+    /// Polls as the public poll of the queue does, but skips and counts the events that the crate does not map; the
+    /// events and the skipped count come as one batch, which may hold no events when all were skipped.
+    fn poll_items(&self, timeout: Option<Duration>, limit: usize) -> Result<PollResult<(Vec<Self::Item>, u64)>>;
+
+    fn wake_up(&self) -> Result<()>;
+
+    fn close(&self) -> Result<()>;
+
+    fn get_dropped_events(&self) -> Result<i64>;
+}
+
+/// Whose endpoints end a stream.
+enum Feeds {
+    /// The feeds of the subscription: the stream ends when the endpoints of all of them are closed.
+    Of(Weak<Mutex<Vec<DXFeed>>>),
+    /// Any endpoint, never ended by their close: a shared queue, attached to subscriptions of any endpoint.
+    Any,
+}
+
 /// The buffer that the listener or the thread of the stream fills and the stream takes from.
-struct Queue<E: SubscriptionItem> {
-    state: Mutex<State<E>>,
+struct Queue<Q: Source> {
+    state: Mutex<State<Q::Item>>,
     capacity: Option<usize>,
-    /// The feeds of the subscription, whose endpoints end the stream when all are closed.
-    feeds: Weak<Mutex<Vec<DXFeed>>>,
-    /// The event queue that the thread of the stream polls, for [`StreamOptions::event_queue`].
-    source: Option<EventQueue<E>>,
+    feeds: Feeds,
+    /// The event queue that the thread of the stream polls, for [`StreamOptions::event_queue`] and a shared queue.
+    source: Option<Q>,
     /// Wakes the thread of the stream when the state asks it to poll or to exit.
     requests: Condvar,
+    /// The component of the errors and panics that go to the error manager.
+    component: &'static str,
 }
 
 struct State<E> {
@@ -409,14 +520,106 @@ struct State<E> {
     finishing: bool,
 }
 
-impl<E: SubscriptionItem> Queue<E> {
-    fn lock(&self) -> MutexGuard<'_, State<E>> {
+/// Starts the thread of a stream of an event queue.
+fn spawn<Q: Source>(queue: &Arc<Queue<Q>>) -> Result<()> {
+    let helper = queue.clone();
+    thread::Builder::new()
+        .name("dxfeed-event-stream".into())
+        .spawn(move || helper.run())
+        .map(drop)
+        .map_err(|e| Error::Io(Arc::new(e)))
+}
+
+impl<Q: Source> Queue<Q> {
+    fn new(capacity: Option<usize>, feeds: Feeds, source: Option<Q>, component: &'static str) -> Self {
+        Queue {
+            state: Mutex::new(State {
+                items: VecDeque::new(),
+                closed: false,
+                waker: None,
+                dropped: 0,
+                skipped: 0,
+                demand: false,
+                draining: Vec::new(),
+                finishing: false,
+            }),
+            capacity,
+            feeds,
+            source,
+            requests: Condvar::new(),
+            component,
+        }
+    }
+
+    fn lock(&self) -> MutexGuard<'_, State<Q::Item>> {
         crate::lock(&self.state)
+    }
+
+    /// Takes the next item for the task of `cx`, or stores its waker and, for an event queue, asks the thread to poll.
+    fn poll_next(&self, cx: &mut Context<'_>) -> Poll<Option<Q::Item>> {
+        let (replaced, requested) = {
+            let mut state = self.lock();
+            if let Some(event) = state.items.pop_front() {
+                return Poll::Ready(Some(event));
+            }
+            if state.closed {
+                return Poll::Ready(None);
+            }
+            let requested = self.source.is_some() && !std::mem::replace(&mut state.demand, true);
+            let replaced = match &mut state.waker {
+                Some(waker) if waker.will_wake(cx.waker()) => None,
+                waker => waker.replace(cx.waker().clone()),
+            };
+            (replaced, requested)
+        };
+        if requested {
+            self.requests.notify_one();
+        }
+        // The waker of another task is dropped after the lock, as its drop may run any code.
+        drop(replaced);
+        Poll::Pending
+    }
+
+    /// The buffered items, and no upper bound until the stream has ended.
+    #[cfg(feature = "stream")]
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let state = self.lock();
+        let buffered = state.items.len();
+        (buffered, state.closed.then_some(buffered))
+    }
+
+    /// Closes the event queue and ends the stream, keeping the buffered items.
+    fn close_source(&self) -> Result<()> {
+        let Some(source) = &self.source else {
+            return Ok(());
+        };
+        let closed = source.close();
+        wake(self.end_with(Some(source.get_dropped_events())));
+        // Lets the thread of the stream exit now rather than when the stream is dropped.
+        self.requests.notify_one();
+        closed
+    }
+
+    /// Ends the stream of a dropped stream, without a wake, as nothing polls it any more, and closes its event queue.
+    fn release(&self) {
+        let waker = {
+            let mut state = self.lock();
+            state.closed = true;
+            state.items.clear();
+            state.waker.take()
+        };
+        drop(waker);
+        if let Some(source) = &self.source {
+            // The thread of the stream exits: at once if it waits for a request, after its poll otherwise, which the
+            // close ends. It is not joined, as this may run on it, in its wake.
+            self.requests.notify_one();
+            let _ = source.close();
+        }
     }
 
     /// Adds a batch, dropping the oldest events beyond the capacity, and returns the waker of the task to wake after
     /// the lock. `lost` is the dropped count of the event queue, if it was read.
-    fn push(&self, batch: Vec<E>, skipped: u64, lost: Option<Result<i64>>) -> Option<Waker> {
+    fn push(&self, batch: Vec<Q::Item>, skipped: u64, lost: Option<Result<i64>>) -> Option<Waker> {
         let mut state = self.lock();
         if state.closed {
             return None;
@@ -449,7 +652,7 @@ impl<E: SubscriptionItem> Queue<E> {
 
     /// Stores the dropped count of the event queue, which never decreases; one that cannot be read, such as after
     /// shutdown, keeps the last one.
-    fn update_lost(state: &mut State<E>, lost: Option<Result<i64>>) {
+    fn update_lost(state: &mut State<Q::Item>, lost: Option<Result<i64>>) {
         if let Some(Ok(lost)) = lost {
             state.dropped = state.dropped.max(u64::try_from(lost).unwrap_or(0));
         }
@@ -475,9 +678,12 @@ impl<E: SubscriptionItem> Queue<E> {
     }
 
     /// Whether the subscription is attached to a feed of `endpoint` (to any feed when it is `None`), and whether the
-    /// endpoints of all its feeds are closed then.
+    /// endpoints of all its feeds are closed then; a shared queue is attached to every endpoint, never all closed.
     fn feeds_of(&self, endpoint: Option<&EndpointState>) -> (bool, bool) {
-        feeds_of(&self.feeds, endpoint)
+        match &self.feeds {
+            Feeds::Of(feeds) => feeds_of(feeds, endpoint),
+            Feeds::Any => (true, false),
+        }
     }
 
     /// Ends the stream if the endpoints of all the feeds of the subscription are closed and, when `endpoint` is given,
@@ -535,12 +741,12 @@ impl<E: SubscriptionItem> Queue<E> {
             let _ = source.close();
             let waker = self.end_with(Some(source.get_dropped_events()));
             error_manager::report_panic(
-                "DXFeedSubscription",
+                self.component,
                 "the waker of an event stream",
                 panic::catch_unwind(AssertUnwindSafe(|| wake(waker))),
             );
         }
-        error_manager::report_panic("DXFeedSubscription", "the thread of an event stream", ran);
+        error_manager::report_panic(self.component, "the thread of an event stream", ran);
     }
 
     fn poll_source(&self) {
@@ -574,7 +780,7 @@ impl<E: SubscriptionItem> Queue<E> {
                     // A panic of the waker goes to the error manager, as one in a listener does, and the stream goes
                     // on.
                     error_manager::report_panic(
-                        "DXFeedSubscription",
+                        self.component,
                         "the waker of an event stream",
                         panic::catch_unwind(AssertUnwindSafe(|| wake(waker))),
                     );
@@ -590,7 +796,7 @@ impl<E: SubscriptionItem> Queue<E> {
                     return wake(self.end_with(Some(source.get_dropped_events())));
                 }
                 Err(error) => {
-                    ErrorManager::report_error("DXFeedSubscription", &error);
+                    ErrorManager::report_error(self.component, &error);
                     let _ = source.close();
                     return wake(self.end_with(Some(source.get_dropped_events())));
                 }
@@ -622,7 +828,7 @@ fn wake(waker: Option<Waker>) {
     }
 }
 
-impl<E: SubscriptionItem> Terminate for Queue<E> {
+impl<Q: Source> Terminate for Queue<Q> {
     fn terminate(&self) {
         self.finish();
     }
@@ -637,7 +843,7 @@ impl<E: SubscriptionItem> Terminate for Queue<E> {
 }
 
 /// The change listener that ends the stream when the subscription is closed.
-struct Closer<E: SubscriptionItem>(Arc<Queue<E>>);
+struct Closer<E: SubscriptionItem>(Arc<Queue<EventQueue<E>>>);
 
 impl<E: SubscriptionItem> ObservableSubscriptionChangeListener for Closer<E> {
     fn symbols_added(&mut self, _symbols: &[Symbol]) {}
