@@ -14,6 +14,31 @@ order_base_fields! {
             /// A subscription to orders also receives the price levels that the feed builds from quotes (the
             /// sources `COMPOSITE_BID` and `COMPOSITE_ASK`) and from market makers (`AGGREGATE_BID` and
             /// `AGGREGATE_ASK`).
+            ///
+            /// # Examples
+            ///
+            /// The orders of `AAPL` from `NTV` only, with their side, scope and price:
+            ///
+            /// ```no_run
+            /// # fn main() -> dxfeed_graal::Result<()> {
+            /// use dxfeed_graal::event::{Order, OrderSource};
+            /// use dxfeed_graal::{DXFeed, Symbol};
+            ///
+            /// let subscription = DXFeed::get_instance()?.create_subscription::<Order>()?;
+            /// subscription.add_event_listener(|orders| {
+            ///     for order in orders {
+            ///         let (side, scope) = (order.order_side(), order.scope());
+            ///         println!("{} {side} {scope}: {} x {}", order.index(), order.price(), order.size());
+            ///     }
+            /// })?;
+            /// subscription.add_symbols([Symbol::indexed("AAPL", OrderSource::NTV)])?;
+            /// # Ok(())
+            /// # }
+            /// ```
+            ///
+            /// The events of an order book come in snapshots and transactions (see [`EventFlags`](super::EventFlags));
+            /// [`OrderBookModel`](crate::model::OrderBookModel) and
+            /// [`MarketDepthModel`](crate::model::MarketDepthModel) keep the book itself.
             Order, OrderRef, sys::dxfg_order_t, sys::DXFG_EVENT_ORDER, [order_base.market_event]
         }
         fields {

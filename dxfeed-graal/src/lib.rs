@@ -71,6 +71,29 @@
 //! }
 //! ```
 //!
+//! # How-to
+//!
+//! The common tasks have short examples on the items that do them; the `samples` directory of the repository has
+//! complete programs.
+//!
+//! - Subscribe, add and change symbols, close; several event types at once: [`DXFeedSubscription`].
+//! - Events from a time on, such as candles or time and sales: [`DXFeedTimeSeriesSubscription`]; a history in one
+//!   request: [`DXFeed::get_time_series_promise`].
+//! - The orders of one source, all the symbols, a time-series symbol: [`Symbol`].
+//! - Candle symbols with a period, a price, an exchange or a session: [`CandleSymbol`](event::CandleSymbol).
+//! - Read the fields of events, keep copies, use event flags: [`event`]; the main fields of
+//!   [`Quote`](event::Quote), [`Trade`](event::Trade), [`TimeAndSale`](event::TimeAndSale), [`Order`](event::Order),
+//!   [`Candle`](event::Candle) and [`Series`](event::Series).
+//! - The last event of a symbol and other requests: [`Promise`], several at once: [`Promises`]; in async code: the
+//!   [Async](#async) section.
+//! - Conflate events or limit their batches: [`SubscriptionController`].
+//! - Order books: [`OrderBookModel`](model::OrderBookModel), [`MarketDepthModel`](model::MarketDepthModel) and their
+//!   lists, [`ObservableListModel`](model::ObservableListModel).
+//! - Whole transactions and snapshots: [`IndexedTxModel`](model::IndexedTxModel),
+//!   [`TimeSeriesTxModel`](model::TimeSeriesTxModel), [`IndexedEventTxModel`](model::IndexedEventTxModel); live
+//!   lists: [`IndexedEventModel`](model::IndexedEventModel), [`TimeSeriesEventModel`](model::TimeSeriesEventModel).
+//! - Publish events: [`DXPublisher`]; poll events without listeners: [`event_queue`].
+//!
 //! # Threads
 //!
 //! The SDK runs in a GraalVM isolate that the crate creates on first use and never tears down. A thread is attached to

@@ -20,6 +20,25 @@ use crate::time_period::TimePeriod;
 /// It comes from [`DXFeedSubscription::get_subscription_controller`] or from a model, such as
 /// [`IndexedEventTxModel::get_subscription_controller`], and borrows it.
 ///
+/// # Examples
+///
+/// Conflate the quotes of a subscription to at most one batch per second, in batches of up to 100 events:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::Quote;
+/// use dxfeed_graal::{DXFeed, TimePeriod};
+///
+/// let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
+/// let controller = subscription.get_subscription_controller()?;
+/// controller.set_aggregation_period(Some(TimePeriod::value_of("1s")?))?;
+/// controller.set_events_batch_limit(100)?;
+/// subscription.add_event_listener(|quotes| println!("{} quotes", quotes.count()))?;
+/// subscription.add_symbols(["AAPL"])?;
+/// # Ok(())
+/// # }
+/// ```
+///
 /// [`DXFeedSubscription::get_subscription_controller`]: crate::DXFeedSubscription::get_subscription_controller
 /// [`IndexedEventTxModel::get_subscription_controller`]: crate::model::IndexedEventTxModel::get_subscription_controller
 pub struct SubscriptionController<'a> {

@@ -9,6 +9,27 @@ time_sequence_values! {
     event_type! {
         head {
             /// The properties of an option series: its volatility, volumes and the forward price (`Series`).
+            ///
+            /// # Examples
+            ///
+            /// ```no_run
+            /// # fn main() -> dxfeed_graal::Result<()> {
+            /// use dxfeed_graal::DXFeed;
+            /// use dxfeed_graal::event::Series;
+            ///
+            /// let subscription = DXFeed::get_instance()?.create_subscription::<Series>()?;
+            /// subscription.add_event_listener(|series| {
+            ///     for s in series {
+            ///         println!("{} expiring {}:", s.symbol(), s.expiration());
+            ///         println!("volatility {}, put/call {}", s.volatility(), s.put_call_ratio());
+            ///     }
+            /// })?;
+            /// subscription.add_symbols(["AAPL"])?;
+            /// # Ok(())
+            /// # }
+            /// ```
+            ///
+            /// An [`IndexedEventModel`](crate::model::IndexedEventModel) keeps the current series of a symbol.
             Series, SeriesRef, sys::dxfg_series_t, sys::DXFG_EVENT_SERIES, [market_event]
         }
         fields {

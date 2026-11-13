@@ -44,6 +44,68 @@ impl ListenerId {
 /// after the listener is released; dropping the subscription from another thread therefore waits for running calls of
 /// its listeners, so do not hold a lock their closures take while dropping it. It keeps the endpoints of the feeds it
 /// is attached to open.
+///
+/// # Examples
+///
+/// Add the listener, then the symbols; change the symbols at any time and close the subscription when done:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::Quote;
+///
+/// let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
+/// subscription.add_event_listener(|quotes| {
+///     for quote in quotes {
+///         println!("{}: {} x {}", quote.symbol(), quote.bid_price(), quote.ask_price());
+///     }
+/// })?;
+/// subscription.add_symbols(["AAPL", "IBM"])?;
+/// subscription.remove_symbols(["IBM"])?;
+/// subscription.set_symbols(["MSFT", "GOOG"])?; // replaces AAPL
+/// subscription.close()?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A subscription to several event types gives its listeners an [`EventRef`](crate::EventRef) to match:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::{DXFeed, EventRef, EventType};
+///
+/// let types = [EventType::Quote, EventType::Trade];
+/// let subscription = DXFeed::get_instance()?.create_subscription_with_types(&types)?;
+/// subscription.add_event_listener(|events| {
+///     for event in events {
+///         match event {
+///             EventRef::Quote(quote) => println!("quote {}", quote.bid_price()),
+///             EventRef::Trade(trade) => println!("trade {}", trade.price()),
+///             _ => {}
+///         }
+///     }
+/// })?;
+/// subscription.add_symbols(["AAPL"])?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A subscription created without a feed receives events once it is attached to one:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::Trade;
+/// use dxfeed_graal::{DXFeed, DXFeedSubscription};
+///
+/// let subscription = DXFeedSubscription::<Trade>::new()?;
+/// subscription.add_event_listener(|trades| trades.for_each(|trade| println!("{trade}")))?;
+/// subscription.add_symbols(["AAPL"])?;
+/// subscription.attach(DXFeed::get_instance()?)?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The symbols of other kinds, such as the orders of one source or all the symbols, are [`Symbol`]s.
 pub struct DXFeedSubscription<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_subscription_t>,
     listeners: Mutex<Vec<(ListenerId, EventListener)>>,
@@ -540,6 +602,30 @@ impl<E: SubscriptionItem> Drop for DXFeedSubscription<E> {
 ///
 /// It is a [`DXFeedSubscription`], whose methods it has through `Deref`, that wraps each symbol it adds in a
 /// [`Symbol::TimeSeriesSubscription`] from the time of [`set_from_time`](Self::set_from_time).
+///
+/// # Examples
+///
+/// The hourly candles of `AAPL` for the last day, then their updates; the time applies to the symbols added before
+/// and after it is set:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use std::time::{Duration, SystemTime};
+///
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::{Candle, CandlePeriod, CandleSymbol, CandleType};
+///
+/// let day_ago = SystemTime::now() - Duration::from_secs(24 * 3600);
+/// let from_time = day_ago.duration_since(SystemTime::UNIX_EPOCH).unwrap().as_millis() as i64;
+///
+/// let subscription = DXFeed::get_instance()?.create_time_series_subscription::<Candle>()?;
+/// subscription.add_event_listener(|candles| candles.for_each(|candle| println!("{candle}")))?;
+/// subscription.set_from_time(from_time)?;
+/// let hourly = CandlePeriod::value_of(1.0, CandleType::Hour);
+/// subscription.add_symbols([CandleSymbol::value_of_with("AAPL", [hourly])?])?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct DXFeedTimeSeriesSubscription<E: SubscriptionItem = Event> {
     subscription: DXFeedSubscription<E>,
     /// The time of the last `set_from_time`, read without a lock: change listeners may read it while it is set.

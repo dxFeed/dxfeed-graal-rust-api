@@ -9,6 +9,26 @@ use crate::error::Result;
 event_type! {
     head {
         /// A quote: the best bid and offer of a symbol (`Quote`).
+        ///
+        /// # Examples
+        ///
+        /// ```no_run
+        /// # fn main() -> dxfeed_graal::Result<()> {
+        /// use dxfeed_graal::DXFeed;
+        /// use dxfeed_graal::event::Quote;
+        ///
+        /// let subscription = DXFeed::get_instance()?.create_subscription::<Quote>()?;
+        /// subscription.add_event_listener(|quotes| {
+        ///     for q in quotes {
+        ///         let (bid, ask) = (q.bid_price(), q.ask_price());
+        ///         println!("{}: {bid} x {} / {ask} x {}", q.symbol(), q.bid_size(), q.ask_size());
+        ///         println!("spread {}", ask - bid);
+        ///     }
+        /// })?;
+        /// subscription.add_symbols(["AAPL"])?;
+        /// # Ok(())
+        /// # }
+        /// ```
         Quote, QuoteRef, sys::dxfg_quote_t, sys::DXFG_EVENT_QUOTE, [market_event]
     }
     fields {

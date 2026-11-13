@@ -7,6 +7,25 @@ trade_base_fields! {
     event_type! {
         head {
             /// A trade: the last trade of a symbol during regular trading hours or extended ones (`Trade`).
+            ///
+            /// # Examples
+            ///
+            /// ```no_run
+            /// # fn main() -> dxfeed_graal::Result<()> {
+            /// use dxfeed_graal::DXFeed;
+            /// use dxfeed_graal::event::Trade;
+            ///
+            /// let subscription = DXFeed::get_instance()?.create_subscription::<Trade>()?;
+            /// subscription.add_event_listener(|trades| {
+            ///     for trade in trades {
+            ///         println!("{}: {} x {}", trade.symbol(), trade.price(), trade.size());
+            ///         println!("day volume {}", trade.day_volume());
+            ///     }
+            /// })?;
+            /// subscription.add_symbols(["AAPL", "IBM"])?;
+            /// # Ok(())
+            /// # }
+            /// ```
             Trade, TradeRef, sys::dxfg_trade_t, sys::DXFG_EVENT_TRADE, [trade_base.market_event]
         }
         fields {}

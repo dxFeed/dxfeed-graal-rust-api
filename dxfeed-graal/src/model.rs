@@ -434,6 +434,31 @@ trait HasKind {
 /// Dropping it closes it and releases its listener, whose closure is not called afterwards; dropping it from another
 /// thread therefore waits for a running call of the listener, so do not hold a lock its closure takes while dropping
 /// it. It keeps the endpoints of the feeds it is attached to open.
+///
+/// # Examples
+///
+/// The orders of `AAPL` from two sources, each snapshot as its resulting state; the sources change while it runs:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::DXFeed;
+/// use dxfeed_graal::event::{Order, OrderSource};
+/// use dxfeed_graal::model::IndexedTxModel;
+///
+/// let model = IndexedTxModel::<Order>::new_builder()
+///     .with_feed(DXFeed::get_instance()?)
+///     .with_symbol("AAPL")
+///     .with_sources([OrderSource::NTV, OrderSource::ISE])
+///     .with_snapshot_processing(true)
+///     .with_listener(|source, orders, is_snapshot| {
+///         let kind = if is_snapshot { "the book" } else { "changes" };
+///         println!("{kind} from {source}: {} orders", orders.count());
+///     })
+///     .build()?;
+/// model.set_sources([OrderSource::NTV])?;
+/// # Ok(())
+/// # }
+/// ```
 pub struct IndexedTxModel<E: IndexedEvent + EventKind> {
     core: Core<Indexed>,
     _event: PhantomData<fn() -> E>,
@@ -567,6 +592,31 @@ impl SortOrder {
 /// Dropping it closes it and releases its listener, whose closure is not called afterwards; dropping it from another
 /// thread therefore waits for a running call of the listener, so do not hold a lock its closure takes while dropping
 /// it. It keeps the endpoints of the feeds it is attached to open.
+///
+/// # Examples
+///
+/// The 1-minute candles of `AAPL` from a time on: first a snapshot of the history, then the updates:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::Candle;
+/// use dxfeed_graal::model::TimeSeriesTxModel;
+/// use dxfeed_graal::{DXFeed, TimeFormat};
+///
+/// let model = TimeSeriesTxModel::<Candle>::new_builder()
+///     .with_feed(DXFeed::get_instance()?)
+///     .with_symbol("AAPL{=1m}")
+///     .with_from_time(TimeFormat::DEFAULT.parse("20260101")?)
+///     .with_listener(|_source, candles, is_snapshot| {
+///         for candle in candles {
+///             println!("{} {candle}", if is_snapshot { "history" } else { "update" });
+///         }
+///     })
+///     .build()?;
+/// model.set_from_time(TimeFormat::DEFAULT.parse("20260601")?)?; // re-subscribes from a later time
+/// # Ok(())
+/// # }
+/// ```
 pub struct TimeSeriesTxModel<E: TimeSeriesEvent + EventKind> {
     core: Core<TimeSeries>,
     /// Dropped after the model is closed.

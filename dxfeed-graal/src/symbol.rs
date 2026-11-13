@@ -24,6 +24,66 @@ use crate::isolate;
 /// - [`TimeSeriesSubscription`](Self::TimeSeriesSubscription): the time-series events of a symbol from a time on
 ///   (`TimeSeriesSubscriptionSymbol`).
 ///
+/// # Examples
+///
+/// String slices and `String`s convert into it, so plain symbols need no `Symbol`:
+///
+/// ```
+/// use dxfeed_graal::Symbol;
+///
+/// let symbols: Vec<Symbol> = ["AAPL", "IBM"].into_iter().map(Symbol::from).collect();
+/// assert_eq!(symbols[0], Symbol::String("AAPL".into()));
+/// assert_eq!(Symbol::from(String::from("IBM")).to_string(), "IBM");
+/// ```
+///
+/// An indexed symbol subscribes to the indexed events of one source only, such as the orders of `AAPL` from `NTV`
+/// (a plain symbol receives the events of all the sources):
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::{Order, OrderSource};
+/// use dxfeed_graal::{DXFeed, Symbol};
+///
+/// let subscription = DXFeed::get_instance()?.create_subscription::<Order>()?;
+/// subscription.add_event_listener(|orders| orders.for_each(|order| println!("{order}")))?;
+/// subscription.add_symbols([Symbol::indexed("AAPL", OrderSource::NTV)])?;
+/// # Ok(())
+/// # }
+/// ```
+///
+/// The parts of an indexed symbol:
+///
+/// ```
+/// use dxfeed_graal::Symbol;
+/// use dxfeed_graal::event::OrderSource;
+///
+/// let symbol = Symbol::indexed("AAPL", OrderSource::NTV);
+/// assert_eq!(symbol.to_string(), "AAPL{source=NTV}");
+/// assert_eq!(symbol.get_event_symbol(), &Symbol::from("AAPL"));
+/// assert_eq!(symbol.get_source(), Some(OrderSource::NTV));
+/// ```
+///
+/// The wildcard symbol subscribes to all the symbols, on an endpoint that enables it:
+///
+/// ```no_run
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// use dxfeed_graal::event::Trade;
+/// use dxfeed_graal::{DXEndpoint, Symbol};
+///
+/// let endpoint = DXEndpoint::new_builder()
+///     .with_property(DXEndpoint::DXFEED_WILDCARD_ENABLE_PROPERTY, "true")
+///     .build()?;
+/// let subscription = endpoint.get_feed().create_subscription::<Trade>()?;
+/// subscription.add_event_listener(|trades| trades.for_each(|trade| println!("{trade}")))?;
+/// subscription.add_symbols([Symbol::Wildcard])?;
+/// // Connect the endpoint to an address that serves wildcard subscriptions.
+/// # Ok(())
+/// # }
+/// ```
+///
+/// A time-series symbol subscribes to the events from a time on; a
+/// [`DXFeedTimeSeriesSubscription`](crate::DXFeedTimeSeriesSubscription) wraps its symbols in it by itself:
+///
 /// ```no_run
 /// # fn main() -> dxfeed_graal::Result<()> {
 /// use dxfeed_graal::event::{Candle, CandlePeriod, CandleSymbol};
