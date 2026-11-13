@@ -470,6 +470,11 @@ while let Some(quote) = quotes.next().await {
 - The listener of the stream copies each batch into a buffer and wakes the task once; it never waits for the consumer.
   The buffer holds 65 536 events by default and drops the oldest ones when more come, counting them in `dropped()`;
   `into_stream_with(StreamOptions::bounded(n))` changes the capacity, and `StreamOptions::unbounded()` keeps every event.
+- `into_stream_with(StreamOptions::event_queue())` takes the events from the event queue of the subscription instead,
+  on a thread of the stream and only while a task waits for them. Meanwhile they stay in the SDK: it keeps the last
+  quote (and other lasting event) of each symbol, keeps trades and other events in the buffer of the subscription, and
+  an endpoint of `Role::StreamFeed` stops receiving data rather than dropping it. `dropped()` counts the events that the
+  SDK lost. `close_and_await_termination()` does not wait for the consumer: the stream takes what the queue holds.
 - An untyped stream (`create_subscription_with_types`) yields `Event` and skips the events of types the crate does not
   map, counting them in `skipped()`.
 - The stream yields `None` after its buffered events once it is closed with `close()`, its subscription is closed, the
@@ -483,7 +488,7 @@ while let Some(quote) = quotes.next().await {
 - `DXEndpoint::close_and_await_termination()` closes an endpoint and waits for the notifications already scheduled;
   `close()` does not wait. Dropping the last handle of an endpoint (the endpoint, its feed, its publisher or a
   subscription) closes it as well. Close the event queues of its subscriptions first: it waits while a queue holds
-  events that no poll returned.
+  events that no poll returned. A stream over an event queue needs no such care: it takes those events itself.
 - The process may exit with open endpoints and running listeners: from the moment it starts exiting, listeners are no
   longer called and destructors no longer call the SDK.
 - `system::shutdown()` is an advanced function with no counterpart in the other dxFeed APIs. It stops all listeners,
@@ -767,7 +772,8 @@ the types.
   `Promise::new` and `Promise::failed`, failed with `complete_exceptionally` and a `JavaExceptionClass`
 - [x] Async: `Promise` and `AnyOf` are awaited with `.await` on any executor (`IntoFuture`), with `cancel()` on the
   future and `Error::ShutDown` on `system::shutdown()`; subscriptions turn into streams of owned events
-  (`EventStream`, `futures_core::Stream` with the feature `stream`) with a bounded buffer that drops the oldest events
+  (`EventStream`, `futures_core::Stream` with the feature `stream`) with a bounded buffer that drops the oldest events,
+  or over the event queue of the subscription, with the conflation of the SDK while the consumer lags
 - [x] Event queues: the events of subscriptions polled on a thread of the application (`EventQueue`), and a
   `SharedEventQueue` with tags whose executor runs the models, the collector and the promise handlers in the polls
 - [x] Transactional models of indexed and time-series events: `IndexedTxModel`, `TimeSeriesTxModel`,

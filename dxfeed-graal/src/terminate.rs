@@ -15,6 +15,12 @@ pub(crate) trait Terminate: Send + Sync {
     fn endpoint_closed(&self, endpoint: &EndpointState) {
         let _ = endpoint;
     }
+
+    /// Prepares it for the wait of [`close_and_await_termination`](crate::DXEndpoint::close_and_await_termination) of
+    /// `endpoint`, which is marked closed and is about to wait for its scheduled work; does nothing by default.
+    fn endpoint_closing(&self, endpoint: &EndpointState) {
+        let _ = endpoint;
+    }
 }
 
 /// The live entries, and whether shutdown has begun.
@@ -70,12 +76,31 @@ pub(crate) fn terminate_all() {
 /// Tells the registered entries that `endpoint` has been closed, outside the lock; a panic of one goes to
 /// [`ErrorManager`](crate::ErrorManager) and the others are still told.
 pub(crate) fn endpoint_closed(endpoint: &EndpointState) {
-    let entries = crate::lock(&REGISTRY).entries.clone();
-    for entry in entries.iter().filter_map(Weak::upgrade) {
+    for_each_entry(|entry| {
         crate::error_manager::report_panic(
             "DXEndpoint",
             "a waker at close",
             panic::catch_unwind(AssertUnwindSafe(|| entry.endpoint_closed(endpoint))),
         );
+    });
+}
+
+/// Tells the registered entries that `endpoint` is about to wait for its termination, outside the lock; a panic of one
+/// goes to [`ErrorManager`](crate::ErrorManager) and the others are still told.
+pub(crate) fn endpoint_closing(endpoint: &EndpointState) {
+    for_each_entry(|entry| {
+        crate::error_manager::report_panic(
+            "DXEndpoint",
+            "the close of an event stream",
+            panic::catch_unwind(AssertUnwindSafe(|| entry.endpoint_closing(endpoint))),
+        );
+    });
+}
+
+/// Calls `f` with each live entry, outside the lock.
+fn for_each_entry(mut f: impl FnMut(&dyn Terminate)) {
+    let entries = crate::lock(&REGISTRY).entries.clone();
+    for entry in entries.iter().filter_map(Weak::upgrade) {
+        f(&*entry);
     }
 }

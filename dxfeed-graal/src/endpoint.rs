@@ -860,13 +860,17 @@ impl DXEndpoint {
     /// It also waits while an [event queue](crate::event_queue) of a subscription of the endpoint holds events that no
     /// poll returned, and while the executor of a queue that a subscription has as its executor holds work: close the
     /// queue first, and never call it on the polling thread (see
-    /// [`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor)).
+    /// [`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor)). An
+    /// [`EventStream`](crate::EventStream) over an event queue ([`StreamOptions::event_queue`](crate::StreamOptions::event_queue))
+    /// needs no such care: it takes the events that its queue holds into its buffer.
     #[doc(alias = "closeAndAwaitTermination")]
     pub fn close_and_await_termination(&self) -> Result<()> {
         if isolate::in_callback() {
             return Err(Error::InCallback);
         }
         self.state.closed.store(true, Ordering::SeqCst);
+        // The event streams over event queues take the events that the queues hold, which the SDK waits for.
+        crate::terminate::endpoint_closing(&self.state);
         let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
         let closed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_closeAndAwaitTermination(t, e) });
