@@ -305,14 +305,22 @@ impl EndpointState {
         removed
     }
 
+    /// Whether the endpoint has been closed through the crate.
+    pub(crate) fn is_closed(&self) -> bool {
+        // SeqCst with the stores: two endpoints closed at once on two threads see each other closed.
+        self.closed.load(Ordering::SeqCst)
+    }
+
     fn close(&self) -> Result<()> {
-        if self.closed.swap(true, Ordering::AcqRel) {
+        if self.closed.swap(true, Ordering::SeqCst) {
             return Ok(());
         }
         let e = self.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
         let closed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_close(t, e) });
         self.release_publisher_listeners();
+        // The SDK does not close the subscriptions of the feed, so the event streams end here.
+        crate::terminate::endpoint_closed(self);
         closed
     }
 }
@@ -833,7 +841,8 @@ impl DXEndpoint {
         ConnectionError::last(|t, error| unsafe { sys::dxfg_v4_DXEndpoint_getLastConnectionError(t, e, error) })
     }
 
-    /// Closes the endpoint for all its handles; it cannot be used afterwards. Closing again does nothing.
+    /// Closes the endpoint for all its handles; it cannot be used afterwards. Closing again does nothing. The
+    /// [event streams](crate::EventStream) of subscriptions with no other open endpoint end.
     ///
     /// Notifications already scheduled may still be delivered after it returns; see
     /// [`close_and_await_termination`](Self::close_and_await_termination). Dropping the last owner of the endpoint
@@ -857,11 +866,12 @@ impl DXEndpoint {
         if isolate::in_callback() {
             return Err(Error::InCallback);
         }
-        self.state.closed.store(true, Ordering::Release);
+        self.state.closed.store(true, Ordering::SeqCst);
         let e = self.state.endpoint.as_ptr();
         // SAFETY: the endpoint is live.
         let closed = call(|t| unsafe { sys::dxfg_v4_DXEndpoint_closeAndAwaitTermination(t, e) });
         self.state.release_publisher_listeners();
+        crate::terminate::endpoint_closed(&self.state);
         closed
     }
 

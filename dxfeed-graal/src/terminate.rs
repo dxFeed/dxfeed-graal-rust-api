@@ -1,12 +1,20 @@
-//! What [`system::shutdown`](crate::system::shutdown) ends besides the SDK: the pending futures of promises.
+//! What [`system::shutdown`](crate::system::shutdown) and the close of an endpoint end besides the SDK: the pending
+//! futures of promises and the event streams.
 
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, Weak};
+
+use crate::endpoint::EndpointState;
 
 /// Something that [`system::shutdown`](crate::system::shutdown) ends.
 pub(crate) trait Terminate: Send + Sync {
     /// Ends it; does nothing if it has ended.
     fn terminate(&self);
+
+    /// Ends it if it depends on `endpoint`, which has just been closed; does nothing by default.
+    fn endpoint_closed(&self, endpoint: &EndpointState) {
+        let _ = endpoint;
+    }
 }
 
 /// The live entries, and whether shutdown has begun.
@@ -55,6 +63,19 @@ pub(crate) fn terminate_all() {
             "System",
             "a waker at shutdown",
             panic::catch_unwind(AssertUnwindSafe(|| entry.terminate())),
+        );
+    }
+}
+
+/// Tells the registered entries that `endpoint` has been closed, outside the lock; a panic of one goes to
+/// [`ErrorManager`](crate::ErrorManager) and the others are still told.
+pub(crate) fn endpoint_closed(endpoint: &EndpointState) {
+    let entries = crate::lock(&REGISTRY).entries.clone();
+    for entry in entries.iter().filter_map(Weak::upgrade) {
+        crate::error_manager::report_panic(
+            "DXEndpoint",
+            "a waker at close",
+            panic::catch_unwind(AssertUnwindSafe(|| entry.endpoint_closed(endpoint))),
         );
     }
 }

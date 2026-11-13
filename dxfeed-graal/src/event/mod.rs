@@ -473,6 +473,10 @@ macro_rules! event_types {
                         _ => None,
                     }
                 }
+
+                fn owned(item: &$view) -> Option<Self> {
+                    Some(<$view>::to_owned(item))
+                }
             }
 
             impl SubscriptionItem for $name {
@@ -507,6 +511,10 @@ macro_rules! event_types {
 
             fn from_event(event: &Event) -> Option<&Self> {
                 Some(event)
+            }
+
+            fn owned(item: EventRef<'_>) -> Option<Self> {
+                item.to_owned()
             }
         }
 
@@ -634,7 +642,17 @@ mod sealed {
 
         /// The owned event, or `None` for an event of another type.
         fn from_event(event: &Event) -> Option<&Self>;
+
+        /// A copy of an item, or `None` for an [`EventRef::Other`].
+        fn owned(item: Self::Item<'_>) -> Option<Self>
+        where
+            Self: SubscriptionItem + Sized;
     }
+}
+
+/// A copy of an item that a listener received, or `None` for an [`EventRef::Other`].
+pub(crate) fn owned<E: SubscriptionItem>(item: E::Item<'_>) -> Option<E> {
+    <E as sealed::Sealed>::owned(item)
 }
 
 /// The events of one listener call, borrowed from the SDK: a view such as `&QuoteRef` for a subscription to one event

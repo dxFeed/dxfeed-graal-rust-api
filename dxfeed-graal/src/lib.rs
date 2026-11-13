@@ -111,6 +111,27 @@
 //! leaves a pending request pending, and [`system::shutdown`] makes pending futures ready with [`Error::ShutDown`]. A
 //! worker thread of the runtime that polls a future is attached to the isolate, as any thread that calls the SDK is.
 //!
+//! A subscription turns into an [`EventStream`] of owned events with
+//! [`into_stream`](DXFeedSubscription::into_stream), before its symbols are added:
+//!
+//! ```no_run
+//! use dxfeed_graal::DXFeed;
+//! use dxfeed_graal::event::Quote;
+//!
+//! async fn print_quotes(feed: &DXFeed) -> dxfeed_graal::Result<()> {
+//!     let mut quotes = feed.create_subscription::<Quote>()?.into_stream()?;
+//!     quotes.subscription().add_symbols(["AAPL"])?;
+//!     while let Some(quote) = quotes.next().await {
+//!         println!("{quote}");
+//!     }
+//!     Ok(())
+//! }
+//! ```
+//!
+//! Its buffer drops the oldest events when it is full ([`StreamOptions`]); it ends when it or its subscription is
+//! closed, when its endpoints are closed and on [`system::shutdown`]. The cargo feature `stream` implements
+//! `futures_core::Stream` for it.
+//!
 //! # Errors
 //!
 //! Every fallible call returns [`Result`]. A Java exception becomes [`Error::Java`] with its class, message, stack
@@ -158,6 +179,7 @@ mod promise;
 mod publisher;
 pub mod qds;
 pub mod schedule;
+mod stream;
 mod subscription;
 mod subscription_controller;
 mod symbol;
@@ -184,6 +206,7 @@ pub use handle::live_handles;
 pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
 pub use promise::{AnyOf, AnyOfFuture, Promise, PromiseFuture, PromiseResult, Promises};
 pub use publisher::DXPublisher;
+pub use stream::{EventStream, StreamOptions};
 pub use subscription::{DXFeedSubscription, DXFeedTimeSeriesSubscription, ListenerId};
 pub use subscription_controller::SubscriptionController;
 pub use symbol::Symbol;
