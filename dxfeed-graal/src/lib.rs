@@ -151,9 +151,10 @@
 //! }
 //! ```
 //!
-//! Its buffer drops the oldest events when it is full ([`StreamOptions`]); it ends when it or its subscription is
-//! closed, when its endpoints are closed and on [`system::shutdown`]. The cargo feature `stream` implements
-//! `futures_core::Stream` for it.
+//! Its buffer drops the oldest events when it is full; with [`StreamOptions::event_queue`] the events stay in the SDK
+//! until the consumer waits for them, and the SDK keeps the last quote of each symbol meanwhile ([`StreamOptions`]).
+//! The stream ends when it or its subscription is closed, when its endpoints are closed and on [`system::shutdown`].
+//! The cargo feature `stream` implements `futures_core::Stream` for it.
 //!
 //! # Errors
 //!

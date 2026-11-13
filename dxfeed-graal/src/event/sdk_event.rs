@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 
 use dxfeed_graal_sys as sys;
 
-use super::{Event, EventKind, EventType, LastingEvent, sealed::Sealed};
+use super::{Event, EventKind, EventType, LastingEvent, SubscriptionItem, sealed::Sealed};
 use crate::error::{Error, JavaException, Result};
 use crate::isolate::{self, Thread, call};
 
@@ -145,6 +145,34 @@ pub(crate) unsafe fn take_event_list<E: TryFrom<Event>>(list: *mut sys::dxfg_eve
                 .ok_or_else(unexpected_event)
         })
         .collect()
+}
+
+/// Copies the events of a list that the SDK gave to the caller as the items of `E`, as an event stream copies the
+/// events of a listener call, and releases the list; NULL is no events. Returns the copies and the number of the
+/// events that the crate does not map ([`EventRef::Other`](super::EventRef::Other)), which it skips.
+///
+/// # Safety
+///
+/// `list` must be NULL or a live SDK event list that the caller owns and nothing else releases.
+pub(crate) unsafe fn take_owned_list<E: SubscriptionItem>(list: *mut sys::dxfg_event_type_list) -> (Vec<E>, u64) {
+    let Some(list) = NonNull::new(list) else {
+        return (Vec::new(), 0);
+    };
+    // SAFETY: the caller guarantees that the list is live.
+    let len = usize::try_from(unsafe { list.as_ref() }.size).unwrap_or(0);
+    LIVE.fetch_add(len, Ordering::SeqCst);
+    let guard = SdkEventList(list, len);
+    // SAFETY: the list is live while the guard lives, and the items are copied before it is dropped.
+    let items = unsafe { super::Events::new(guard.0.as_ptr()) }.typed::<E>();
+    let mut events = Vec::with_capacity(len);
+    let mut skipped = 0;
+    for item in items {
+        match super::owned::<E>(item) {
+            Some(event) => events.push(event),
+            None => skipped += 1,
+        }
+    }
+    (events, skipped)
 }
 
 /// A list of events with tags that the SDK returned, released on `Drop`.

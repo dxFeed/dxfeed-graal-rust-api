@@ -24,6 +24,10 @@
 //!   attached subscription, which waits while the queue holds events that no poll returned; never call it on the
 //!   polling thread.
 //!
+//! For async code, [`StreamOptions::event_queue`](crate::StreamOptions::event_queue) makes an
+//! [`EventStream`](crate::EventStream) over the queue of its subscription, polled on a thread of the stream only while a
+//! task waits for events.
+//!
 //! With the cargo feature `experimental`, a queue also has a ready signal (`set_ready_signal`): an OS object that the
 //! SDK makes ready when the queue has work, so that an event loop polls with the timeout zero on its own thread.
 //!
@@ -54,7 +58,7 @@ use std::time::Duration;
 use dxfeed_graal_sys as sys;
 
 use crate::error::{Error, Result};
-use crate::event::sdk_event::{take_event_list, take_tagged_event_list};
+use crate::event::sdk_event::{take_event_list, take_owned_list, take_tagged_event_list};
 use crate::event::{Event, SubscriptionItem};
 use crate::executor::Executor;
 use crate::handle::Handle;
@@ -135,6 +139,23 @@ impl<E: SubscriptionItem> EventQueue<E> {
     #[doc(alias = "setReadySignal")]
     pub unsafe fn set_ready_signal(&self, signal: ReadySignal) -> Result<()> {
         set_ready_signal(&self.handle, signal)
+    }
+
+    /// Polls as [`poll`](Self::poll) does, but copies the events as an [`EventStream`](crate::EventStream) does: an
+    /// event that the crate does not map is skipped and counted instead of failing the poll. The events and the
+    /// skipped count come as one batch, which may hold no events when all were skipped.
+    pub(crate) fn poll_items(&self, timeout: Option<Duration>, limit: usize) -> Result<PollResult<(Vec<E>, u64)>> {
+        let q = self.handle.as_ptr();
+        let (timeout, limit) = (timeout_millis(timeout), limit_of(limit));
+        let mut list = ptr::null_mut();
+        // SAFETY: the queue is live; the out-pointer is valid for writes.
+        let result = poll(|t| unsafe { sys::dxfg_v4_EventQueue_poll(t, q, timeout, limit, &mut list) })?;
+        Ok(match result {
+            // SAFETY: on events the SDK returned a list that is ours.
+            Polled::Events => PollResult::Events(unsafe { take_owned_list(list) }),
+            Polled::NoEvents => PollResult::NoEvents,
+            Polled::Closed => PollResult::Closed,
+        })
     }
 }
 

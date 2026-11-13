@@ -10,8 +10,17 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{Error, EventStream, Promise, Promises, system};
+use dxfeed_graal::{Error, ErrorManager, EventStream, Promise, Promises, StreamOptions, system};
 use support::{CountingWaker, Hub, block_on_with, is_child, poll_with, quote, quote_with_bid, run_child};
+
+/// A stream of quotes over the event queue of its subscription.
+fn queue_stream(hub: &Hub) -> EventStream<Quote> {
+    hub.feed
+        .create_subscription::<Quote>()
+        .unwrap()
+        .into_stream_with(StreamOptions::event_queue())
+        .unwrap()
+}
 
 /// Polls `stream` once with `waker`.
 fn poll_stream(stream: &mut EventStream<Quote>, waker: &Arc<CountingWaker>) -> Poll<Option<Quote>> {
@@ -59,6 +68,21 @@ fn child_shutdown_ends_pending_futures() {
     }
     assert_eq!(quotes.buffered(), 1);
     assert!(poll_stream(&mut waiting, &stream_waker).is_pending());
+    // The same over event queues: the thread of the waiting one is in a blocking poll.
+    let mut queued = queue_stream(&hub);
+    queued.subscription().add_symbols(["MSFT"]).unwrap();
+    let mut queue_waiting = queue_stream(&hub);
+    hub.publisher
+        .publish_events(&[quote_with_bid("MSFT", 3.0).into()])
+        .unwrap();
+    assert!(poll_stream(&mut queued, &stream_waker).is_pending());
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while queued.buffered() == 0 && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(queued.buffered(), 1);
+    assert!(poll_stream(&mut queue_waiting, &stream_waker).is_pending());
+    ErrorManager::clear_errors();
     // Futures made on another thread while shutdown runs.
     let racing: Vec<Promise<()>> = (0..200).map(|_| Promise::new().unwrap()).collect();
     let racer = thread::spawn(move || racing.into_iter().map(IntoFuture::into_future).collect::<Vec<_>>());
@@ -70,6 +94,19 @@ fn child_shutdown_ends_pending_futures() {
     assert!(matches!(poll_stream(&mut quotes, &stream_waker), Poll::Ready(Some(_))));
     assert!(matches!(poll_stream(&mut quotes, &stream_waker), Poll::Ready(None)));
     assert!(matches!(poll_stream(&mut waiting, &stream_waker), Poll::Ready(None)));
+    // The streams over event queues end on their threads.
+    let long = Duration::from_secs(10);
+    assert!(matches!(poll_stream(&mut queued, &stream_waker), Poll::Ready(Some(_))));
+    assert!(matches!(block_on_with(queued.next(), &stream_waker, long), Some(None)));
+    assert!(matches!(
+        block_on_with(queue_waiting.next(), &stream_waker, long),
+        Some(None)
+    ));
+    let errors = ErrorManager::get_errors();
+    assert!(
+        errors.iter().all(|error| error.component != "DXFeedSubscription"),
+        "{errors:?}"
+    );
     assert!(matches!(
         poll_with(&mut request, &waker),
         Poll::Ready(Err(Error::ShutDown))
