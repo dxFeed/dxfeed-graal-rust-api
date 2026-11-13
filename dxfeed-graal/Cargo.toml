@@ -19,11 +19,12 @@ categories = ["api-bindings", "finance"]
 include = ["/src/**", "/build.rs", "/tests/**"]
 
 [dependencies]
-dxfeed-graal-sys = { version = "0.3.0", path = "../dxfeed-graal-sys" }
+dxfeed-graal-sys = { version = "0.4.0", path = "../dxfeed-graal-sys" }
 futures-core = { version = "0.3.31", optional = true, default-features = false }
 
 [features]
-# The futures_core::Stream trait for EventStream; the stream works without it through its own next and poll_next.
+# The futures_core::Stream trait for EventStream, TaggedEventStream and ModelStream; the streams work without it
+# through their own next and poll_next.
 stream = ["dep:futures-core"]
 # The experimental tier of the SDK: the feed filters, the ready signal of the event queues, the event peek of the time
 # series transaction models, the message connector listener and the connection errors. They may change in a minor
