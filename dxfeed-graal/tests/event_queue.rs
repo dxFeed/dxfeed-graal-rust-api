@@ -12,7 +12,7 @@ use dxfeed_graal::event_queue::{EventQueue, PollResult, SharedEventQueue};
 use dxfeed_graal::ipf::InstrumentProfile;
 use dxfeed_graal::ipf::live::InstrumentProfileCollector;
 use dxfeed_graal::model::TimeSeriesEventModel;
-use dxfeed_graal::{Error, Event, Executor, Promise, system};
+use dxfeed_graal::{Error, Event, Executor, Promise, live_handles, system};
 use support::{Hub, candle, is_child, quote, run_child, time_and_sale, trade};
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -254,20 +254,56 @@ fn a_promise_handler_on_a_shared_queue_runs_in_a_poll() {
     assert_eq!(poll_until(&queue, &done), (true, thread::current().id()));
 }
 
-#[test]
-fn the_executor_of_a_closed_queue_runs_the_work_at_once() {
-    let queue = SharedEventQueue::new().unwrap();
-    let executor: Executor = queue.get_executor().unwrap();
-    queue.close().unwrap();
+/// Adds a handler on `executor` to a new promise and completes it; returns whether the handler was called.
+fn complete_with_handler_on(executor: &Executor, close_while_pending: Option<&SharedEventQueue>) -> bool {
     let promise = Promise::<()>::new().unwrap();
     let (sender, done) = mpsc::channel();
     promise
-        .when_done_async(move |_| sender.send(thread::current().id()).unwrap(), &executor)
+        .when_done_async(move |_| sender.send(()).unwrap(), executor)
         .unwrap();
     promise.complete().unwrap();
-    // The work runs on the posting thread, but the listeners of the application are not called.
-    assert!(done.recv_timeout(Duration::from_millis(300)).is_err());
+    if let Some(queue) = close_while_pending {
+        queue.close().unwrap();
+    }
+    done.recv_timeout(Duration::from_millis(300)).is_ok()
+}
+
+/// The executor of a closed queue runs the work at once, on the posting thread, but the SDK does not call the promise
+/// handlers there: a handler posted to a closed queue, or pending when it closes, is never called, so its closure and
+/// its handle of the promise stay.
+#[test]
+fn the_executor_of_a_closed_queue_never_calls_promise_handlers() {
+    run_child("child_the_executor_of_a_closed_queue_never_calls_promise_handlers");
+}
+
+#[test]
+#[ignore = "run by the_executor_of_a_closed_queue_never_calls_promise_handlers"]
+fn child_the_executor_of_a_closed_queue_never_calls_promise_handlers() {
+    if !is_child() {
+        return;
+    }
+    let handles = live_handles();
+
+    let queue = SharedEventQueue::new().unwrap();
+    let executor: Executor = queue.get_executor().unwrap();
+    queue.close().unwrap();
+    assert!(!complete_with_handler_on(&executor, None), "posted to a closed queue");
     assert_eq!(queue.poll(Some(Duration::ZERO), 0).unwrap(), PollResult::Closed);
+    drop((queue, executor));
+    assert_eq!(live_handles(), handles + 1, "the handle of the promise in the handler");
+
+    let queue = SharedEventQueue::new().unwrap();
+    let executor: Executor = queue.get_executor().unwrap();
+    assert!(
+        !complete_with_handler_on(&executor, Some(&queue)),
+        "pending when the queue closed"
+    );
+    drop((queue, executor));
+    assert_eq!(
+        live_handles(),
+        handles + 2,
+        "the handles of the promises in the handlers"
+    );
 }
 
 #[test]

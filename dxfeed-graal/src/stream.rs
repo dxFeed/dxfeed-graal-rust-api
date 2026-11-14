@@ -350,7 +350,8 @@ impl<E: SubscriptionItem, S: AsRef<DXFeedSubscription<E>>> fmt::Debug for EventS
 /// The stream ends, yielding `None` after the buffered events, when it is [closed](Self::close), when its queue is
 /// closed, and when [`system::shutdown`](crate::system::shutdown) runs. Closing an endpoint does not end it, as
 /// subscriptions of any endpoint may be attached to the queue. Dropping the stream closes the queue; the executors
-/// that it lent then run their work at once, on the posting thread, without calling the listeners of the application.
+/// that it lent then run their work at once, on the posting thread, without calling the listeners of the application or
+/// the handlers of promises ([`SharedEventQueue::get_executor`]).
 ///
 /// # Example
 ///
