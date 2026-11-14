@@ -409,7 +409,9 @@ impl<T: PromiseResult> Promise<T> {
     /// `handler` receives another handle of the promise, which keeps no endpoint open. A panic of `handler` goes to
     /// [`ErrorManager`](crate::ErrorManager); blocking waits inside it return [`Error::InCallback`]. A handler cannot
     /// be removed: one of a promise that never completes, such as a promise whose endpoint was closed, stays with its
-    /// closure.
+    /// closure and a handle of the promise, and so does one that the executor of a closed event queue would run, as
+    /// the SDK never calls it there
+    /// ([`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor)).
     #[doc(alias = "whenDone")]
     pub fn when_done(&self, handler: impl FnOnce(&Promise<T>) + Send + 'static) -> Result<()> {
         self.add_handler(Box::new(handler), None)

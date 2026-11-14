@@ -244,9 +244,12 @@ impl SharedEventQueue {
     /// models, the collector, the endpoint builder or [`Promise::when_done_async`](crate::Promise::when_done_async).
     ///
     /// The executor keeps the queue open as the queue itself does; the executor of a closed queue runs the work at
-    /// once, on the posting thread, without calling the listeners of the application. A subscription that has it as
-    /// its executor gets its events by its listeners, not by the polls. The calls of a model that notify on the
-    /// calling thread (`set_symbol`, `clear`) call its listener there, not in a poll.
+    /// once, on the posting thread, without calling the listeners of the application or the handlers of promises. Such
+    /// a handler, also one pending when the queue closes, is never called and keeps its closure and a handle of its
+    /// promise; the future of a request of an endpoint built with this executor is then ready only once it is
+    /// [cancelled](crate::PromiseFuture::cancel) or [`system::shutdown`](crate::system::shutdown) runs. A subscription
+    /// that has it as its executor gets its events by its listeners, not by the polls. The calls of a model that notify
+    /// on the calling thread (`set_symbol`, `clear`) call its listener there, not in a poll.
     ///
     /// For a subscription that has it as its executor, also inherited from an endpoint built with it,
     /// [`DXFeed::detach_subscription_and_clear`](crate::DXFeed::detach_subscription_and_clear) and
