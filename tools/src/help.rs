@@ -128,7 +128,9 @@ pub fn tool_screen(info: &Info, error: Option<&str>) -> String {
     let mut result = header(info.name, width, &description(info, error));
     result.push('\n');
     result.push_str(&usage(info.usage));
-    result.push_str("\nWhere:\n\n");
+    if !info.args.is_empty() {
+        result.push_str("\nWhere:\n\n");
+    }
     for spec in info.args {
         result.push_str(&argument(spec, name_field, width));
     }

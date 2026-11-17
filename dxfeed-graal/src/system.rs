@@ -57,6 +57,7 @@ pub fn set_properties<K: AsRef<str>, V: AsRef<str>>(properties: impl IntoIterato
 /// - `-D<name>=<value>` sets a system property before anything else runs, such as `-Dlog.level=WARN`;
 /// - `-Xmx<size>`, `-Xms<size>` and `-Xmn<size>` set the maximum, the initial and the young generation sizes of the
 ///   heap, such as `-Xmx1g`;
+/// - `-Xss<size>` sets the stack size of the threads, such as `-Xss2m`;
 /// - `-XX:<option>=<value>`, `-XX:+<option>` and `-XX:-<option>` set the options of the runtime.
 ///
 /// An unknown `-XX:` option or a wrong size, such as `-Xmx64q`, makes the creation of the isolate fail: every call of

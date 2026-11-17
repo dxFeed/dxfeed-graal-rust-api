@@ -31,6 +31,7 @@ fn the_usage_lists_the_tools() {
              Dump         Dumps all events received from address.\n  \
              Help         Help tool.\n  \
              LatencyTest  Connects to the specified address(es) and calculates latency.\n  \
+             NetTest      Publishes generated events and prints the statistics of QD NetTest.\n  \
              PerfTest     Connects to specified address and calculates performance counters.\n  \
              Qds          A collection of tools ported from the Java qds-tools.\n"
     ));
@@ -69,6 +70,15 @@ fn a_parse_error_shows_the_screen_with_the_error() {
 #[test]
 fn help_shows_tools_and_articles() {
     assert!(stdout(&["Help", "qds"]).starts_with("\nQds\n===\n"));
+    let net_test = stdout(&["Help", "NetTest"]);
+    assert!(
+        net_test.contains("\nUsage:\n  NetTest p <address> -S <symbols> [options]\n"),
+        "{net_test}"
+    );
+    assert!(
+        net_test.contains("\n  --role <role>        the role of the endpoints:"),
+        "{net_test}"
+    );
     let address = stdout(&["help", "address"]);
     assert!(
         address.starts_with("\nAddress\n=======\n\nTo create a connection"),

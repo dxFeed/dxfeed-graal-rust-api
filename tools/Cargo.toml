@@ -13,7 +13,11 @@ name = "Tools"
 path = "src/main.rs"
 
 [dependencies]
+ctrlc = { version = "3.5.2", features = ["termination"] }
 dxfeed-graal = { path = "../dxfeed-graal" }
+
+[dev-dependencies]
+regex = { version = "1.13", default-features = false, features = ["std"] }
 
 [build-dependencies]
 dxfeed-graal-build = { path = "../dxfeed-graal-build" }

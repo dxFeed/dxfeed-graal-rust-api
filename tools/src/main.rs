@@ -10,6 +10,7 @@ mod dump;
 mod help;
 mod latency_test;
 mod metrics;
+mod net_test;
 mod perf_test;
 mod qds;
 mod stats;
@@ -30,6 +31,7 @@ pub enum Tool {
     Dump,
     Help,
     LatencyTest,
+    NetTest,
     PerfTest,
     Qds,
 }
@@ -41,6 +43,7 @@ impl Tool {
         Tool::Dump,
         Tool::Help,
         Tool::LatencyTest,
+        Tool::NetTest,
         Tool::PerfTest,
         Tool::Qds,
     ];
@@ -60,6 +63,7 @@ impl Tool {
             Tool::Dump => &dump::INFO,
             Tool::Help => &help::HELP,
             Tool::LatencyTest => &latency_test::INFO,
+            Tool::NetTest => &net_test::INFO,
             Tool::PerfTest => &perf_test::INFO,
             Tool::Qds => &qds::INFO,
         }
@@ -79,6 +83,8 @@ impl Tool {
             Tool::Dump => dump::run(args)?,
             Tool::Help => help::run(args),
             Tool::LatencyTest => latency_test::run(args)?,
+            // NetTest parses its own command line and runs from main(), before the common properties.
+            Tool::NetTest => unreachable!("NetTest runs before the argument parsing"),
             Tool::PerfTest => perf_test::run(args)?,
             Tool::Qds => qds::run(args)?,
         }
@@ -130,11 +136,26 @@ fn main() -> ExitCode {
         .skip(1)
         .map(|arg| arg.to_string_lossy().into_owned())
         .collect();
+    // NetTest passes its -X options to the isolate, so it goes before the common properties create the isolate.
+    if args.first().and_then(|first| Tool::find(first)) == Some(Tool::NetTest) {
+        return net_test::main(&args[1..]);
+    }
     match run(&args) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
             ExitCode::FAILURE
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn net_test_is_found_in_any_case() {
+        assert_eq!(Tool::find("nettest"), Some(Tool::NetTest));
+        assert_eq!(Tool::find("NetTest"), Some(Tool::NetTest));
     }
 }
