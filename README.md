@@ -568,6 +568,14 @@ options:
 - [x] [PerfTest](tools/src/perf_test.rs) connects to the specified address(es) and calculates performance counters
   (events per second, memory usage, CPU usage, etc.)
 - [x] [LatencyTest](tools/src/latency_test.rs) connects to the specified address(es) and calculates latency
+- [x] [NetTest](tools/src/net_test.rs) publishes generated Trade or TimeAndSale events through publisher endpoints
+  and prints the statistics lines of the QD tool `NetTest p`, as the NetTest publisher of the C API does, with the
+  same command line and output; the consumer is QD NetTest `c`. For example, on loopback:
+  `Tools NetTest p :6666 -S 100 -r */5k -s 1s --duration 10s -Ddxscheme.nanoTime=true`, with a consumer connected
+  to `localhost:6666`. `Tools Help NetTest` lists the options. Differences from the C tool: `--role
+  PUBLISHER|STREAM_PUBLISHER` selects the role of the endpoints and `--legacy` is rejected; `--reuse` overwrites one
+  batch of events in place and saves the Rust allocations only, as every publishing call still converts the events
+  for the SDK; `-XX:+PrintGCSummary` is accepted but prints nothing, as the isolate is never torn down
 - [x] [Qds](tools/src/qds.rs) collection of tools ported from the Java qds-tools
 - [x] [Help](tools/src/help.rs) shows the help screens of the tools and the help articles
 
