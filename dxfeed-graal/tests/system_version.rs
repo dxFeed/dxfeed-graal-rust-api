@@ -23,6 +23,7 @@ fn every_feature_of_the_headers_is_supported() {
         system::feature::TIME_SERIES_TX_MODEL_EVENT_PEEK,
         system::feature::MESSAGE_CONNECTORS,
         system::feature::CONNECTION_ERRORS,
+        system::feature::RUNTIME_STATISTICS,
     ] {
         assert!(system::is_feature_supported(name).unwrap(), "{name}");
     }
@@ -62,6 +63,10 @@ fn the_feature_names_are_those_of_the_headers() {
     assert_eq!(
         system::feature::CONNECTION_ERRORS,
         name(dxfeed_graal_sys::DXFG_V4_FEATURE_CONNECTION_ERRORS)
+    );
+    assert_eq!(
+        system::feature::RUNTIME_STATISTICS,
+        name(dxfeed_graal_sys::DXFG_V4_FEATURE_RUNTIME_STATISTICS)
     );
 }
 

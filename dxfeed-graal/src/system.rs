@@ -1,4 +1,4 @@
-//! Java system properties of the SDK, its version and features, and its shutdown.
+//! Java system properties of the SDK, its version and features, its runtime statistics, and its shutdown.
 //!
 //! When the SDK starts, as in the C++ and .NET APIs, it sets the system properties of the `dxfeed.system.properties`
 //! file in the current directory, or of the file named by the `DXFEED_dxfeed.system.properties` environment variable,
@@ -12,6 +12,7 @@
 use std::ffi::CString;
 use std::ptr;
 use std::sync::Mutex;
+use std::time::Duration;
 
 use dxfeed_graal_sys as sys;
 
@@ -120,6 +121,100 @@ pub mod feature {
     pub const MESSAGE_CONNECTORS: &str = "message_connectors";
     /// The last connection error of a message connector and of an endpoint. It is experimental in the SDK.
     pub const CONNECTION_ERRORS: &str = "connection_errors";
+    /// The runtime statistics of the isolate and its process
+    /// ([`get_runtime_statistics`](super::get_runtime_statistics)).
+    pub const RUNTIME_STATISTICS: &str = "runtime_statistics";
+}
+
+/// The runtime statistics of the isolate of the SDK and of its process, from [`get_runtime_statistics`].
+///
+/// A value that the platform or the garbage collector does not give is `None`. The heap pool and collection values
+/// follow the Serial GC of the SDK builds; a build with the G1 GC has none of them, and `allocated_bytes` is `None`
+/// with the GraalVM of the SDK. The counters and times grow from the start of the isolate: the change between two
+/// calls covers the time between them. Each value is read on its own, so a heap value and a collection count may come
+/// from moments around one collection.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub struct RuntimeStatistics {
+    /// The bytes of the heap in use, garbage not yet collected included.
+    pub heap_used_bytes: Option<u64>,
+    /// The bytes of the heap taken from the system, `heap_used_bytes` or more.
+    pub heap_committed_bytes: Option<u64>,
+    /// The bytes the heap may grow to (`-Xmx`, by default a part of the physical memory).
+    pub heap_max_bytes: Option<u64>,
+    /// The incremental (young generation) collections.
+    pub young_gc_count: Option<u64>,
+    /// The total time of the incremental collections, with a step of a millisecond.
+    pub young_gc_time: Option<Duration>,
+    /// The collections of the whole heap.
+    pub full_gc_count: Option<u64>,
+    /// The total time of the collections of the whole heap, with a step of a millisecond.
+    pub full_gc_time: Option<Duration>,
+    /// The live threads of the isolate: its own threads and the attached native threads.
+    pub thread_count: Option<u64>,
+    /// The peak of `thread_count`.
+    pub peak_thread_count: Option<u64>,
+    /// The live daemon threads of the isolate; the attached native threads count as daemon threads.
+    pub daemon_thread_count: Option<u64>,
+    /// The threads started or attached in the isolate.
+    pub total_started_thread_count: Option<u64>,
+    /// The CPU time of the whole process, user plus system: every isolate of the process reports the same value. The
+    /// step is the one of the system (15.625 ms on Windows).
+    pub process_cpu_time: Option<Duration>,
+    /// The time since the isolate started, with a step of a millisecond.
+    pub uptime: Option<Duration>,
+    /// The bytes allocated by all threads of the isolate.
+    pub allocated_bytes: Option<u64>,
+    /// The bytes in use in the eden space of the young generation.
+    pub eden_used_bytes: Option<u64>,
+    /// The bytes in use in the survivor space of the young generation.
+    pub survivor_used_bytes: Option<u64>,
+    /// The bytes in use in the old generation: its growth across collections shows objects that stay alive.
+    pub old_used_bytes: Option<u64>,
+    /// The processors available to the process, container limits considered: divide a CPU load by it to get the load
+    /// per processor.
+    pub available_processors: Option<u64>,
+}
+
+impl RuntimeStatistics {
+    fn from_sys(stats: &sys::dxfg_v4_runtime_stats_t) -> Self {
+        // The SDK gives -1 for a value it does not have.
+        let value = |v: i64| u64::try_from(v).ok();
+        let millis = |v: i64| value(v).map(Duration::from_millis);
+        Self {
+            heap_used_bytes: value(stats.heap_used_bytes),
+            heap_committed_bytes: value(stats.heap_committed_bytes),
+            heap_max_bytes: value(stats.heap_max_bytes),
+            young_gc_count: value(stats.young_gc_count),
+            young_gc_time: millis(stats.young_gc_time_ms),
+            full_gc_count: value(stats.full_gc_count),
+            full_gc_time: millis(stats.full_gc_time_ms),
+            thread_count: value(stats.thread_count),
+            peak_thread_count: value(stats.peak_thread_count),
+            daemon_thread_count: value(stats.daemon_thread_count),
+            total_started_thread_count: value(stats.total_started_thread_count),
+            process_cpu_time: value(stats.process_cpu_time_ns).map(Duration::from_nanos),
+            uptime: millis(stats.uptime_ms),
+            allocated_bytes: value(stats.allocated_bytes),
+            eden_used_bytes: value(stats.eden_used_bytes),
+            survivor_used_bytes: value(stats.survivor_used_bytes),
+            old_used_bytes: value(stats.old_used_bytes),
+            available_processors: value(stats.available_processors),
+        }
+    }
+}
+
+/// Reads the runtime statistics of the isolate of the SDK and of its process: heap, garbage collections, threads,
+/// process CPU time and uptime (`dxfg_v4_system_get_runtime_statistics`). In Java they come from `ManagementFactory`,
+/// `ProcessHandle` and `Runtime.availableProcessors`.
+///
+/// Reading changes nothing. The first call prepares the sources and may take some milliseconds: call it once at
+/// start-up to keep that out of a measurement. It also works after [`shutdown`].
+pub fn get_runtime_statistics() -> Result<RuntimeStatistics> {
+    let mut stats = sys::dxfg_v4_runtime_stats_t::default();
+    // SAFETY: the out-pointer is valid for writes of the struct.
+    call(|t| unsafe { sys::dxfg_v4_system_get_runtime_statistics(t, &mut stats) })?;
+    Ok(RuntimeStatistics::from_sys(&stats))
 }
 
 /// Returns the version of the SDK release the loaded library belongs to (`dxfg_v4_system_get_version`).

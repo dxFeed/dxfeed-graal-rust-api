@@ -406,6 +406,10 @@ ${env:DXFEED_dxfeed.address} = "demo.dxfeed.com:7300"
 `system::set_property("dxfeed.address", ...)` sets a property in code. Most properties take effect only when they are
 set before the first endpoint is created.
 
+`system::set_isolate_arguments` passes options to the Graal isolate of the SDK when it starts, such as the heap size
+(`-Xmx512m`) or the GC log (`-XX:+PrintGC`). `system::get_runtime_statistics()` reads the heap, the garbage
+collections, the threads, the CPU time and the uptime of the isolate and its process.
+
 A `tls+` address checks the certificate of the server against the root CAs of the JDK that builds the SDK. To trust
 other roots, set `javax.net.ssl.trustStore` to a trust store file (and `javax.net.ssl.trustStorePassword`, if it has
 one) before the first TLS connection.
@@ -876,6 +880,7 @@ the types.
 - [x] [Message connectors](#message-connectors) of an endpoint: their addresses, states, connections and statistics
 - [x] `TimeFormat`, `TimePeriod`, `TimeZone`, the logging bridge (`logging`) and executors with thread pools
 - [x] `close_and_await_termination`, explicit shutdown and clean process exit
+- [x] Isolate arguments (heap size, GC options) and the runtime statistics of the isolate
 - [x] Errors without a caller: `ErrorManager` with a handler and a journal
 - [x] Deployment of the SDK library next to executables, a download cache for the SDK archive
 - [x] The [Tools](#tools) binary and the QDS tools of the SDK (`qds::Tools`): the symbol list parser and the
