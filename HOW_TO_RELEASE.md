@@ -12,6 +12,21 @@ the section `## vX.Y.Z`. The tag starts the release workflow (`.github/workflows
 4. Once its reviewer approves, it publishes the crates `dxfeed-graal-sys`, `dxfeed-graal-build` and `dxfeed-graal` on
    crates.io (see [Crates](#crates)).
 
+## Versions
+
+The version follows the Stability section of the README; from 1.0.0 on:
+
+- **major** for a change that breaks code building against the public API outside the feature `experimental`:
+  a removed or renamed item, a changed signature, a new required trait bound, a lost `Send` or `Sync`, a field or
+  variant added to a type that is not `#[non_exhaustive]`;
+- **minor** for new API, new fields and variants of `#[non_exhaustive]` types, any change behind `experimental`, a
+  move to a newer SDK, and a higher minimum supported Rust version (say so in the notes);
+- **patch** for fixes that change no API.
+
+Before 1.0.0 a breaking change takes the next minor version. `dxfeed-graal-build` and, until 1.0.0, `dxfeed-graal-sys`
+take the version of the workspace (`xtask release-notes` checks the latter); from 1.0.0 the bindings get a version of
+their own, as the README describes.
+
 ## Prepare
 
 On a branch, in a pull request:

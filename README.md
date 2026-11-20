@@ -41,6 +41,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
   * [Closing and Exit](#closing-and-exit)
 - [Tools](#tools)
 - [Samples](#samples)
+- [Stability](#stability)
 - [Current State](#current-state)
 - [How To Develop](HOW_TO_DEVELOP.md)
 - [How To Release](HOW_TO_RELEASE.md), [Release Notes](ReleaseNotes.md)
@@ -744,6 +745,30 @@ cd samples/API/PrintQuoteEventsSample
 - [x] [PriceLevelServiceClientSample](samples/Orcs/PriceLevelServiceClientSample/main.rs)
   demonstrates how to get the price levels and the quotes of a symbol for a period from the Order Reconstruction
   Service (ORCS) with `PriceLevelService`
+
+## Stability
+
+From version 1.0.0 on, `dxfeed-graal` and `dxfeed-graal-build` follow [Semantic Versioning](https://semver.org):
+a patch release fixes bugs, a minor release adds to the API and may move to a newer SDK, and only a major release
+breaks code that builds against the public API. Before 1.0.0, a minor release may break the API.
+
+- The event types, `InstrumentProfile` and the enums that mirror Java enums are `#[non_exhaustive]`: a minor release
+  may add fields and variants as the SDK and the Java API grow. Make an event with `new` and field writes, and match
+  these enums with a wildcard arm.
+- The feature `experimental` is outside this promise: its items wrap SDK functions that the SDK may change in a minor
+  release, so they may change in a minor release of the crate too.
+- Items hidden from the documentation, such as the module `__private`, are not part of the API.
+- The behavior that comes from the SDK and the Java API follows them: a newer SDK may fix or change it. The texts of
+  `Debug` and of the errors may change in any release; `Display` of the events follows Java `toString`.
+- The feature `stream` implements the `Stream` trait of futures-core 0.3. A futures-core 1.0 will get a feature of its
+  own; the 0.3 one stays until the next major release.
+- The minimum supported Rust version is 1.88. Raising it is a minor release, never a patch, and the release notes say
+  so.
+- `dxfeed-graal-sys`, the raw bindings, has a SemVer of its own: a major release when the SDK removes or changes a
+  function that it exports. The build metadata of its version names the SDK (`+sdk.X.Y.Z`); the crate calls only the
+  `v4` generation of the SDK functions.
+- Every release names the SDK it is built with: in the version of `dxfeed-graal-sys`, the release notes and the badge
+  above.
 
 ## Current State
 
