@@ -568,14 +568,9 @@ options:
 - [x] [PerfTest](tools/src/perf_test.rs) connects to the specified address(es) and calculates performance counters
   (events per second, memory usage, CPU usage, etc.)
 - [x] [LatencyTest](tools/src/latency_test.rs) connects to the specified address(es) and calculates latency
-- [x] [NetTest](tools/src/net_test.rs) publishes generated Trade or TimeAndSale events through publisher endpoints
-  and prints the statistics lines of the QD tool `NetTest p`, as the NetTest publisher of the C API does, with the
-  same command line and output; the consumer is QD NetTest `c`. For example, on loopback:
-  `Tools NetTest p :6666 -S 100 -r */5k -s 1s --duration 10s -Ddxscheme.nanoTime=true`, with a consumer connected
-  to `localhost:6666`. `Tools Help NetTest` lists the options. Differences from the C tool: `--role
-  PUBLISHER|STREAM_PUBLISHER` selects the role of the endpoints and `--legacy` is rejected; `--reuse` overwrites one
-  batch of events in place and saves the Rust allocations only, as every publishing call still converts the events
-  for the SDK; `-XX:+PrintGCSummary` is accepted but prints nothing, as the isolate is never torn down
+- [x] [NetTest](tools/src/net_test.rs) publishes generated Trade or TimeAndSale events (`p`) or receives them and
+  reports the end-to-end lag (`c`), printing the statistics lines of the QD tool NetTest, as the NetTest of the C API
+  does; see [NetTest](#nettest) below
 - [x] [Qds](tools/src/qds.rs) collection of tools ported from the Java qds-tools
 - [x] [Help](tools/src/help.rs) shows the help screens of the tools and the help articles
 
@@ -595,6 +590,44 @@ target/release/Tools PerfTest demo.dxfeed.com:7300 Quote AAPL,IBM -p PerfTest.fo
 target/release/Tools LatencyTest demo.dxfeed.com:7300 Quote,Trade AAPL,IBM --interval 5
 target/release/Tools Qds "help connect"
 ```
+
+### NetTest
+
+`Tools NetTest p|c <address> -S <symbols> [options]` follows the NetTest specification (`nettest/1`) of the Graal SDK
+kit. Mode `p` publishes the generated events through `-C` publisher endpoints at an optional total rate (`-r */<rate>`),
+mode `c` subscribes `-C` feed endpoints to their slices of the symbols and reports the signed end-to-end lag of every
+event. Both print a statistics block per `-s` period (the summary line, a line per instance and the runtime line of the
+isolate); `Tools NetTest --help` lists every option. For example, on loopback, a publisher and a consumer:
+
+```shell
+target/release/Tools NetTest p :6666 -S 100 -r */5k -s 1s --duration 10s
+target/release/Tools NetTest c localhost:6666 -S 100 -C 2 -s 1s --duration 5s --summary c-summary.json
+```
+
+`--summary <file>` writes the JSON summary `nettest-summary/1` at the end of the run, through `<file>.tmp` and a rename;
+`--metrics-port [<host>:]<port>` serves `GET /metrics` in the Prometheus text format and prints its address in a line
+`{*NetTestMetrics-<name>*}`. The exit code is 0 for a run that ends by `--duration` or by SIGINT and SIGTERM (status
+`ok` or `stopped_by_signal`), 1 for `no_data`, `nano_missing` and `error`, and 2 for a bad command line, an unwritable
+`--summary` path or an option that the isolate rejects, all without a summary.
+
+Differences from the specification:
+
+- `tool.implementation` is `rust-api`; `qd_version` and the values of `build` are `null` (the SDK does not report
+  them); `config.reuse_effective` is `false`, as the Rust API copies the events into native structures on every call;
+  `tool.version` is the version of the crate and `tool.sdk_version` comes from the SDK at run time.
+- `--legacy` is rejected with `unsupported option: --legacy`: the Rust API has no deprecated publishing entry point.
+  The vectors of the kit that need it are skipped by the tests.
+- The optional `-X<option>` and `-XX:<option>` take `-Xmx`, `-Xms`, `-Xmn`, `-Xss` and `-XX:<option>` of the
+  isolate, and a rejected one ends the run with 2; `-XX:+PrintGCSummary` is accepted but prints nothing, as the
+  isolate is never torn down. `--reuse` overwrites one batch in place and saves the Rust allocations only.
+- Metrics: the label `tool` is `rust-api`. The connector statistics v2 families are exported only when the SDK
+  reports `MESSAGE_CONNECTOR_IO_STATISTICS`, and the connector lag only on `c`. `nettest_schedule_slip_seconds` has a
+  value only with `-r`. The runtime, connection and connector values are those of the last reporter tick, so the
+  server thread never calls into the isolate. The server speaks HTTP/1.0, one request at a time, and reads a request
+  head of at most 8192 bytes within 2 seconds.
+- An IPv6 host of `--metrics-port` keeps its brackets in the printed line.
+- The environment variable `DXFG_NETTEST_WATCHDOG=<ms after a record>,<ms after the connection>` shortens the
+  watchdog of `c` for tests; it is not part of the usage.
 
 ## Samples
 

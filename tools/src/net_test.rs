@@ -1,5 +1,5 @@
-//! The NetTest tool: publishes generated Trade or TimeAndSale events and prints the statistics of the QD tool
-//! `NetTest p`, as the NetTest publisher of the C API does.
+//! The NetTest tool: publishes generated Trade or TimeAndSale events (`p`) or receives them and reports the
+//! end-to-end lag (`c`), printing the statistics of the QD tool NetTest, as the NetTest of the C API does.
 //!
 //! It parses its own command line and runs before the common system properties of the tools are set, so that its
 //! `-X` and `-XX:` options reach the isolate.
@@ -48,9 +48,11 @@ use self::symbols::Symbols;
 
 pub const INFO: Info = Info {
     name: "NetTest",
-    short_description: "Publishes generated events and prints the statistics of QD NetTest.",
-    description: "\nPublishes generated Trade or TimeAndSale events through publisher endpoints at an optional total \
-                  rate and prints the statistics lines of the QD tool NetTest p, as the NetTest of the C API does.\n",
+    short_description: "Publishes (p) or receives (c) generated events and prints QD NetTest statistics.",
+    description: "\nMode p publishes generated Trade or TimeAndSale events through publisher endpoints at an optional \
+                  total rate; mode c receives them through feed endpoints and reports the end-to-end lag. Both print \
+                  the statistics lines of the QD tool NetTest, as the NetTest of the C API does, and can write a JSON \
+                  summary of the run (--summary) and serve Prometheus metrics (--metrics-port).\n",
     usage: &[SYNOPSIS],
     additional_info: OPTION_LINES,
     args: &[],

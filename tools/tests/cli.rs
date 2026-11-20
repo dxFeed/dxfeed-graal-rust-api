@@ -31,7 +31,7 @@ fn the_usage_lists_the_tools() {
              Dump         Dumps all events received from address.\n  \
              Help         Help tool.\n  \
              LatencyTest  Connects to the specified address(es) and calculates latency.\n  \
-             NetTest      Publishes generated events and prints the statistics of QD NetTest.\n  \
+             NetTest      Publishes (p) or receives (c) generated events and prints QD NetTest statistics.\n  \
              PerfTest     Connects to specified address and calculates performance counters.\n  \
              Qds          A collection of tools ported from the Java qds-tools.\n"
     ));
