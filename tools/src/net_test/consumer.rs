@@ -18,6 +18,7 @@ use super::statistics::{
     InstanceTotals, IntervalTaken, LagRecorder, ReporterOutcome, ReporterSettings, RuntimeSample, Side,
     StatisticsSample, run_reporter, system_clock,
 };
+use super::summary::{ConnectorSummary, RunReport, RunResult, connector_summaries, consumer_report};
 use super::symbols::{Symbols, consumer_slice};
 use super::{Status, connections_of};
 
@@ -443,16 +444,41 @@ impl Consumer {
 
 /// How a consumer run ended, and what the summary needs of it.
 #[derive(Debug)]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the summary writes the intervals and the symbols seen")
-)]
 pub struct ConsumerOutcome {
     pub status: Status,
     /// The text after `NetTest: ` on stderr for a failed run; `None` for `ok` and a signal.
     pub error: Option<String>,
     pub reporter: ReporterOutcome,
     pub symbols_seen: i64,
+    /// The wall-clock time in nanoseconds since the Unix epoch after the reporter stopped (after the failure when the
+    /// endpoints did not start).
+    pub end_epoch_nanos: i64,
+    /// The statistics of the connectors, read once after the reporter stopped; empty when the endpoints did not start.
+    pub connectors: Vec<ConnectorSummary>,
+    /// Whether all endpoints started: a run that did not has nothing to report but its failure.
+    pub started: bool,
+}
+
+impl ConsumerOutcome {
+    /// The result for the exit code and the summary file; `start_epoch_nanos` is the time where the run began.
+    pub fn into_result(self, start_epoch_nanos: i64) -> RunResult {
+        let report = if self.started {
+            consumer_report(
+                start_epoch_nanos,
+                self.end_epoch_nanos,
+                self.reporter,
+                self.symbols_seen,
+                self.connectors,
+            )
+        } else {
+            RunReport::at(start_epoch_nanos, self.end_epoch_nanos)
+        };
+        RunResult {
+            status: self.status,
+            error: self.error,
+            report,
+        }
+    }
 }
 
 /// The failure that ended the run, the first one that came.
@@ -497,6 +523,9 @@ pub fn run_consumer(
                 error: Some(error),
                 reporter: ReporterOutcome::default(),
                 symbols_seen: shared.symbols_seen.load(Ordering::Relaxed),
+                end_epoch_nanos: now_epoch_nanos(),
+                connectors: Vec::new(),
+                started: false,
             };
         }
     }
@@ -556,6 +585,9 @@ pub fn run_consumer(
         reporter_stop.request();
         reporter.join()
     });
+    // The report is taken before the endpoints close: a closed connector reads 0 for its records.
+    let end_epoch_nanos = now_epoch_nanos();
+    let connectors = connector_summaries(consumers.iter().map(|consumer| &consumer.endpoint));
     for consumer in &consumers {
         consumer.close();
     }
@@ -588,6 +620,9 @@ pub fn run_consumer(
         error,
         reporter,
         symbols_seen: shared.symbols_seen.load(Ordering::Relaxed),
+        end_epoch_nanos,
+        connectors,
+        started: true,
     }
 }
 
