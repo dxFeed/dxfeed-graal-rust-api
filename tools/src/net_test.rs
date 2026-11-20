@@ -36,10 +36,9 @@ use self::events::{EventPool, now_epoch_nanos};
 use self::exposition::LiveMetrics;
 use self::generator::{Counters, Settings, run_generator};
 use self::http::MetricsServer;
-use self::limiter::{ScheduleLimiter, Stop};
+use self::limiter::{ScheduleLimiter, Stop, lock_ignoring_poison};
 use self::statistics::{
-    InstanceTotals, IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample,
-    run_reporter, system_clock,
+    IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample, run_reporter, system_clock,
 };
 use self::summary::{
     ProducerTotals, RunResult, connector_summaries, connector_totals, format_summary, producer_report, write_summary,
@@ -172,12 +171,13 @@ pub fn main(args: &[String]) -> ExitCode {
         }
         None => None,
     };
-    let pool = symbols::build_symbol_pool(&options);
-    if let Some(warning) = pool.as_ref().ok().and_then(|pool| pool.warning.as_ref()) {
-        eprintln!("NetTest: warning: {warning}");
-    }
-    let pool = match pool {
-        Ok(pool) => pool,
+    let pool = match symbols::build_symbol_pool(&options) {
+        Ok(pool) => {
+            if let Some(warning) = &pool.warning {
+                eprintln!("NetTest: warning: {warning}");
+            }
+            pool
+        }
         Err(error) => return failed_before_run(error),
     };
     // Ctrl+C and SIGTERM end the run like --duration does: the last statistics are printed and the endpoints close.
@@ -235,12 +235,7 @@ struct Instance {
 impl Instance {
     /// Creates the endpoint of the name and its publisher.
     fn create(name: String, options: &Options, counters: Arc<Counters>) -> Result<Self, String> {
-        let endpoint = DXEndpoint::new_builder()
-            .with_role(options.role())
-            .with_name(&name)
-            .with_property(DXEndpoint::DXSCHEME_NANO_TIME_PROPERTY, options.nano_time())
-            .build()
-            .map_err(|error| format!("cannot create the endpoint {name}: {error}"))?;
+        let endpoint = build_endpoint(&name, options)?;
         let publisher = endpoint.get_publisher();
         Ok(Instance {
             name,
@@ -255,9 +250,7 @@ impl Instance {
     /// connected. A client address never waits: with no peer its connector stays connecting, a normal state.
     fn connect(&self, address: &str) -> Result<(), String> {
         let name = &self.name;
-        self.endpoint
-            .connect(address)
-            .map_err(|error| format!("cannot connect {name} to '{address}': {error}"))?;
+        connect_endpoint(&self.endpoint, name, address)?;
         let deadline = Instant::now() + SERVER_START_TIMEOUT;
         loop {
             let pending = self
@@ -283,18 +276,6 @@ impl Instance {
             std::thread::sleep(Duration::from_millis(5));
         }
     }
-
-    /// The open connections of all connectors of the endpoint.
-    fn connections(&self) -> i64 {
-        connections_of(&self.endpoint)
-    }
-
-    fn totals(&self) -> InstanceTotals {
-        InstanceTotals {
-            records: self.counters.records.load(Ordering::Relaxed),
-            weighted_nanos: self.counters.weighted_nanos.load(Ordering::Relaxed),
-        }
-    }
 }
 
 /// The runtime values of the isolate; a failed read gives a sample of absent values, which print as n/a.
@@ -302,6 +283,51 @@ fn read_runtime() -> RuntimeSample {
     system::get_runtime_statistics()
         .map(|statistics| RuntimeSample::from_statistics(&statistics))
         .unwrap_or_default()
+}
+
+/// Creates the endpoint of the role with `dxscheme.nanoTime` on its builder.
+fn build_endpoint(name: &str, options: &Options) -> Result<DXEndpoint, String> {
+    DXEndpoint::new_builder()
+        .with_role(options.role())
+        .with_name(name)
+        .with_property(DXEndpoint::DXSCHEME_NANO_TIME_PROPERTY, options.nano_time())
+        .build()
+        .map_err(|error| format!("cannot create the endpoint {name}: {error}"))
+}
+
+/// Connects the endpoint to the address.
+fn connect_endpoint(endpoint: &DXEndpoint, name: &str, address: &str) -> Result<(), String> {
+    endpoint
+        .connect(address)
+        .map_err(|error| format!("cannot connect {name} to '{address}': {error}"))?;
+    Ok(())
+}
+
+/// The sample of one reporter tick over the instances (their endpoints and counters): the open connections, the
+/// runtime values and the totals. With `serving` it also stores what the metrics read; without a server it makes no
+/// connector calls, which would be calls into the isolate for nobody.
+fn reporter_sample<'a>(
+    live: &LiveMetrics,
+    serving: bool,
+    instances: impl Iterator<Item = (&'a DXEndpoint, &'a Counters)> + Clone,
+) -> StatisticsSample {
+    let connections: Vec<i64> = instances
+        .clone()
+        .map(|(endpoint, _)| connections_of(endpoint))
+        .collect();
+    let runtime = read_runtime();
+    if serving {
+        live.store(
+            connections.clone(),
+            connector_totals(instances.clone().map(|(endpoint, _)| endpoint)),
+            runtime,
+        );
+    }
+    StatisticsSample {
+        instances: instances.map(|(_, counters)| counters.totals()).collect(),
+        connections: connections.iter().sum(),
+        runtime: Some(runtime),
+    }
 }
 
 /// The open connections of all connectors of the endpoint.
@@ -371,20 +397,10 @@ fn run(
                 },
                 system_clock(&reporter_stop),
                 || {
-                    let connections: Vec<i64> = instances.iter().map(Instance::connections).collect();
-                    let runtime = read_runtime();
-                    if serving {
-                        live.store(
-                            connections.clone(),
-                            connector_totals(instances.iter().map(|instance| &instance.endpoint)),
-                            runtime,
-                        );
-                    }
-                    StatisticsSample {
-                        instances: instances.iter().map(Instance::totals).collect(),
-                        connections: connections.iter().sum(),
-                        runtime: Some(runtime),
-                    }
+                    let sampled = instances
+                        .iter()
+                        .map(|instance| (&instance.endpoint, &*instance.counters));
+                    reporter_sample(live, serving, sampled)
                 },
                 || {
                     // Taken once per interval, with or without a schedule; only a schedule reports it.
@@ -396,7 +412,7 @@ fn run(
                         publish_nanos_total: publish.nanos.load(Ordering::Relaxed),
                         slip_max_nanos: scheduled.then_some(slip_max),
                         slip_end_nanos: scheduled.then_some(slip_end),
-                        lags: None,
+                        ..IntervalTaken::default()
                     }
                 },
                 console::print,
@@ -424,10 +440,7 @@ fn run(
                         Ok(Err(error)) => format!("publishing failed: {error}"),
                         Err(_) => "a generator thread panicked".to_owned(),
                     };
-                    failure
-                        .lock()
-                        .unwrap_or_else(|poisoned| poisoned.into_inner())
-                        .get_or_insert(error);
+                    lock_ignoring_poison(failure).get_or_insert(error);
                     stop.request();
                 })
             })
@@ -444,10 +457,7 @@ fn run(
         }
         reporter_stop.request();
         reporter.join().unwrap_or_else(|_| {
-            failure
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .get_or_insert_with(|| "the reporter thread panicked".to_owned());
+            lock_ignoring_poison(&failure).get_or_insert_with(|| "the reporter thread panicked".to_owned());
             ReporterOutcome::default()
         })
     });
@@ -463,7 +473,10 @@ fn run(
     };
     let totals = ProducerTotals {
         counters: publish,
-        events: instances.iter().map(|instance| instance.totals().records).sum(),
+        events: instances
+            .iter()
+            .map(|instance| instance.counters.totals().records)
+            .sum(),
         scheduled: options.records_per_second.is_some(),
     };
     RunResult {

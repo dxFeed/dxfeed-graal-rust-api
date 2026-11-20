@@ -3,6 +3,12 @@
 use std::sync::{Condvar, Mutex, MutexGuard};
 use std::time::{Duration, Instant, SystemTime};
 
+/// Locks the mutex even when a thread panicked under it: the tool reports the panic itself and every value behind
+/// its mutexes stays valid after one.
+pub(super) fn lock_ignoring_poison<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    mutex.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+}
+
 /// The stop flag of a run: set once, from any thread, and waited on with a timeout, so that every wait of the tool
 /// wakes the moment the stop is requested.
 #[derive(Default)]
@@ -13,7 +19,7 @@ pub struct Stop {
 
 impl Stop {
     fn lock(&self) -> MutexGuard<'_, bool> {
-        self.stopped.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+        lock_ignoring_poison(&self.stopped)
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -108,7 +114,7 @@ impl<'a> ScheduleLimiter<'a> {
     /// stop was requested; it may also return early without it.
     fn acquire_with(&self, now: impl Fn() -> Instant, mut wait: impl FnMut(Duration) -> bool) -> Option<Instant> {
         let due = {
-            let mut schedule = self.schedule.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+            let mut schedule = lock_ignoring_poison(&self.schedule);
             let start = *schedule.start.get_or_insert_with(&now);
             let k = schedule.next;
             schedule.next += 1;
