@@ -8,10 +8,11 @@
 use std::fs;
 use std::path::PathBuf;
 
-use dxfeed_graal::{DXEndpoint, system};
+use dxfeed_graal::{DXEndpoint, MessageConnector, system};
 
 use super::Status;
 use super::cli::{Mode, Options, SPEC_VERSION, role_name};
+use super::exposition::{ConnectorTotals, ConnectorTotalsV2};
 use super::generator::PublishCounters;
 use super::histogram::{HISTOGRAM_DIGITS, HISTOGRAM_HIGHEST, HISTOGRAM_LOWEST};
 use super::statistics::{E2eTotals, IntervalRecord, ReporterOutcome, RuntimeSample, TimedRuntime, records_per_second};
@@ -287,47 +288,56 @@ pub fn producer_report(
     }
 }
 
+/// Whether the SDK reports the connector statistics v2.
+pub fn io_statistics_supported() -> bool {
+    system::is_feature_supported(system::feature::MESSAGE_CONNECTOR_IO_STATISTICS).unwrap_or(false)
+}
+
+/// The statistics of a connector: v2 (which has v1 too) when `io`, v1 otherwise; `None` when they cannot be read.
+fn read_statistics(connector: &MessageConnector, io: bool) -> Option<(ConnectorV1, Option<ConnectorV2>)> {
+    if io {
+        let stats = connector.get_io_statistics().ok()?;
+        let v1 = ConnectorV1 {
+            read_bytes: stats.read_bytes,
+            written_bytes: stats.written_bytes,
+            read_data_records: stats.read_data_records,
+            written_data_records: stats.written_data_records,
+            active_connections: stats.active_connection_count,
+            closed_connections: stats.closed_connection_count,
+        };
+        let v2 = ConnectorV2 {
+            read_sub_records: stats.read_sub_records,
+            written_sub_records: stats.written_sub_records,
+            data_read_lag_us: stats.read_data_lag_sum_us,
+            data_write_lag_us: stats.written_data_lag_sum_us,
+            read_rtt_us: stats.read_rtt_sum_us,
+            write_rtt_us: stats.written_rtt_sum_us,
+        };
+        Some((v1, Some(v2)))
+    } else {
+        let stats = connector.get_statistics().ok()?;
+        let v1 = ConnectorV1 {
+            read_bytes: stats.read_bytes,
+            written_bytes: stats.written_bytes,
+            read_data_records: stats.read_data_records,
+            written_data_records: stats.written_data_records,
+            active_connections: stats.active_connection_count,
+            closed_connections: stats.closed_connection_count,
+        };
+        Some((v1, None))
+    }
+}
+
 /// The statistics of the connectors of the endpoints, in order: v2 (which has v1 too) when the SDK reports the
 /// feature, v1 otherwise. A connector whose statistics cannot be read is left out.
 pub fn connector_summaries<'a>(endpoints: impl IntoIterator<Item = &'a DXEndpoint>) -> Vec<ConnectorSummary> {
-    let io = system::is_feature_supported(system::feature::MESSAGE_CONNECTOR_IO_STATISTICS).unwrap_or(false);
+    let io = io_statistics_supported();
     let mut summaries = Vec::new();
     for endpoint in endpoints {
         for connector in endpoint.get_connectors().unwrap_or_default() {
-            let read = if io {
-                connector.get_io_statistics().map(|stats| {
-                    let v1 = ConnectorV1 {
-                        read_bytes: stats.read_bytes,
-                        written_bytes: stats.written_bytes,
-                        read_data_records: stats.read_data_records,
-                        written_data_records: stats.written_data_records,
-                        active_connections: stats.active_connection_count,
-                        closed_connections: stats.closed_connection_count,
-                    };
-                    let v2 = ConnectorV2 {
-                        read_sub_records: stats.read_sub_records,
-                        written_sub_records: stats.written_sub_records,
-                        data_read_lag_us: stats.read_data_lag_sum_us,
-                        data_write_lag_us: stats.written_data_lag_sum_us,
-                        read_rtt_us: stats.read_rtt_sum_us,
-                        write_rtt_us: stats.written_rtt_sum_us,
-                    };
-                    (v1, Some(v2))
-                })
-            } else {
-                connector.get_statistics().map(|stats| {
-                    let v1 = ConnectorV1 {
-                        read_bytes: stats.read_bytes,
-                        written_bytes: stats.written_bytes,
-                        read_data_records: stats.read_data_records,
-                        written_data_records: stats.written_data_records,
-                        active_connections: stats.active_connection_count,
-                        closed_connections: stats.closed_connection_count,
-                    };
-                    (v1, None)
-                })
+            let Some((v1, v2)) = read_statistics(&connector, io) else {
+                continue;
             };
-            let Ok((v1, v2)) = read else { continue };
             summaries.push(ConnectorSummary {
                 address: connector.get_address().unwrap_or_default(),
                 v1,
@@ -336,6 +346,33 @@ pub fn connector_summaries<'a>(endpoints: impl IntoIterator<Item = &'a DXEndpoin
         }
     }
     summaries
+}
+
+/// The statistics of the connectors of the endpoints summed, without their addresses; the v2 part is present when the
+/// SDK reports the feature. A connector whose statistics cannot be read is left out.
+pub fn connector_totals<'a>(endpoints: impl IntoIterator<Item = &'a DXEndpoint>) -> ConnectorTotals {
+    let io = io_statistics_supported();
+    let mut totals = ConnectorTotals {
+        v2: io.then(ConnectorTotalsV2::default),
+        ..ConnectorTotals::default()
+    };
+    for endpoint in endpoints {
+        for connector in endpoint.get_connectors().unwrap_or_default() {
+            let Some((v1, v2)) = read_statistics(&connector, io) else {
+                continue;
+            };
+            totals.read_bytes += v1.read_bytes;
+            totals.written_bytes += v1.written_bytes;
+            totals.read_records += v1.read_data_records;
+            totals.written_records += v1.written_data_records;
+            if let (Some(sum), Some(v2)) = (totals.v2.as_mut(), v2) {
+                sum.sub_records += v2.read_sub_records + v2.written_sub_records;
+                sum.read_lag_us += v2.data_read_lag_us;
+                sum.rtt_us += v2.read_rtt_us + v2.write_rtt_us;
+            }
+        }
+    }
+    totals
 }
 
 /// A JSON string with the quotes: `"`, `\`, the new line, the carriage return and the tab have the short escapes,

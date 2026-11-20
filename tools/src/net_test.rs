@@ -7,8 +7,10 @@
 mod cli;
 mod consumer;
 mod events;
+mod exposition;
 mod generator;
 mod histogram;
+mod http;
 #[cfg(test)]
 mod kit;
 mod limiter;
@@ -31,13 +33,17 @@ use crate::help::Info;
 use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
 use self::consumer::{WATCHDOG_VARIABLE, WatchdogTimeouts, run_consumer};
 use self::events::{EventPool, now_epoch_nanos};
-use self::generator::{Counters, PublishCounters, Settings, run_generator};
+use self::exposition::LiveMetrics;
+use self::generator::{Counters, Settings, run_generator};
+use self::http::MetricsServer;
 use self::limiter::{ScheduleLimiter, Stop};
 use self::statistics::{
     InstanceTotals, IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample,
     run_reporter, system_clock,
 };
-use self::summary::{ProducerTotals, RunResult, connector_summaries, format_summary, producer_report, write_summary};
+use self::summary::{
+    ProducerTotals, RunResult, connector_summaries, connector_totals, format_summary, producer_report, write_summary,
+};
 use self::symbols::Symbols;
 
 pub const INFO: Info = Info {
@@ -143,6 +149,27 @@ pub fn main(args: &[String]) -> ExitCode {
             return failed_before_run(format!("cannot set the system property '{key}'"));
         }
     }
+    // The metrics port is bound before the first endpoint, so that a port in use fails the start and a scraper finds
+    // the tool as soon as its line is printed.
+    let live = Arc::new(LiveMetrics::for_run(&options, system::get_version().ok().as_deref()));
+    let server = match options.metrics_port {
+        Some(port) => {
+            let scraped = Arc::clone(&live);
+            match MetricsServer::start(&options.metrics_host, port, move || scraped.render()) {
+                Ok(server) => {
+                    console::println(&format!(
+                        "{{*NetTestMetrics-{}*}} http://{}:{}/metrics",
+                        options.name,
+                        options.metrics_host,
+                        server.port()
+                    ));
+                    Some(server)
+                }
+                Err(error) => return failed_before_run(error),
+            }
+        }
+        None => None,
+    };
     let pool = symbols::build_symbol_pool(&options);
     if let Some(warning) = pool.as_ref().ok().and_then(|pool| pool.warning.as_ref()) {
         eprintln!("NetTest: warning: {warning}");
@@ -166,10 +193,12 @@ pub fn main(args: &[String]) -> ExitCode {
     let started = now_epoch_nanos();
     let result = if options.mode == Mode::Consumer {
         let timeouts = WatchdogTimeouts::from_variable(std::env::var(WATCHDOG_VARIABLE).ok().as_deref());
-        run_consumer(&options, &pool.symbols, &stop, &signalled, timeouts).into_result(started)
+        run_consumer(&options, &pool.symbols, &stop, &signalled, timeouts, &live).into_result(started)
     } else {
-        run(&options, &pool.symbols, &stop, &signalled, started)
+        run(&options, &pool.symbols, &stop, &signalled, started, &live)
     };
+    // The server stops with the run; the summary does not wait for a scraper.
+    drop(server);
     if let Some(error) = &result.error {
         eprintln!("NetTest: {error}");
     }
@@ -198,12 +227,12 @@ struct Instance {
     name: String,
     endpoint: DXEndpoint,
     publisher: DXPublisher,
-    counters: Counters,
+    counters: Arc<Counters>,
 }
 
 impl Instance {
     /// Creates the endpoint of the name and its publisher.
-    fn create(name: String, options: &Options) -> Result<Self, String> {
+    fn create(name: String, options: &Options, counters: Arc<Counters>) -> Result<Self, String> {
         let endpoint = DXEndpoint::new_builder()
             .with_role(options.role())
             .with_name(&name)
@@ -215,7 +244,7 @@ impl Instance {
             name,
             endpoint,
             publisher,
-            counters: Counters::default(),
+            counters,
         })
     }
 
@@ -266,6 +295,13 @@ impl Instance {
     }
 }
 
+/// The runtime values of the isolate; a failed read gives a sample of absent values, which print as n/a.
+fn read_runtime() -> RuntimeSample {
+    system::get_runtime_statistics()
+        .map(|statistics| RuntimeSample::from_statistics(&statistics))
+        .unwrap_or_default()
+}
+
 /// The open connections of all connectors of the endpoint.
 fn connections_of(endpoint: &DXEndpoint) -> i64 {
     endpoint
@@ -285,11 +321,19 @@ fn close(instances: &[Instance]) {
 
 /// Starts the instances, runs the generators and the reporter until the stop, the duration or a failed publish, then
 /// joins the threads (the generators first, then the reporter with the last statistics) and closes the endpoints.
-fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool, started: i64) -> RunResult {
+fn run(
+    options: &Options,
+    symbols: &Symbols,
+    stop: &Stop,
+    signalled: &AtomicBool,
+    started: i64,
+    live: &LiveMetrics,
+) -> RunResult {
     let mut instances = Vec::with_capacity(options.instances);
     let mut pools = Vec::with_capacity(options.instances);
     for index in 1..=options.instances {
-        let connected = Instance::create(format!("{}.{index}", options.name), options).and_then(|instance| {
+        let counters = Arc::clone(&live.records[index - 1]);
+        let connected = Instance::create(format!("{}.{index}", options.name), options, counters).and_then(|instance| {
             let connected = instance.connect(&options.address);
             // The endpoint that failed to start closes with the others.
             instances.push(instance);
@@ -308,7 +352,9 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool
     let limiter = options
         .records_per_second
         .map(|rate| ScheduleLimiter::new(rate, options.batch as i64, stop));
-    let publish = PublishCounters::default();
+    let publish = &live.publish;
+    // The metrics read what the reporter stores, so without a server it stores nothing.
+    let serving = options.metrics_port.is_some();
     let failure = Mutex::new(None);
     let reporter_stop = Stop::default();
     let reporter = std::thread::scope(|scope| {
@@ -322,15 +368,21 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool
                     warmup_millis: options.warmup_millis,
                 },
                 system_clock(&reporter_stop),
-                || StatisticsSample {
-                    instances: instances.iter().map(Instance::totals).collect(),
-                    connections: instances.iter().map(Instance::connections).sum(),
-                    // A failed read prints n/a values, as in the C tool.
-                    runtime: Some(
-                        system::get_runtime_statistics()
-                            .map(|statistics| RuntimeSample::from_statistics(&statistics))
-                            .unwrap_or_default(),
-                    ),
+                || {
+                    let connections: Vec<i64> = instances.iter().map(Instance::connections).collect();
+                    let runtime = read_runtime();
+                    if serving {
+                        live.store(
+                            connections.clone(),
+                            connector_totals(instances.iter().map(|instance| &instance.endpoint)),
+                            runtime,
+                        );
+                    }
+                    StatisticsSample {
+                        instances: instances.iter().map(Instance::totals).collect(),
+                        connections: connections.iter().sum(),
+                        runtime: Some(runtime),
+                    }
                 },
                 || {
                     // Taken once per interval, with or without a schedule; only a schedule reports it.
@@ -352,7 +404,7 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool
             .iter()
             .zip(pools)
             .map(|(instance, mut pool)| {
-                let (limiter, failure, publish) = (limiter.as_ref(), &failure, &publish);
+                let (limiter, failure) = (limiter.as_ref(), &failure);
                 scope.spawn(move || {
                     let published = panic::catch_unwind(AssertUnwindSafe(|| {
                         run_generator(
@@ -408,7 +460,7 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool
         (None, false) => Status::Ok,
     };
     let totals = ProducerTotals {
-        counters: &publish,
+        counters: publish,
         events: instances.iter().map(|instance| instance.totals().records).sum(),
         scheduled: options.records_per_second.is_some(),
     };

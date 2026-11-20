@@ -8,19 +8,20 @@ use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Event, EventRef, EventType, Events, system};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Event, EventRef, EventType, Events};
 
 use super::cli::{EventKind, Options};
 use super::events::now_epoch_nanos;
+use super::exposition::LiveMetrics;
 use super::generator::Counters;
 use super::limiter::Stop;
 use super::statistics::{
-    InstanceTotals, IntervalTaken, LagRecorder, ReporterOutcome, ReporterSettings, RuntimeSample, Side,
-    StatisticsSample, run_reporter, system_clock,
+    InstanceTotals, IntervalTaken, LagRecorder, ReporterOutcome, ReporterSettings, Side, StatisticsSample,
+    run_reporter, system_clock,
 };
-use super::summary::{ConnectorSummary, RunReport, RunResult, connector_summaries, consumer_report};
+use super::summary::{ConnectorSummary, RunReport, RunResult, connector_summaries, connector_totals, consumer_report};
 use super::symbols::{Symbols, consumer_slice};
-use super::{Status, connections_of};
+use super::{Status, connections_of, read_runtime};
 
 /// The consumer stops with `nano_missing` when this many first events all have the nanosecond part 0.
 pub const NANO_CHECK_EVENTS: i64 = 1000;
@@ -234,7 +235,7 @@ pub struct ConsumerShared {
     stop: Arc<Stop>,
     /// The e2e lags of the current interval.
     pub lags: LagRecorder,
-    pub live: LiveLags,
+    pub live: Arc<LiveLags>,
     /// The distinct symbols received by all instances.
     pub symbols_seen: AtomicI64,
     nano: NanoCheck,
@@ -249,12 +250,18 @@ impl ConsumerShared {
         ConsumerShared {
             stop,
             lags: LagRecorder::default(),
-            live: LiveLags::default(),
+            live: Arc::default(),
             symbols_seen: AtomicI64::new(0),
             nano: NanoCheck::new(nano_check),
             first_record_epoch_nanos: AtomicI64::new(0),
             last_record_steady_nanos: AtomicI64::new(0),
         }
+    }
+
+    /// Counts the lags in `live`, which the metrics read, instead of in a fresh one.
+    pub fn with_live(mut self, live: Arc<LiveLags>) -> Self {
+        self.live = live;
+        self
     }
 
     pub fn first_record_epoch_nanos(&self) -> Option<i64> {
@@ -354,7 +361,13 @@ struct Consumer {
 impl Consumer {
     /// Creates the endpoint of the role with `dxscheme.nanoTime` on its builder, the subscription, its listener and
     /// then the symbols of the slice. The endpoint connects later, last.
-    fn create(name: String, options: &Options, slice: &[String], shared: &Arc<ConsumerShared>) -> Result<Self, String> {
+    fn create(
+        name: String,
+        options: &Options,
+        slice: &[String],
+        shared: &Arc<ConsumerShared>,
+        counters: Arc<Counters>,
+    ) -> Result<Self, String> {
         let endpoint = DXEndpoint::new_builder()
             .with_role(options.role())
             .with_name(&name)
@@ -376,12 +389,11 @@ impl Consumer {
                 return Err(error);
             }
         };
-        let counters = Arc::new(Counters::default());
         let consumer = Consumer {
             name,
             endpoint,
             subscription,
-            counters: Arc::clone(&counters),
+            counters,
         };
         consumer.subscribe(options.event, slice, shared)?;
         Ok(consumer)
@@ -502,18 +514,22 @@ pub fn run_consumer(
     stop: &Arc<Stop>,
     signalled: &AtomicBool,
     timeouts: WatchdogTimeouts,
+    live: &LiveMetrics,
 ) -> ConsumerOutcome {
-    let shared = Arc::new(ConsumerShared::new(Arc::clone(stop), options.is_nano_time_on()));
+    let shared =
+        Arc::new(ConsumerShared::new(Arc::clone(stop), options.is_nano_time_on()).with_live(Arc::clone(&live.lags)));
     let failure = Failure(Mutex::new(None));
     let mut consumers: Vec<Consumer> = Vec::with_capacity(options.instances);
     for index in 1..=options.instances {
         let slice = consumer_slice(symbols, index, options.instances);
-        let started = Consumer::create(format!("{}.{index}", options.name), options, &slice, &shared).and_then(|c| {
-            let connected = c.connect(&options.address);
-            // The endpoint that failed to start closes with the others.
-            consumers.push(c);
-            connected
-        });
+        let counters = Arc::clone(&live.records[index - 1]);
+        let started = Consumer::create(format!("{}.{index}", options.name), options, &slice, &shared, counters)
+            .and_then(|c| {
+                let connected = c.connect(&options.address);
+                // The endpoint that failed to start closes with the others.
+                consumers.push(c);
+                connected
+            });
         if let Err(error) = started {
             for consumer in &consumers {
                 consumer.close();
@@ -530,6 +546,8 @@ pub fn run_consumer(
         }
     }
     let reporter_stop = Stop::default();
+    // The metrics read what the reporter stores, so without a server it stores nothing.
+    let serving = options.metrics_port.is_some();
     let reporter_outcome = std::thread::scope(|scope| {
         let consumers = &consumers;
         let shared = &shared;
@@ -542,15 +560,21 @@ pub fn run_consumer(
                     warmup_millis: options.warmup_millis,
                 },
                 system_clock(&reporter_stop),
-                || StatisticsSample {
-                    instances: consumers.iter().map(Consumer::totals).collect(),
-                    connections: consumers.iter().map(|c| connections_of(&c.endpoint)).sum(),
-                    // A failed read prints n/a values, as in the C tool.
-                    runtime: Some(
-                        system::get_runtime_statistics()
-                            .map(|statistics| RuntimeSample::from_statistics(&statistics))
-                            .unwrap_or_default(),
-                    ),
+                || {
+                    let connections: Vec<i64> = consumers.iter().map(|c| connections_of(&c.endpoint)).collect();
+                    let runtime = read_runtime();
+                    if serving {
+                        live.store(
+                            connections.clone(),
+                            connector_totals(consumers.iter().map(|consumer| &consumer.endpoint)),
+                            runtime,
+                        );
+                    }
+                    StatisticsSample {
+                        instances: consumers.iter().map(Consumer::totals).collect(),
+                        connections: connections.iter().sum(),
+                        runtime: Some(runtime),
+                    }
                 },
                 || IntervalTaken {
                     warmup_start_epoch_nanos: shared.first_record_epoch_nanos(),
@@ -922,6 +946,7 @@ mod tests {
             &stop,
             &AtomicBool::new(false),
             WatchdogTimeouts::default(),
+            &LiveMetrics::for_run(&options, None),
         );
         (outcome, started.elapsed())
     }
@@ -977,7 +1002,8 @@ mod tests {
             after_record: Duration::from_millis(100),
             after_connect: Duration::from_millis(100),
         };
-        let outcome = run_consumer(&options, &symbols, &stop, &AtomicBool::new(false), timeouts);
+        let live = LiveMetrics::for_run(&options, None);
+        let outcome = run_consumer(&options, &symbols, &stop, &AtomicBool::new(false), timeouts, &live);
         assert_eq!(outcome.status, Status::Ok, "{outcome:?}");
         assert_eq!(outcome.symbols_seen, 0);
     }
@@ -996,7 +1022,15 @@ mod tests {
                 signalled.store(true, Ordering::SeqCst);
                 stop.request();
             });
-            run_consumer(&options, &symbols, &stop, &signalled, WatchdogTimeouts::default())
+            let live = LiveMetrics::for_run(&options, None);
+            run_consumer(
+                &options,
+                &symbols,
+                &stop,
+                &signalled,
+                WatchdogTimeouts::default(),
+                &live,
+            )
         });
         assert_eq!(outcome.status, Status::StoppedBySignal, "{outcome:?}");
         assert_eq!(outcome.error, None);

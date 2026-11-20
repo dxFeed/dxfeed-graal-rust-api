@@ -1,6 +1,6 @@
 //! The NetTest tool as a child process; the network is loopback only.
 
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -810,4 +810,223 @@ fn a_consumer_without_records_writes_a_no_data_summary() {
     assert_eq!(summary["symbols_seen"], 0);
     assert_eq!(summary["publish_call"], serde_json::Value::Null);
     assert_eq!(summary["connectors"].as_array().unwrap().len(), 1, "{summary}");
+}
+
+/// The answer of the metrics server to a request, read until it closes the connection.
+fn exchange(port: u16, request: &str) -> String {
+    let mut client = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    client.set_read_timeout(Some(Duration::from_secs(10))).unwrap();
+    client.write_all(request.as_bytes()).unwrap();
+    let mut bytes = Vec::new();
+    let _ = client.read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// The answer to `GET /metrics`; a failed scrape (the server is not up yet) is an empty text.
+fn scrape(port: u16) -> String {
+    let Ok(mut client) = TcpStream::connect(("127.0.0.1", port)) else {
+        return String::new();
+    };
+    let _ = client.set_read_timeout(Some(Duration::from_secs(10)));
+    let _ = client.write_all(b"GET /metrics HTTP/1.0\r\n\r\n");
+    let mut bytes = Vec::new();
+    let _ = client.read_to_end(&mut bytes);
+    String::from_utf8_lossy(&bytes).into_owned()
+}
+
+/// Scrapes until the text satisfies the condition; the last text is the failure message.
+fn scrape_until(port: u16, condition: impl Fn(&str) -> bool) -> String {
+    let deadline = Instant::now() + Duration::from_secs(40);
+    loop {
+        let text = scrape(port);
+        if condition(&text) {
+            return text;
+        }
+        assert!(Instant::now() < deadline, "no such metrics in time:\n{text}");
+        std::thread::sleep(Duration::from_millis(200));
+    }
+}
+
+/// The value of the first series that starts with the prefix.
+fn series_value(text: &str, prefix: &str) -> Option<i64> {
+    text.lines()
+        .find_map(|line| line.strip_prefix(prefix))
+        .and_then(|rest| rest.trim().parse().ok())
+}
+
+#[test]
+fn a_producer_serves_its_metrics_during_the_run() {
+    let port = free_port();
+    let metrics = port.to_string();
+    let directory = TempDir::new("metrics-producer");
+    let file = directory.file("summary.json");
+    let tool = Tool::start(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "10",
+        "-r",
+        "*/2k",
+        "-s",
+        "1s",
+        "--duration",
+        "6s",
+        "--metrics-port",
+        &metrics,
+        "--summary",
+        &file,
+    ]);
+    wait_for_port(port);
+    let labels = "tool=\"rust-api\",side=\"producer\",name=\"NetTest\"";
+    // The published records are live; the runtime values come with the first tick of the reporter.
+    let text = scrape_until(port, |text| {
+        series_value(text, &format!("nettest_records_total{{{labels},connection=\"1\"}} ")).is_some_and(|n| n > 0)
+            && text.contains(&format!("nettest_runtime_heap_used_bytes{{{labels}}} "))
+    });
+    assert!(text.starts_with("HTTP/1.0 200 OK\r\n"), "{text}");
+    assert!(
+        text.contains("\r\nContent-Type: text/plain; version=0.0.4; charset=utf-8\r\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("nettest_info{{{labels},spec_version=\"nettest/1\",version=\"")),
+        "{text}"
+    );
+    for series in [
+        "nettest_publish_calls_total",
+        "nettest_publish_seconds_total",
+        "nettest_schedule_slip_seconds",
+        "nettest_connector_written_bytes_total",
+    ] {
+        assert!(text.contains(&format!("\n{series}{{{labels}}} ")), "{series}\n{text}");
+    }
+    assert!(
+        text.contains(&format!("\nnettest_connections{{{labels},connection=\"1\"}} 0\n")),
+        "{text}"
+    );
+    // The producer has no e2e lag and no connector lag.
+    assert!(!text.contains("nettest_e2e_lag_seconds"), "{text}");
+    assert!(!text.contains("nettest_connector_lag_seconds_total"), "{text}");
+    assert!(exchange(port, "GET /other HTTP/1.0\r\n\r\n").starts_with("HTTP/1.0 404 Not Found\r\n"));
+    let outcome = tool.finish();
+    assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
+    let line = format!("{{*NetTestMetrics-NetTest*}} http://127.0.0.1:{port}/metrics");
+    assert_eq!(outcome.stdout.lines().next(), Some(line.as_str()), "{outcome:#?}");
+    assert_eq!(read_summary(&file)["status"], "ok");
+    // The server is gone with the run.
+    assert!(TcpStream::connect(("127.0.0.1", port)).is_err());
+}
+
+#[test]
+fn port_zero_takes_a_free_port_and_the_line_names_it() {
+    let outcome = run(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "10",
+        "--duration",
+        "1s",
+        "--metrics-port",
+        "127.0.0.1:0",
+    ]);
+    assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
+    let line = Regex::new("^[{][*]NetTestMetrics-NetTest[*][}] http://127[.]0[.]0[.]1:([0-9]+)/metrics$").unwrap();
+    let first = outcome.stdout.lines().next().unwrap_or_default();
+    let captures = line.captures(first).unwrap_or_else(|| panic!("{outcome:#?}"));
+    assert_ne!(&captures[1], "0", "{outcome:#?}");
+}
+
+#[test]
+fn a_consumer_serves_its_metrics_during_the_run() {
+    let port = free_port();
+    let address = format!(":{port}");
+    let publisher = Tool::start(&["p", &address, "-S", "20", "-r", "*/2k", "-s", "1s", "--duration", "12s"]);
+    wait_for_port(port);
+    let metrics_port = free_port();
+    let metrics = metrics_port.to_string();
+    let client = format!("127.0.0.1:{port}");
+    let consumer = Tool::start(&[
+        "c",
+        &client,
+        "-S",
+        "20",
+        "-s",
+        "1s",
+        "--duration",
+        "5s",
+        "--metrics-port",
+        &metrics,
+    ]);
+    wait_for_port(metrics_port);
+    let labels = "tool=\"rust-api\",side=\"consumer\",name=\"NetTest\"";
+    let text = scrape_until(metrics_port, |text| {
+        series_value(text, &format!("nettest_e2e_lag_seconds_count{{{labels}}} ")).is_some_and(|n| n > 0)
+            && series_value(text, &format!("nettest_connections{{{labels},connection=\"1\"}} ")) == Some(1)
+    });
+    assert!(
+        text.contains(&format!("nettest_e2e_lag_seconds_bucket{{{labels},le=\"+Inf\"}} ")),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("\nnettest_e2e_lag_negative_total{{{labels}}} ")),
+        "{text}"
+    );
+    assert!(
+        series_value(&text, &format!("nettest_records_total{{{labels},connection=\"1\"}} ")).is_some_and(|n| n > 0),
+        "{text}"
+    );
+    // The consumer has no publish counters.
+    assert!(!text.contains("nettest_publish_calls_total"), "{text}");
+    let consumer = consumer.finish();
+    assert_eq!(consumer.code(), Some(0), "{consumer:#?}");
+    assert!(
+        consumer.stdout.starts_with(&format!(
+            "{{*NetTestMetrics-NetTest*}} http://127.0.0.1:{metrics_port}/metrics\n"
+        )),
+        "{consumer:#?}"
+    );
+    let publisher = publisher.finish();
+    assert_eq!(publisher.code(), Some(0), "{publisher:#?}");
+}
+
+#[test]
+fn a_second_tool_on_a_taken_metrics_port_fails_the_start_with_the_error_status() {
+    let port = free_port();
+    let metrics = port.to_string();
+    let mut first = Tool::start(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "10",
+        "--duration",
+        "60s",
+        "--metrics-port",
+        &metrics,
+    ]);
+    wait_for_port(port);
+    let directory = TempDir::new("metrics-taken");
+    let file = directory.file("summary.json");
+    let second = run(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "10",
+        "--duration",
+        "10s",
+        "--metrics-port",
+        &metrics,
+        "--summary",
+        &file,
+    ]);
+    let _ = first.child.kill();
+    let _ = first.finish();
+    assert_eq!(second.code(), Some(1), "{second:#?}");
+    let error = format!("cannot listen on 127.0.0.1:{port} for /metrics (is the port in use?)");
+    assert!(second.stderr.contains(&format!("NetTest: {error}\n")), "{second:#?}");
+    assert!(!second.stdout.contains("NetTestMetrics"), "{second:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "error", "{summary}");
+    assert_eq!(summary["exit_code"], 1);
+    assert_eq!(summary["error"], error.as_str());
+    assert_eq!(summary["intervals"], serde_json::json!([]));
 }
