@@ -6,11 +6,15 @@
 //! `cargo run -p xtask -- check-deploy` builds `WriteTapeFileSample` of the samples and checks that it runs outside
 //! cargo from a directory holding only the executable and the deployed SDK library, and fails without the library.
 //!
+//! `cargo run -p xtask -- check-experimental` checks that the stable API uses no experimental SDK item outside
+//! `xtask/experimental-allowlist.txt`.
+//!
 //! `cargo run -p xtask -- release-tag` prints the tag of the workspace version; `release-notes <tag>` checks the tag
 //! against the workspace version and prints its section of `ReleaseNotes.md`; `package <tag> <out dir>` writes the
 //! Tools and Samples archives of this platform from the release build and checks that the unpacked executables run
 //! (see `HOW_TO_RELEASE.md`).
 
+mod experimental;
 mod release;
 
 use std::fs;
@@ -27,12 +31,14 @@ fn main() -> ExitCode {
             gen_bindings(Path::new(sdk_dir)).map(|path| format!("wrote {}", path.display()))
         }
         [task] if task == "check-deploy" => check_deploy(),
+        [task] if task == "check-experimental" => experimental::check_experimental(),
         [task] if task == "release-tag" => release::release_tag(),
         [task, tag] if task == "release-notes" => release::release_notes(tag),
         [task, tag, out] if task == "package" => release::package(tag, Path::new(out)),
         _ => {
             eprintln!("usage: cargo run -p xtask -- gen-bindings <unpacked SDK {SDK_VERSION} dir>");
             eprintln!("       cargo run -p xtask -- check-deploy");
+            eprintln!("       cargo run -p xtask -- check-experimental");
             eprintln!("       cargo run -p xtask -- release-tag");
             eprintln!("       cargo run -p xtask -- release-notes <tag>");
             eprintln!("       cargo run -p xtask -- package <tag> <out dir>");

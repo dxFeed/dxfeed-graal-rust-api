@@ -85,7 +85,7 @@ pub enum PollResult<T> {
 ///
 /// The queue closes when the subscription closes, when [`close`](Self::close) is called and when it is dropped. The
 /// subscription keeps the executor of the queue for its life, also after the queue is closed. The queue can be shared
-/// by threads, but poll it from one thread at a time.
+/// by threads, whose polls wait for each other; poll it from one thread so that a snapshot is not split between them.
 pub struct EventQueue<E: SubscriptionItem = Event> {
     handle: Handle<sys::dxfg_v4_event_queue_t>,
     _item: PhantomData<fn() -> E>,
@@ -213,7 +213,7 @@ impl<E: SubscriptionItem> std::fmt::Debug for EventQueue<E> {
 ///
 /// A subscription leaves the queue only by being closed; the queue stays open then. The queue closes when
 /// [`close`](Self::close) is called, or when it and every executor it lent are dropped. The queue can be shared by
-/// threads, but poll it from one thread at a time.
+/// threads, whose polls wait for each other; poll it from one thread so that a snapshot is not split between them.
 pub struct SharedEventQueue {
     handle: Handle<sys::dxfg_v4_event_queue_t>,
 }

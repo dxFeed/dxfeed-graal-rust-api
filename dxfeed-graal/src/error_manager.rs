@@ -240,10 +240,10 @@ fn dispatch(mut info: ErrorInfo) {
 
 fn call(handler: Option<&Handler>, info: &ErrorInfo) {
     // The handler is the last stop of an error: its own panic has nowhere to go.
-    let _ = panic::catch_unwind(AssertUnwindSafe(|| match handler {
+    drop_panic(panic::catch_unwind(AssertUnwindSafe(|| match handler {
         Some(handler) => handler(info),
         None => ErrorManager::default_handler(info),
-    }));
+    })));
 }
 
 /// Reports the failed release of the native data of the SDK named by `component`, unless the process is exiting or
@@ -268,5 +268,37 @@ pub(crate) fn report_panic(component: &str, what: &str, result: thread::Result<(
             .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
             .unwrap_or("unknown panic");
         ErrorManager::report(component, format!("{what} panicked: {message}"));
+        drop_panic::<()>(Err(payload));
+    }
+}
+
+/// Drops the result of a call that may have panicked. A panic payload whose `Drop` panics in turn is leaked: no panic
+/// may leave a callback of the SDK, where it would abort the process.
+pub(crate) fn drop_panic<T>(result: thread::Result<T>) {
+    if let Err(payload) = result
+        && let Err(again) = panic::catch_unwind(AssertUnwindSafe(move || drop(payload)))
+    {
+        std::mem::forget(again);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A panic payload whose `Drop` panics.
+    struct PanicOnDrop;
+
+    impl Drop for PanicOnDrop {
+        fn drop(&mut self) {
+            panic!("the payload panics on drop");
+        }
+    }
+
+    #[test]
+    fn a_payload_that_panics_on_drop_is_leaked() {
+        let result: thread::Result<()> = panic::catch_unwind(|| panic::panic_any(PanicOnDrop));
+        // A panic of the drop would fail the test.
+        drop_panic::<()>(result);
     }
 }

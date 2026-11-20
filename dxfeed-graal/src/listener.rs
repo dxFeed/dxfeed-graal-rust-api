@@ -911,7 +911,7 @@ unsafe fn dispatch<C: ?Sized>(
         Arc::increment_strong_count(state);
         Arc::from_raw(state)
     };
-    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+    crate::error_manager::drop_panic(panic::catch_unwind(AssertUnwindSafe(|| {
         let _scope = CallbackScope::enter(thread);
         let me = thread_id();
         if state.running.load(Ordering::Acquire) == me {
@@ -959,5 +959,7 @@ unsafe fn dispatch<C: ?Sized>(
             }
         }
         state.running.store(0, Ordering::Release);
-    }));
+    })));
+    // The last reference, after a failed release, drops the closure, whose `Drop` may panic.
+    crate::error_manager::drop_panic(panic::catch_unwind(AssertUnwindSafe(move || drop(state))));
 }
