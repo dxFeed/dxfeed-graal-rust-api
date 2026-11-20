@@ -7,9 +7,10 @@ mod support;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, mpsc};
 
+use dxfeed_graal::__private::live_handles;
+use dxfeed_graal::Error;
 use dxfeed_graal::event::{Order, OrderSource, Scope, Side};
 use dxfeed_graal::model::{OrderBookModel, OrderBookModelFilter};
-use dxfeed_graal::{Error, live_handles};
 use support::Hub;
 
 /// Runs the tests of this file one by one, so that each can count the live handles.
@@ -19,12 +20,10 @@ fn serial() -> MutexGuard<'static, ()> {
 }
 
 fn order(source: OrderSource, scope: Scope, side: Side, index: i64, price: f64, size: f64) -> Order {
-    let mut order = Order {
-        index,
-        price,
-        size,
-        ..Order::new("BOOK")
-    };
+    let mut order = Order::new("BOOK");
+    order.index = index;
+    order.price = price;
+    order.size = size;
     order.set_source(source).unwrap();
     order.set_scope(scope);
     order.set_order_side(side);

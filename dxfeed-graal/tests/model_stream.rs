@@ -7,12 +7,13 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
+use dxfeed_graal::__private::{live_events, live_handles};
+use dxfeed_graal::Error;
 use dxfeed_graal::event::{EventFlags, IndexedEventSource, Order, OrderSource, Scope, Side, TimeAndSale};
 use dxfeed_graal::model::{
     BookSides, IndexedTxModel, MarketDepthModel, ModelStream, OrderBookModel, OrderBookModelFilter, TimeSeriesTxModel,
     Transaction,
 };
-use dxfeed_graal::{Error, live_events, live_handles};
 use support::{CountingWaker, Hub, block_on_with};
 
 /// Runs the tests of this file one by one, so that each can count the live handles.
@@ -27,13 +28,11 @@ type Orders = ModelStream<Transaction<Order>, IndexedTxModel<Order>>;
 
 /// An order of `source` with the index (within the source) and the flags.
 fn order_of(source: IndexedEventSource, index: i64, flags: EventFlags) -> Order {
-    let mut order = Order {
-        index,
-        price: 100.0 + index as f64,
-        size: 10.0,
-        event_flags: flags,
-        ..Order::new("TX")
-    };
+    let mut order = Order::new("TX");
+    order.index = index;
+    order.price = 100.0 + index as f64;
+    order.size = 10.0;
+    order.event_flags = flags;
     order.set_source(source).unwrap();
     order.set_order_side(Side::Buy);
     order
@@ -193,12 +192,10 @@ fn time_series_stream() {
     assert_eq!(stream.model().get_from_time().unwrap(), 1_000);
 
     let sale = |time: i64, flags: EventFlags| {
-        let mut sale = TimeAndSale {
-            price: 10.0,
-            size: 1.0,
-            event_flags: flags,
-            ..TimeAndSale::new("TX")
-        };
+        let mut sale = TimeAndSale::new("TX");
+        sale.price = 10.0;
+        sale.size = 1.0;
+        sale.event_flags = flags;
         sale.set_time(time);
         sale.into()
     };
@@ -433,13 +430,11 @@ fn book_streams_are_send_sync_unpin_and_static() {
 
 /// A price level of the NTV book of `symbol`.
 fn level(symbol: &str, index: i64, side: Side, price: f64, flags: EventFlags) -> Order {
-    let mut order = Order {
-        index,
-        price,
-        size: 1.0,
-        event_flags: flags,
-        ..Order::new(symbol)
-    };
+    let mut order = Order::new(symbol);
+    order.index = index;
+    order.price = price;
+    order.size = 1.0;
+    order.event_flags = flags;
     order.set_source(OrderSource::NTV).unwrap();
     order.set_order_side(side);
     order.set_scope(Scope::Aggregate);

@@ -27,13 +27,31 @@ macro_rules! event_type {
         }
     ) => {
         $(#[$doc])*
-        #[derive(Debug, Clone, PartialEq)]
+        #[derive(Debug, PartialEq)]
+        #[non_exhaustive]
         pub struct $name {
             /// The symbol.
             pub symbol: String,
             /// The time the event was created, in milliseconds since the Unix epoch; `0` if unknown.
             pub event_time: i64,
             $( $(#[$fdoc])* pub $field: event_field!(@owned $kind), )*
+        }
+
+        impl Clone for $name {
+            fn clone(&self) -> Self {
+                $name {
+                    symbol: self.symbol.clone(),
+                    event_time: self.event_time,
+                    $( $field: self.$field.clone(), )*
+                }
+            }
+
+            /// Copies `source` field by field, reusing the strings of `self`.
+            fn clone_from(&mut self, source: &Self) {
+                self.symbol.clone_from(&source.symbol);
+                self.event_time = source.event_time;
+                $( self.$field.clone_from(&source.$field); )*
+            }
         }
 
         impl $name {

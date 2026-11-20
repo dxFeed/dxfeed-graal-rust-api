@@ -47,16 +47,14 @@ fn new_trade_prints_as_in_java() {
 /// Strings printed by Java 3.356 for events filled through the Java setters of the same names.
 #[test]
 fn typed_setters_print_as_in_java() {
-    let mut quote = Quote {
-        bid_exchange_code: 'Q',
-        bid_price: 189.5,
-        bid_size: 100.0,
-        ask_exchange_code: 'N',
-        ask_price: 189.75,
-        ask_size: 200.0,
-        time_nano_part: 456,
-        ..Quote::new("AAPL")
-    };
+    let mut quote = Quote::new("AAPL");
+    quote.bid_exchange_code = 'Q';
+    quote.bid_price = 189.5;
+    quote.bid_size = 100.0;
+    quote.ask_exchange_code = 'N';
+    quote.ask_price = 189.75;
+    quote.ask_size = 200.0;
+    quote.time_nano_part = 456;
     quote.set_sequence(7).unwrap();
     assert_eq!(
         quote.to_string(),
@@ -65,18 +63,16 @@ fn typed_setters_print_as_in_java() {
     );
 
     let base = || {
-        let mut trade = Trade {
-            exchange_code: 'Q',
-            price: 190.25,
-            change: 0.5,
-            size: 300.0,
-            day_id: 19675,
-            day_volume: 1_000_000.0,
-            day_turnover: 1.9e8,
-            time_nano_part: 321,
-            trade_id: 42,
-            ..Trade::new("AAPL")
-        };
+        let mut trade = Trade::new("AAPL");
+        trade.exchange_code = 'Q';
+        trade.price = 190.25;
+        trade.change = 0.5;
+        trade.size = 300.0;
+        trade.day_id = 19675;
+        trade.day_volume = 1_000_000.0;
+        trade.day_turnover = 1.9e8;
+        trade.time_nano_part = 321;
+        trade.trade_id = 42;
         trade.set_sequence(9).unwrap();
         trade
     };
@@ -144,17 +140,15 @@ fn events_convert_back_to_their_type() {
 
 #[test]
 fn quote_values_print_as_in_java() {
-    let quote = Quote {
-        time_millis_sequence: 5,
-        time_nano_part: 7,
-        bid_exchange_code: 'Q',
-        bid_price: 100.0,
-        bid_size: 1e7,
-        ask_exchange_code: 'K',
-        ask_price: 101.5,
-        ask_size: 250.0,
-        ..Quote::new("IBM")
-    };
+    let mut quote = Quote::new("IBM");
+    quote.time_millis_sequence = 5;
+    quote.time_nano_part = 7;
+    quote.bid_exchange_code = 'Q';
+    quote.bid_price = 100.0;
+    quote.bid_size = 1e7;
+    quote.ask_exchange_code = 'K';
+    quote.ask_price = 101.5;
+    quote.ask_size = 250.0;
     assert_eq!(
         quote.to_string(),
         "Quote{IBM, eventTime=0, time=0, timeNanoPart=7, sequence=5, bidTime=0, bidExchange=Q, bidPrice=100.0, \
@@ -164,19 +158,17 @@ fn quote_values_print_as_in_java() {
 
 #[test]
 fn trade_values_print_as_in_java() {
-    let trade = Trade {
-        time_sequence: 9,
-        exchange_code: '\u{e9}',
-        price: 1.5e-5,
-        change: -0.25,
-        size: 12345678.9,
-        day_id: 20000,
-        day_volume: 0.0001,
-        day_turnover: 1e21,
-        flags: 4 << 1 | 1,
-        trade_id: 42,
-        ..Trade::new("MSFT")
-    };
+    let mut trade = Trade::new("MSFT");
+    trade.time_sequence = 9;
+    trade.exchange_code = '\u{e9}';
+    trade.price = 1.5e-5;
+    trade.change = -0.25;
+    trade.size = 12345678.9;
+    trade.day_id = 20000;
+    trade.day_volume = 0.0001;
+    trade.day_turnover = 1e21;
+    trade.flags = 4 << 1 | 1;
+    trade.trade_id = 42;
     assert_eq!(
         trade.to_string(),
         "Trade{MSFT, eventTime=0, time=0, timeNanoPart=0, sequence=9, exchange=\\u00e9, tradeId=42, price=1.5E-5, \
@@ -187,13 +179,11 @@ fn trade_values_print_as_in_java() {
 
 #[test]
 fn times_print_through_the_sdk() {
-    let quote = Quote {
-        event_time: 1_700_000_000_123,
-        time_millis_sequence: 456 << 22,
-        bid_time: 1_700_000_000_000,
-        ask_time: 1_700_000_001_000,
-        ..Quote::new("AAPL")
-    };
+    let mut quote = Quote::new("AAPL");
+    quote.event_time = 1_700_000_000_123;
+    quote.time_millis_sequence = 456 << 22;
+    quote.bid_time = 1_700_000_000_000;
+    quote.ask_time = 1_700_000_001_000;
     let text = quote.to_string();
     for name in ["eventTime", "time", "bidTime", "askTime"] {
         assert!(is_time(field(&text, name)), "{name} in {text}");
@@ -204,10 +194,8 @@ fn times_print_through_the_sdk() {
     // Both times fall on one minute in every time zone: only the seconds differ.
     assert_eq!(field(&text, "bidTime")[..13], field(&text, "askTime")[..13]);
 
-    let trade = Trade {
-        time_sequence: (1_700_000_000_i64 << 32) | (789 << 22),
-        ..Trade::new("AAPL")
-    };
+    let mut trade = Trade::new("AAPL");
+    trade.time_sequence = (1_700_000_000_i64 << 32) | (789 << 22);
     let text = trade.to_string();
     assert!(is_time(field(&text, "time")), "{text}");
     assert!(field(&text, "time").ends_with(".789"), "{text}");
@@ -215,10 +203,8 @@ fn times_print_through_the_sdk() {
 
 #[test]
 fn events_print_as_their_payload() {
-    let quote = Quote {
-        bid_price: 1.0,
-        ..Quote::new("AAPL")
-    };
+    let mut quote = Quote::new("AAPL");
+    quote.bid_price = 1.0;
     assert_eq!(Event::from(quote.clone()).to_string(), quote.to_string());
     assert_eq!(
         Event::from(Trade::new("AAPL")).to_string(),
@@ -241,10 +227,8 @@ fn received_events_print_like_their_copies() {
         })
         .unwrap();
     subscription.add_symbols(["AAPL"]).unwrap();
-    let sent = Quote {
-        bid_time: 1_700_000_000_000,
-        ..quote("AAPL")
-    };
+    let mut sent = quote("AAPL");
+    sent.bid_time = 1_700_000_000_000;
     hub.publish_and_process(&[sent.into()]);
     let (borrowed, owned) = texts.try_recv().expect("no quote");
     assert_eq!(borrowed, owned);
@@ -323,22 +307,20 @@ fn new_market_events_print_as_in_java() {
 /// The strings Java 3.356 prints for events filled through the Java setters of the same names.
 #[test]
 fn filled_market_events_print_as_in_java() {
-    let mut profile = Profile {
-        description: Some("desc".to_owned()),
-        status_reason: Some("reason".to_owned()),
-        high_limit_price: 10.0,
-        low_limit_price: 1.5,
-        high_52_week_price: 1e7,
-        low_52_week_price: 2.25,
-        beta: 0.75,
-        earnings_per_share: 3.5,
-        dividend_frequency: 4.0,
-        ex_dividend_amount: 0.25,
-        ex_dividend_day_id: 19000,
-        shares: 1000.0,
-        free_float: 500.5,
-        ..Profile::new("AAPL")
-    };
+    let mut profile = Profile::new("AAPL");
+    profile.description = Some("desc".to_owned());
+    profile.status_reason = Some("reason".to_owned());
+    profile.high_limit_price = 10.0;
+    profile.low_limit_price = 1.5;
+    profile.high_52_week_price = 1e7;
+    profile.low_52_week_price = 2.25;
+    profile.beta = 0.75;
+    profile.earnings_per_share = 3.5;
+    profile.dividend_frequency = 4.0;
+    profile.ex_dividend_amount = 0.25;
+    profile.ex_dividend_day_id = 19000;
+    profile.shares = 1000.0;
+    profile.free_float = 500.5;
     profile.set_short_sale_restriction(ShortSaleRestriction::Active);
     profile.set_trading_status(TradingStatus::Active);
     assert_eq!(profile.flags, 6);
@@ -349,11 +331,9 @@ fn filled_market_events_print_as_in_java() {
          low52WeekPrice=2.25, beta=0.75, earningsPerShare=3.5, dividendFrequency=4.0, exDividendAmount=0.25, \
          exDividendDay=20220108, shares=1000, freeFloat=500.5}"
     );
-    let empty = Profile {
-        description: Some(String::new()),
-        status_reason: Some(String::new()),
-        ..Profile::new("AAPL")
-    };
+    let mut empty = Profile::new("AAPL");
+    empty.description = Some(String::new());
+    empty.status_reason = Some(String::new());
     assert!(
         empty
             .to_string()
@@ -361,18 +341,16 @@ fn filled_market_events_print_as_in_java() {
         "{empty}"
     );
 
-    let mut summary = Summary {
-        day_id: 19001,
-        day_open_price: 1.5,
-        day_high_price: 2.25,
-        day_low_price: 1.0,
-        day_close_price: 10.0,
-        prev_day_id: 19000,
-        prev_day_close_price: 1e7,
-        prev_day_volume: 1234.5,
-        open_interest: 77,
-        ..Summary::new("AAPL")
-    };
+    let mut summary = Summary::new("AAPL");
+    summary.day_id = 19001;
+    summary.day_open_price = 1.5;
+    summary.day_high_price = 2.25;
+    summary.day_low_price = 1.0;
+    summary.day_close_price = 10.0;
+    summary.prev_day_id = 19000;
+    summary.prev_day_close_price = 1e7;
+    summary.prev_day_volume = 1234.5;
+    summary.open_interest = 77;
     summary.set_day_close_price_type(PriceType::Final);
     summary.set_prev_day_close_price_type(PriceType::Preliminary);
     assert_eq!(summary.flags, 14);
@@ -383,16 +361,14 @@ fn filled_market_events_print_as_in_java() {
          prevDayVolume=1234.5, openInterest=77}"
     );
 
-    let mut greeks = Greeks {
-        price: 1.5,
-        volatility: 0.25,
-        delta: 0.5,
-        gamma: 2.25,
-        theta: -1.5,
-        rho: 10.0,
-        vega: 1e7,
-        ..Greeks::new("AAPL")
-    };
+    let mut greeks = Greeks::new("AAPL");
+    greeks.price = 1.5;
+    greeks.volatility = 0.25;
+    greeks.delta = 0.5;
+    greeks.gamma = 2.25;
+    greeks.theta = -1.5;
+    greeks.rho = 10.0;
+    greeks.vega = 1e7;
     greeks.set_sequence(5).unwrap();
     assert_eq!(greeks.index, 5);
     assert_eq!(
@@ -401,15 +377,13 @@ fn filled_market_events_print_as_in_java() {
          gamma=2.25, theta=-1.5, rho=10.0, vega=1.0E7}"
     );
 
-    let mut underlying = Underlying {
-        volatility: 0.25,
-        front_volatility: 0.5,
-        back_volatility: 0.75,
-        call_volume: 1e7,
-        put_volume: 50.0,
-        put_call_ratio: 0.5,
-        ..Underlying::new("AAPL")
-    };
+    let mut underlying = Underlying::new("AAPL");
+    underlying.volatility = 0.25;
+    underlying.front_volatility = 0.5;
+    underlying.back_volatility = 0.75;
+    underlying.call_volume = 1e7;
+    underlying.put_volume = 50.0;
+    underlying.put_call_ratio = 0.5;
     underlying.set_sequence(5).unwrap();
     assert_eq!(
         underlying.to_string(),
@@ -417,15 +391,13 @@ fn filled_market_events_print_as_in_java() {
          backVolatility=0.75, callVolume=1.0E7, putVolume=50.0, putCallRatio=0.5}"
     );
 
-    let mut theo_price = TheoPrice {
-        price: 1.5,
-        underlying_price: 1e7,
-        delta: 0.5,
-        gamma: 2.25,
-        dividend: 0.25,
-        interest: 0.05,
-        ..TheoPrice::new("AAPL")
-    };
+    let mut theo_price = TheoPrice::new("AAPL");
+    theo_price.price = 1.5;
+    theo_price.underlying_price = 1e7;
+    theo_price.delta = 0.5;
+    theo_price.gamma = 2.25;
+    theo_price.dividend = 0.25;
+    theo_price.interest = 0.05;
     theo_price.set_sequence(5).unwrap();
     assert_eq!(
         theo_price.to_string(),
@@ -433,18 +405,16 @@ fn filled_market_events_print_as_in_java() {
          delta=0.5, gamma=2.25, dividend=0.25, interest=0.05}"
     );
 
-    let mut series = Series {
-        index: 17,
-        expiration: 19999,
-        volatility: 0.25,
-        call_volume: 100.0,
-        put_volume: 50.0,
-        put_call_ratio: 0.5,
-        forward_price: 1e7,
-        dividend: 0.25,
-        interest: 0.05,
-        ..Series::new("AAPL")
-    };
+    let mut series = Series::new("AAPL");
+    series.index = 17;
+    series.expiration = 19999;
+    series.volatility = 0.25;
+    series.call_volume = 100.0;
+    series.put_volume = 50.0;
+    series.put_call_ratio = 0.5;
+    series.forward_price = 1e7;
+    series.dividend = 0.25;
+    series.interest = 0.05;
     series.set_sequence(5).unwrap();
     assert_eq!(
         series.to_string(),
@@ -456,40 +426,36 @@ fn filled_market_events_print_as_in_java() {
     let trade_base = "AAPL, eventTime=0, time=0, timeNanoPart=7, sequence=5, exchange=Q, tradeId=42, price=1.5, \
                       change=2.25, size=10.0, day=20220108, dayVolume=1000.0, dayTurnover=1.0E7, direction=UP, \
                       ETH=true";
-    let mut trade_eth = TradeETH {
-        exchange_code: 'Q',
-        price: 1.5,
-        change: 2.25,
-        size: 10.0,
-        day_id: 19000,
-        day_volume: 1000.0,
-        day_turnover: 1e7,
-        time_nano_part: 7,
-        trade_id: 42,
-        ..TradeETH::new("AAPL")
-    };
+    let mut trade_eth = TradeETH::new("AAPL");
+    trade_eth.exchange_code = 'Q';
+    trade_eth.price = 1.5;
+    trade_eth.change = 2.25;
+    trade_eth.size = 10.0;
+    trade_eth.day_id = 19000;
+    trade_eth.day_volume = 1000.0;
+    trade_eth.day_turnover = 1e7;
+    trade_eth.time_nano_part = 7;
+    trade_eth.trade_id = 42;
     trade_eth.set_sequence(5).unwrap();
     trade_eth.set_tick_direction(Direction::Up);
     trade_eth.set_extended_trading_hours(true);
     assert_eq!(trade_eth.flags, 11);
     assert_eq!(trade_eth.to_string(), format!("TradeETH{{{trade_base}}}"));
 
-    let mut nuam_trade = NuamTrade {
-        exchange_code: 'Q',
-        price: 1.5,
-        change: 2.25,
-        size: 10.0,
-        day_id: 19000,
-        day_volume: 1000.0,
-        day_turnover: 1e7,
-        time_nano_part: 7,
-        trade_id: 42,
-        last_significant_price: 1.5,
-        last_price_for_all: 2.25,
-        number_of_trades: 8,
-        vwap: 1e7,
-        ..NuamTrade::new("AAPL")
-    };
+    let mut nuam_trade = NuamTrade::new("AAPL");
+    nuam_trade.exchange_code = 'Q';
+    nuam_trade.price = 1.5;
+    nuam_trade.change = 2.25;
+    nuam_trade.size = 10.0;
+    nuam_trade.day_id = 19000;
+    nuam_trade.day_volume = 1000.0;
+    nuam_trade.day_turnover = 1e7;
+    nuam_trade.time_nano_part = 7;
+    nuam_trade.trade_id = 42;
+    nuam_trade.last_significant_price = 1.5;
+    nuam_trade.last_price_for_all = 2.25;
+    nuam_trade.number_of_trades = 8;
+    nuam_trade.vwap = 1e7;
     nuam_trade.set_sequence(5).unwrap();
     nuam_trade.set_tick_direction(Direction::Up);
     nuam_trade.set_extended_trading_hours(true);
@@ -504,11 +470,9 @@ fn filled_market_events_print_as_in_java() {
 
 #[test]
 fn market_event_times_print_through_the_sdk() {
-    let profile = Profile {
-        halt_start_time: 1_700_000_000_123,
-        halt_end_time: 1_700_000_100_000,
-        ..Profile::new("AAPL")
-    };
+    let mut profile = Profile::new("AAPL");
+    profile.halt_start_time = 1_700_000_000_123;
+    profile.halt_end_time = 1_700_000_100_000;
     let text = profile.to_string();
     for name in ["haltStartTime", "haltEndTime"] {
         assert!(is_time_without_millis(field(&text, name)), "{name} in {text}");
@@ -522,10 +486,8 @@ fn market_event_times_print_through_the_sdk() {
     assert!(field(&text, "time").ends_with(".789"), "{text}");
     assert_eq!((greeks.time(), greeks.sequence()), (1_700_000_000_789, 5));
 
-    let nuam_trade = NuamTrade {
-        trade_stat_time: 1_700_000_000_456,
-        ..NuamTrade::new("AAPL")
-    };
+    let mut nuam_trade = NuamTrade::new("AAPL");
+    nuam_trade.trade_stat_time = 1_700_000_000_456;
     let text = nuam_trade.to_string();
     assert!(field(&text, "tradeStatTime").ends_with(".456"), "{text}");
 }
@@ -551,11 +513,9 @@ fn packed_market_values_have_typed_accessors() {
         (PriceType::Regular, PriceType::Indicative)
     );
 
-    let mut series = Series {
-        index: 17,
-        event_flags: EventFlags::SNAPSHOT_END,
-        ..Series::new("AAPL")
-    };
+    let mut series = Series::new("AAPL");
+    series.index = 17;
+    series.event_flags = EventFlags::SNAPSHOT_END;
     series.set_time(1_700_000_000_000);
     series.set_sequence(3).unwrap();
     assert_eq!(
@@ -628,19 +588,17 @@ macro_rules! set_sale_flags {
 /// The strings Java 3.356 prints for sale and candle events filled through the Java setters of the same names.
 #[test]
 fn filled_sale_and_candle_events_print_as_in_java() {
-    let mut time_and_sale = TimeAndSale {
-        time_nano_part: 7,
-        exchange_code: 'Q',
-        trade_id: 42,
-        price: 1.5,
-        size: 10.0,
-        bid_price: 2.25,
-        ask_price: 1e7,
-        exchange_sale_conditions: Some("ESC".to_owned()),
-        buyer: Some("buyer".to_owned()),
-        seller: Some("seller".to_owned()),
-        ..TimeAndSale::new("AAPL")
-    };
+    let mut time_and_sale = TimeAndSale::new("AAPL");
+    time_and_sale.time_nano_part = 7;
+    time_and_sale.exchange_code = 'Q';
+    time_and_sale.trade_id = 42;
+    time_and_sale.price = 1.5;
+    time_and_sale.size = 10.0;
+    time_and_sale.bid_price = 2.25;
+    time_and_sale.ask_price = 1e7;
+    time_and_sale.exchange_sale_conditions = Some("ESC".to_owned());
+    time_and_sale.buyer = Some("buyer".to_owned());
+    time_and_sale.seller = Some("seller".to_owned());
     time_and_sale.set_sequence(5).unwrap();
     set_sale_flags!(time_and_sale);
     let sale = "AAPL, eventTime=0, eventFlags=0x0, time=0, timeNanoPart=7, sequence=5, exchange=Q, tradeId=42, \
@@ -648,59 +606,51 @@ fn filled_sale_and_candle_events_print_as_in_java() {
                 validTick=true, type=CORRECTION, buyer='buyer', seller='seller'";
     assert_eq!(time_and_sale.to_string(), format!("TimeAndSale{{{sale}}}"));
 
-    let mut nuam = NuamTimeAndSale {
-        time_nano_part: 7,
-        exchange_code: 'Q',
-        trade_id: 42,
-        price: 1.5,
-        size: 10.0,
-        bid_price: 2.25,
-        ask_price: 1e7,
-        exchange_sale_conditions: Some("ESC".to_owned()),
-        buyer: Some("buyer".to_owned()),
-        seller: Some("seller".to_owned()),
-        match_id: 99,
-        ..NuamTimeAndSale::new("AAPL")
-    };
+    let mut nuam = NuamTimeAndSale::new("AAPL");
+    nuam.time_nano_part = 7;
+    nuam.exchange_code = 'Q';
+    nuam.trade_id = 42;
+    nuam.price = 1.5;
+    nuam.size = 10.0;
+    nuam.bid_price = 2.25;
+    nuam.ask_price = 1e7;
+    nuam.exchange_sale_conditions = Some("ESC".to_owned());
+    nuam.buyer = Some("buyer".to_owned());
+    nuam.seller = Some("seller".to_owned());
+    nuam.match_id = 99;
     nuam.set_sequence(5).unwrap();
     set_sale_flags!(nuam);
     assert_eq!(nuam.to_string(), format!("NuamTimeAndSale{{{sale}, matchId=99}}"));
 
     // Java prints the buyer and the seller only when they are set, empty ones too.
-    let empty = TimeAndSale {
-        exchange_sale_conditions: Some(String::new()),
-        buyer: Some(String::new()),
-        seller: Some(String::new()),
-        ..TimeAndSale::new("AAPL")
-    };
+    let mut empty = TimeAndSale::new("AAPL");
+    empty.exchange_sale_conditions = Some(String::new());
+    empty.buyer = Some(String::new());
+    empty.seller = Some(String::new());
     assert!(empty.to_string().ends_with(
         "ESC='', TTE=\\0, side=UNDEFINED, spread=false, ETH=false, \
                                          validTick=false, type=NEW, buyer='', seller=''}"
     ));
-    let seller_only = TimeAndSale {
-        seller: Some("s".to_owned()),
-        ..TimeAndSale::new("AAPL")
-    };
+    let mut seller_only = TimeAndSale::new("AAPL");
+    seller_only.seller = Some("s".to_owned());
     assert!(
         seller_only.to_string().ends_with("type=NEW, seller='s'}"),
         "{seller_only}"
     );
 
-    let mut option_sale = OptionSale {
-        index: 17,
-        time_nano_part: 7,
-        exchange_code: 'Q',
-        price: 1.5,
-        size: 10.0,
-        bid_price: 2.25,
-        ask_price: 1e7,
-        exchange_sale_conditions: Some("ESC".to_owned()),
-        underlying_price: 100.0,
-        volatility: 0.25,
-        delta: 0.5,
-        option_symbol: Some(".AAPL250117C150".to_owned()),
-        ..OptionSale::new("AAPL")
-    };
+    let mut option_sale = OptionSale::new("AAPL");
+    option_sale.index = 17;
+    option_sale.time_nano_part = 7;
+    option_sale.exchange_code = 'Q';
+    option_sale.price = 1.5;
+    option_sale.size = 10.0;
+    option_sale.bid_price = 2.25;
+    option_sale.ask_price = 1e7;
+    option_sale.exchange_sale_conditions = Some("ESC".to_owned());
+    option_sale.underlying_price = 100.0;
+    option_sale.volatility = 0.25;
+    option_sale.delta = 0.5;
+    option_sale.option_symbol = Some(".AAPL250117C150".to_owned());
     option_sale.set_sequence(5).unwrap();
     set_sale_flags!(option_sale);
     assert_eq!(
@@ -714,36 +664,32 @@ fn filled_sale_and_candle_events_print_as_in_java() {
     let candle = "AAPL{=d}, eventTime=0, eventFlags=0x0, time=0, sequence=5, count=3, open=1.5, high=1.0E7, low=1.0, \
                   close=10.0, volume=1000.0, vwap=1.75, bidVolume=400.0, askVolume=600.0, impVolatility=0.25, \
                   openInterest=77.0";
-    let mut filled = Candle {
-        count: 3,
-        open: 1.5,
-        high: 1e7,
-        low: 1.0,
-        close: 10.0,
-        volume: 1000.0,
-        vwap: 1.75,
-        bid_volume: 400.0,
-        ask_volume: 600.0,
-        imp_volatility: 0.25,
-        open_interest: 77.0,
-        ..Candle::new("AAPL{=d}")
-    };
+    let mut filled = Candle::new("AAPL{=d}");
+    filled.count = 3;
+    filled.open = 1.5;
+    filled.high = 1e7;
+    filled.low = 1.0;
+    filled.close = 10.0;
+    filled.volume = 1000.0;
+    filled.vwap = 1.75;
+    filled.bid_volume = 400.0;
+    filled.ask_volume = 600.0;
+    filled.imp_volatility = 0.25;
+    filled.open_interest = 77.0;
     filled.set_sequence(5).unwrap();
     assert_eq!(filled.to_string(), format!("Candle{{{candle}}}"));
-    let mut daily = DailyCandle {
-        count: 3,
-        open: 1.5,
-        high: 1e7,
-        low: 1.0,
-        close: 10.0,
-        volume: 1000.0,
-        vwap: 1.75,
-        bid_volume: 400.0,
-        ask_volume: 600.0,
-        imp_volatility: 0.25,
-        open_interest: 77.0,
-        ..DailyCandle::new("AAPL{=d}")
-    };
+    let mut daily = DailyCandle::new("AAPL{=d}");
+    daily.count = 3;
+    daily.open = 1.5;
+    daily.high = 1e7;
+    daily.low = 1.0;
+    daily.close = 10.0;
+    daily.volume = 1000.0;
+    daily.vwap = 1.75;
+    daily.bid_volume = 400.0;
+    daily.ask_volume = 600.0;
+    daily.imp_volatility = 0.25;
+    daily.open_interest = 77.0;
     daily.set_sequence(5).unwrap();
     assert_eq!(daily.to_string(), format!("DailyCandle{{{candle}}}"));
 }
@@ -784,10 +730,8 @@ fn sale_values_have_typed_accessors() {
     assert_eq!(IndexedEvent::index(&sale), sale.index);
     assert_eq!(TimeSeriesEvent::time(&sale), 1_700_000_000_123);
 
-    let mut option_sale = OptionSale {
-        index: 17,
-        ..OptionSale::new("AAPL")
-    };
+    let mut option_sale = OptionSale::new("AAPL");
+    option_sale.index = 17;
     option_sale.set_time(1_700_000_000_000);
     assert_eq!(
         (IndexedEvent::index(&option_sale), option_sale.time()),
@@ -915,20 +859,16 @@ fn filled_order_events_print_as_in_java() {
     fill_order_base!(order_base);
     assert_eq!(order_base.to_string(), format!("OrderBase{{{base}}}"));
 
-    let mut order = Order {
-        market_maker: Some("MM1".to_owned()),
-        ..Order::new("AAPL")
-    };
+    let mut order = Order::new("AAPL");
+    order.market_maker = Some("MM1".to_owned());
     fill_order_base!(order);
     assert_eq!(order.to_string(), format!("Order{{{base}, marketMaker='MM1'}}"));
 
-    let mut analytic = AnalyticOrder {
-        market_maker: Some("MM1".to_owned()),
-        iceberg_peak_size: 1.5,
-        iceberg_hidden_size: 2.25,
-        iceberg_executed_size: 10.0,
-        ..AnalyticOrder::new("AAPL")
-    };
+    let mut analytic = AnalyticOrder::new("AAPL");
+    analytic.market_maker = Some("MM1".to_owned());
+    analytic.iceberg_peak_size = 1.5;
+    analytic.iceberg_hidden_size = 2.25;
+    analytic.iceberg_executed_size = 10.0;
     fill_order_base!(analytic);
     analytic.set_iceberg_type(IcebergType::Synthetic);
     assert_eq!(
@@ -939,18 +879,14 @@ fn filled_order_events_print_as_in_java() {
         )
     );
 
-    let mut spread = SpreadOrder {
-        spread_symbol: Some("SPR".to_owned()),
-        ..SpreadOrder::new("AAPL")
-    };
+    let mut spread = SpreadOrder::new("AAPL");
+    spread.spread_symbol = Some("SPR".to_owned());
     fill_order_base!(spread);
     assert_eq!(spread.to_string(), format!("SpreadOrder{{{base}, spreadSymbol='SPR'}}"));
 
-    let mut otc = OtcMarketsOrder {
-        market_maker: Some("MM1".to_owned()),
-        quote_access_payment: 15,
-        ..OtcMarketsOrder::new("AAPL")
-    };
+    let mut otc = OtcMarketsOrder::new("AAPL");
+    otc.market_maker = Some("MM1".to_owned());
+    otc.quote_access_payment = 15;
     fill_order_base!(otc);
     otc.set_open(true);
     otc.set_unsolicited(true);
@@ -967,27 +903,25 @@ fn filled_order_events_print_as_in_java() {
         )
     );
 
-    let mut nuam = NuamOrder {
-        market_maker: Some("MM1".to_owned()),
-        actor_id: 1,
-        participant_id: 2,
-        submitter_id: 3,
-        on_behalf_of_submitter_id: 4,
-        client_order_id: Some("cid".to_owned()),
-        customer_account: Some("acct".to_owned()),
-        customer_info: Some("cinfo".to_owned()),
-        exchange_info: Some("einfo".to_owned()),
-        time_in_force_data: 5,
-        trigger_order_book_id: 6,
-        trigger_price: 1.5,
-        trigger_session_type: 7,
-        order_quantity: 1e7,
-        display_quantity: 2.25,
-        refresh_quantity: 3.5,
-        leaves_quantity: 4.5,
-        matched_quantity: 5.5,
-        ..NuamOrder::new("AAPL")
-    };
+    let mut nuam = NuamOrder::new("AAPL");
+    nuam.market_maker = Some("MM1".to_owned());
+    nuam.actor_id = 1;
+    nuam.participant_id = 2;
+    nuam.submitter_id = 3;
+    nuam.on_behalf_of_submitter_id = 4;
+    nuam.client_order_id = Some("cid".to_owned());
+    nuam.customer_account = Some("acct".to_owned());
+    nuam.customer_info = Some("cinfo".to_owned());
+    nuam.exchange_info = Some("einfo".to_owned());
+    nuam.time_in_force_data = 5;
+    nuam.trigger_order_book_id = 6;
+    nuam.trigger_price = 1.5;
+    nuam.trigger_session_type = 7;
+    nuam.order_quantity = 1e7;
+    nuam.display_quantity = 2.25;
+    nuam.refresh_quantity = 3.5;
+    nuam.leaves_quantity = 4.5;
+    nuam.matched_quantity = 5.5;
     fill_order_base!(nuam);
     nuam.set_time_in_force(NuamTimeInForceType::Gtc);
     nuam.set_order_type(NuamOrderType::Limit);
@@ -1003,15 +937,13 @@ fn filled_order_events_print_as_in_java() {
         )
     );
 
-    let mut market_maker = MarketMaker {
-        bid_price: 1.5,
-        bid_size: 10.0,
-        bid_count: 3,
-        ask_price: 2.25,
-        ask_size: 1e7,
-        ask_count: 4,
-        ..MarketMaker::new("AAPL")
-    };
+    let mut market_maker = MarketMaker::new("AAPL");
+    market_maker.bid_price = 1.5;
+    market_maker.bid_size = 10.0;
+    market_maker.bid_count = 3;
+    market_maker.ask_price = 2.25;
+    market_maker.ask_size = 1e7;
+    market_maker.ask_count = 4;
     market_maker.set_exchange_code('Q').unwrap();
     market_maker.set_market_maker("MM1").unwrap();
     assert_eq!(
@@ -1021,15 +953,13 @@ fn filled_order_events_print_as_in_java() {
          askSize=1.0E7, askCount=4}"
     );
 
-    let mut imbalance = OrderImbalance {
-        source_id: NTV.get_id(),
-        ref_price: 1.5,
-        paired_size: 10.0,
-        imbalance_size: 2.25,
-        near_price: 1e7,
-        far_price: 3.5,
-        ..OrderImbalance::new("AAPL")
-    };
+    let mut imbalance = OrderImbalance::new("AAPL");
+    imbalance.source_id = NTV.get_id();
+    imbalance.ref_price = 1.5;
+    imbalance.paired_size = 10.0;
+    imbalance.imbalance_size = 2.25;
+    imbalance.near_price = 1e7;
+    imbalance.far_price = 3.5;
     imbalance.set_sequence(5).unwrap();
     imbalance.set_imbalance_side(ImbalanceSide::Sell);
     imbalance.set_auction_type(AuctionType::Closing);
@@ -1099,18 +1029,14 @@ fn order_values_have_typed_accessors() {
     );
 
     // A source that Java refuses prints as its id.
-    let imbalance = OrderImbalance {
-        source_id: 10,
-        ..OrderImbalance::new("AAPL")
-    };
+    let mut imbalance = OrderImbalance::new("AAPL");
+    imbalance.source_id = 10;
     assert_eq!(field(&imbalance.to_string(), "source"), "10");
 
     // The time of a market maker is the later of its bid and ask times.
-    let mut market_maker = MarketMaker {
-        bid_time: 1_700_000_000_000,
-        ask_time: 1_700_000_001_000,
-        ..MarketMaker::new("AAPL")
-    };
+    let mut market_maker = MarketMaker::new("AAPL");
+    market_maker.bid_time = 1_700_000_000_000;
+    market_maker.ask_time = 1_700_000_001_000;
     assert_eq!(
         (market_maker.time(), IndexedEvent::source(&market_maker)),
         (1_700_000_001_000, OrderSource::DEFAULT)
@@ -1130,10 +1056,8 @@ fn order_values_have_typed_accessors() {
         ('\u{ffff}', Some("ABCD"))
     );
 
-    let analytic = AnalyticOrder {
-        iceberg_flags: 1,
-        ..AnalyticOrder::new("AAPL")
-    };
+    let mut analytic = AnalyticOrder::new("AAPL");
+    analytic.iceberg_flags = 1;
     assert_eq!(analytic.iceberg_type(), IcebergType::Native);
 }
 
@@ -1158,34 +1082,26 @@ fn message_and_configuration_events_print_as_in_java() {
         "TextMessage{AAPL, eventTime=0, time=0, sequence=0, text='null'}"
     );
 
-    let configuration = Configuration {
-        version: 3,
-        attachment: Some("attach".to_owned()),
-        ..Configuration::new("AAPL")
-    };
+    let mut configuration = Configuration::new("AAPL");
+    configuration.version = 3;
+    configuration.attachment = Some("attach".to_owned());
     assert_eq!(
         configuration.to_string(),
         "Configuration{AAPL, eventTime=0, version=3, attachment=attach}"
     );
-    let message = Message {
-        attachment: Some("attach".to_owned()),
-        ..Message::new("AAPL")
-    };
+    let mut message = Message::new("AAPL");
+    message.attachment = Some("attach".to_owned());
     assert_eq!(message.to_string(), "Message{AAPL, eventTime=0, attachment=attach}");
-    let mut text_configuration = TextConfiguration {
-        version: 3,
-        text: Some("text".to_owned()),
-        ..TextConfiguration::new("AAPL")
-    };
+    let mut text_configuration = TextConfiguration::new("AAPL");
+    text_configuration.version = 3;
+    text_configuration.text = Some("text".to_owned());
     text_configuration.set_sequence(5).unwrap();
     assert_eq!(
         text_configuration.to_string(),
         "TextConfiguration{AAPL, eventTime=0, time=0, sequence=5, version=3, text='text'}"
     );
-    let mut text_message = TextMessage {
-        text: Some("text".to_owned()),
-        ..TextMessage::new("AAPL")
-    };
+    let mut text_message = TextMessage::new("AAPL");
+    text_message.text = Some("text".to_owned());
     text_message.set_sequence(5).unwrap();
     assert_eq!(
         text_message.to_string(),

@@ -7,12 +7,13 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::{Candle, Quote, TimeAndSale, Trade};
 use dxfeed_graal::event_queue::{EventQueue, PollResult, SharedEventQueue};
 use dxfeed_graal::ipf::InstrumentProfile;
 use dxfeed_graal::ipf::live::InstrumentProfileCollector;
 use dxfeed_graal::model::TimeSeriesEventModel;
-use dxfeed_graal::{Error, Event, Executor, Promise, live_handles, system};
+use dxfeed_graal::{Error, Event, Executor, Promise, system};
 use support::{Hub, candle, is_child, quote, run_child, time_and_sale, trade};
 
 const WAIT: Duration = Duration::from_secs(5);
@@ -156,10 +157,8 @@ fn a_shared_queue_tags_the_events_of_its_subscriptions() {
 
     // A subscription leaves by being closed; the queue stays open. A trade that changes nothing would not come again.
     quotes.close().unwrap();
-    let changed = Trade {
-        price: 191.0,
-        ..trade("IBM")
-    };
+    let mut changed = trade("IBM");
+    changed.price = 191.0;
     hub.publisher.publish_events(&[changed.into()]).unwrap();
     assert!(matches!(&poll_events(&queue, 1)[..], [(2, Event::Trade(_))]));
     assert!(format!("{queue:?}").starts_with("SharedEventQueue"));
@@ -194,11 +193,9 @@ fn the_executor_of_a_shared_queue_runs_listeners_in_the_polls() {
             let _ = sender.send((profiles.len(), thread::current().id()));
         })
         .unwrap();
-    let profile = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "AAPL".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut profile = InstrumentProfile::new();
+    profile.instrument_type = "STOCK".into();
+    profile.symbol = "AAPL".into();
     collector.update_instrument_profile(&profile).unwrap();
     assert!(
         updates.recv_timeout(Duration::from_millis(300)).is_err(),
@@ -542,10 +539,8 @@ fn the_ready_signal_tells_when_to_poll() {
     // SAFETY: removing the signal needs no object.
     unsafe { queue.set_ready_signal(ReadySignal::None) }.unwrap();
     object.reset();
-    let changed = Quote {
-        bid_price: 190.0,
-        ..quote("AAPL")
-    };
+    let mut changed = quote("AAPL");
+    changed.bid_price = 190.0;
     hub.publisher.publish_events(&[changed.into()]).unwrap();
     assert!(!object.wait(Duration::from_millis(300)), "a removed signal was written");
     assert!(matches!(queue.poll(Some(WAIT), 0).unwrap(), PollResult::Events(_)));

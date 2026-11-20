@@ -10,8 +10,9 @@ use std::task::{Poll, Wake};
 use std::thread;
 use std::time::Duration;
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::{Candle, Quote};
-use dxfeed_graal::{AnyOfFuture, Error, JavaExceptionClass, Promise, PromiseFuture, Promises, live_handles};
+use dxfeed_graal::{AnyOfFuture, Error, JavaExceptionClass, Promise, PromiseFuture, Promises};
 use support::{CountingWaker, Hub, block_on, block_on_with, delivered, poll_with, quote, same_events};
 
 /// Runs the tests of this file one by one, so that each can count the live handles.

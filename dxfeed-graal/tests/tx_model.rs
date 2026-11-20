@@ -15,13 +15,11 @@ type Call = (IndexedEventSource, Vec<(i64, EventFlags)>, bool);
 
 /// An order of the NTV book with the index (within the source) and the flags.
 fn order(index: i64, flags: EventFlags) -> Order {
-    let mut order = Order {
-        index,
-        price: 100.0 + index as f64,
-        size: 10.0,
-        event_flags: flags,
-        ..Order::new("TX")
-    };
+    let mut order = Order::new("TX");
+    order.index = index;
+    order.price = 100.0 + index as f64;
+    order.size = 10.0;
+    order.event_flags = flags;
     order.set_source(OrderSource::NTV).unwrap();
     order.set_order_side(Side::Buy);
     order
@@ -218,12 +216,10 @@ fn time_series_come_from_a_time_on() {
     assert_eq!(model.get_from_time().unwrap(), 1_000);
 
     let sale = |time: i64, flags: EventFlags| {
-        let mut sale = TimeAndSale {
-            price: 10.0,
-            size: 1.0,
-            event_flags: flags,
-            ..TimeAndSale::new("TX")
-        };
+        let mut sale = TimeAndSale::new("TX");
+        sale.price = 10.0;
+        sale.size = 1.0;
+        sale.event_flags = flags;
         sale.set_time(time);
         sale.into()
     };
@@ -268,12 +264,10 @@ fn the_event_peek_sees_each_event_before_the_listener() {
     hub.executor.process_all_pending().unwrap();
 
     let sale = |time: i64, flags: EventFlags| {
-        let mut sale = TimeAndSale {
-            price: 10.0,
-            size: 1.0,
-            event_flags: flags,
-            ..TimeAndSale::new("TX")
-        };
+        let mut sale = TimeAndSale::new("TX");
+        sale.price = 10.0;
+        sale.size = 1.0;
+        sale.event_flags = flags;
         sale.set_time(time);
         sale.into()
     };

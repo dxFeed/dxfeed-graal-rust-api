@@ -17,12 +17,10 @@ use support::{CountingWaker, Hub, block_on_with, is_child, poll_with, quote, quo
 
 /// A buy order of the NTV book of `TX`, a transaction of its own.
 fn order(index: i64) -> Order {
-    let mut order = Order {
-        index,
-        price: 100.0,
-        size: 1.0,
-        ..Order::new("TX")
-    };
+    let mut order = Order::new("TX");
+    order.index = index;
+    order.price = 100.0;
+    order.size = 1.0;
     order.set_source(OrderSource::NTV).unwrap();
     order.set_order_side(Side::Buy);
     order

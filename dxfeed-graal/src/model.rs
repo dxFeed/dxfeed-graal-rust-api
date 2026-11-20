@@ -633,6 +633,7 @@ impl<E: IndexedEvent + EventKind> IndexedTxModelBuilder<E> {
 
 /// The order of the events of a snapshot of a [`TimeSeriesTxModel`] (`TimeSeriesTxModel.SortOrder`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SortOrder {
     /// The order in which the events come (`NONE`).
     None,
@@ -886,5 +887,17 @@ impl<E: TimeSeriesEvent + EventKind> TimeSeriesTxModelBuilder<E> {
             model,
             TimeSeriesTxModel::close,
         ))
+    }
+}
+
+impl<E: IndexedEvent + EventKind> std::fmt::Debug for IndexedTxModelBuilder<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IndexedTxModelBuilder").finish_non_exhaustive()
+    }
+}
+
+impl<E: TimeSeriesEvent + EventKind> std::fmt::Debug for TimeSeriesTxModelBuilder<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TimeSeriesTxModelBuilder").finish_non_exhaustive()
     }
 }

@@ -11,8 +11,9 @@ use std::sync::{Arc, mpsc};
 use std::thread;
 use std::time::Duration;
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::Quote;
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, ManualExecutor, Role, live_handles, system};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Error, ManualExecutor, Role, system};
 use support::{Hub, collect, is_child, is_time, quote, quote_with_bid, run_child};
 
 /// A feed endpoint connected to a local socket, with a subscription and a listener.
@@ -125,10 +126,8 @@ fn child_display_after_shutdown() {
         return;
     }
     system::shutdown().unwrap();
-    let quote = Quote {
-        event_time: 1_700_000_000_123,
-        ..Quote::new("AAPL")
-    };
+    let mut quote = Quote::new("AAPL");
+    quote.event_time = 1_700_000_000_123;
     let text = quote.to_string();
     let event_time = text.split(", ").find_map(|f| f.strip_prefix("eventTime=")).unwrap();
     eprintln!("eventTime={event_time}");

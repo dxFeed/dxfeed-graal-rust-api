@@ -29,6 +29,7 @@ use crate::isolate::{self, CallbackScope, call};
 
 /// The level of a message of the log (`Level`), from the most detailed to none.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+#[non_exhaustive]
 pub enum LogLevel {
     /// All messages (`ALL`).
     All,
@@ -107,7 +108,7 @@ static HANDLER: Mutex<Option<Handler>> = Mutex::new(None);
 static LEVEL: Mutex<Option<LogLevel>> = Mutex::new(None);
 
 /// The interceptor installed in the SDK on the first [`set_handler`]; the SDK never removes it, so its handle is never
-/// released and counts in [`live_handles`](crate::live_handles).
+/// released and counts in [`live_handles`](crate::__private::live_handles).
 static LISTENER: OnceLock<Handle<sys::dxfg_v4_logging_listener_t>> = OnceLock::new();
 static LISTENER_GUARD: Mutex<()> = Mutex::new(());
 

@@ -291,6 +291,7 @@ impl FromStr for CandleSymbol {
 
 /// An attribute of a candle symbol, for [`CandleSymbol::value_of_with`] (`CandleSymbolAttribute`).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub enum CandleAttribute {
     /// The exchange of the trades of the candles, as `&Q` after the base symbol (`CandleExchange`).
     Exchange(CandleExchange),
@@ -804,6 +805,7 @@ macro_rules! candle_enum {
     ) => {
         $(#[$meta])*
         #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+        #[non_exhaustive]
         pub enum $name {
             $( $(#[$vmeta])* $variant, )*
         }

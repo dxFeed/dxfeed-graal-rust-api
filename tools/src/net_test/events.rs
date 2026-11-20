@@ -59,28 +59,8 @@ fn apply_stamp(event: &mut Event, stamp: &Stamp) {
 /// Overwrites `slot` with `source`, reusing the capacity of the strings of the slot.
 fn overwrite(slot: &mut Event, source: &Event) {
     match (slot, source) {
-        (Event::Trade(slot), Event::Trade(source)) => {
-            let mut symbol = std::mem::take(&mut slot.symbol);
-            symbol.clone_from(&source.symbol);
-            *slot = Trade { symbol, ..*source };
-        }
-        (Event::TimeAndSale(slot), Event::TimeAndSale(source)) => {
-            let mut symbol = std::mem::take(&mut slot.symbol);
-            symbol.clone_from(&source.symbol);
-            let mut conditions = slot.exchange_sale_conditions.take();
-            conditions.clone_from(&source.exchange_sale_conditions);
-            let mut buyer = slot.buyer.take();
-            buyer.clone_from(&source.buyer);
-            let mut seller = slot.seller.take();
-            seller.clone_from(&source.seller);
-            *slot = TimeAndSale {
-                symbol,
-                exchange_sale_conditions: conditions,
-                buyer,
-                seller,
-                ..*source
-            };
-        }
+        (Event::Trade(slot), Event::Trade(source)) => slot.clone_from(source),
+        (Event::TimeAndSale(slot), Event::TimeAndSale(source)) => slot.clone_from(source),
         (slot, source) => slot.clone_from(source),
     }
 }

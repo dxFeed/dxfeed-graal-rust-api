@@ -28,6 +28,7 @@ use super::ObservableListModel;
 /// in Java: the individual orders hide the aggregate price levels of their exchange and market maker, which hide the
 /// regional quote of their exchange, and any of these hides the composite quote.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum OrderBookModelFilter {
     /// The composite quotes only (`COMPOSITE`).
     Composite,

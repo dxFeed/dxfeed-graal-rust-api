@@ -6,11 +6,12 @@ use std::fmt::Debug;
 use std::sync::mpsc;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
+use dxfeed_graal::__private::live_events;
 use dxfeed_graal::event::{
     Candle, Configuration, DailyCandle, Greeks, LastingEvent, NuamTrade, Profile, Quote, Summary, TextConfiguration,
     TheoPrice, Trade, TradeETH, Underlying,
 };
-use dxfeed_graal::{Error, Event, EventKind, live_events};
+use dxfeed_graal::{Error, Event, EventKind};
 use support::{
     Hub, candle, candle_symbol, configuration, daily_candle, delivered, greeks, nuam_trade, profile, quote,
     quote_with_bid, same_events, summary, text_configuration, theo_price, trade, trade_eth, underlying,
@@ -96,10 +97,8 @@ fn last_event_without_data_is_the_input() {
     let _serial = serial();
     let hub = Hub::new();
     // Java recomputes the milliseconds of the packed sequence from the later of the bid and ask times, 0 here.
-    let sample = Quote {
-        time_millis_sequence: 7,
-        ..quote("AAPL")
-    };
+    let mut sample = quote("AAPL");
+    sample.time_millis_sequence = 7;
     assert_eq!(hub.feed.get_last_event(&sample).unwrap(), sample);
     assert_eq!(live_events(), 0);
 }

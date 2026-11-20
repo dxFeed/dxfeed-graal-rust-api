@@ -5,9 +5,10 @@ mod support;
 
 use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::{Candle, EventFlags, Order, OrderSource, Side};
 use dxfeed_graal::model::{IndexedEventModel, TimeSeriesEventModel};
-use dxfeed_graal::{Error, Symbol, live_handles};
+use dxfeed_graal::{Error, Symbol};
 use support::Hub;
 
 /// Runs the tests of this file one by one, so that each can count the live handles.
@@ -17,9 +18,10 @@ fn serial() -> MutexGuard<'static, ()> {
 }
 
 fn candle(symbol: &str, time: i64, close: f64) -> Candle {
-    let mut candle = Candle {
-        close,
-        ..support::candle(symbol)
+    let mut candle = {
+        let mut e = support::candle(symbol);
+        e.close = close;
+        e
     };
     candle.set_time(time);
     candle
@@ -145,13 +147,11 @@ fn an_indexed_model_keeps_orders_by_source_and_index() {
     hub.executor.process_all_pending().unwrap();
 
     let order = |source: OrderSource, index: i64, flags: EventFlags| {
-        let mut order = Order {
-            index,
-            price: 1.0,
-            size: 1.0,
-            event_flags: flags,
-            ..Order::new("IDX")
-        };
+        let mut order = Order::new("IDX");
+        order.index = index;
+        order.price = 1.0;
+        order.size = 1.0;
+        order.event_flags = flags;
         order.set_source(source).unwrap();
         order.set_order_side(Side::Buy);
         order

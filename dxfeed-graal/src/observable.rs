@@ -251,3 +251,9 @@ pub(crate) unsafe fn event_types(list: *const sys::dxfg_v4_event_clazz_list) -> 
             .collect()
     }
 }
+
+impl std::fmt::Debug for ObservableSubscription {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ObservableSubscription").finish_non_exhaustive()
+    }
+}

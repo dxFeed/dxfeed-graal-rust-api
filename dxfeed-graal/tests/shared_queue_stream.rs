@@ -8,10 +8,11 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dxfeed_graal::__private::{live_events, live_handles};
 use dxfeed_graal::event::{Candle, Quote, Trade};
 use dxfeed_graal::event_queue::{PollResult, SharedEventQueue};
 use dxfeed_graal::model::{ObservableListModel, TimeSeriesEventModel};
-use dxfeed_graal::{DXFeedSubscription, Event, EventType, Promise, TaggedEventStream, live_events, live_handles};
+use dxfeed_graal::{DXFeedSubscription, Event, EventType, Promise, TaggedEventStream};
 use support::{CountingWaker, Hub, block_on_with, candle, quote_with_bid, trade};
 
 /// Runs the tests of this file one by one, so that each can count the live handles.

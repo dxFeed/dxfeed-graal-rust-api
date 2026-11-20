@@ -38,6 +38,7 @@ use crate::symbol::{Symbol, SymbolArena};
 
 /// The compression of the responses of the history service (`HistoryEndpoint.Compression`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum Compression {
     /// No compression.
     None,
@@ -60,6 +61,7 @@ impl Compression {
 
 /// The format of the responses of the history service (`HistoryEndpoint.Format`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
 pub enum Format {
     /// Text.
     Text,

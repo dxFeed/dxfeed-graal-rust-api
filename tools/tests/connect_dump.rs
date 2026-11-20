@@ -39,21 +39,24 @@ impl Drop for TempFile {
 /// Writes a text tape with two quotes and a trade.
 fn write_tape(name: &str) -> TempFile {
     let events: Vec<Event> = vec![
-        Quote {
-            bid_price: 10.1,
-            ask_price: 10.2,
-            ..Quote::new("TEST1")
+        {
+            let mut e = Quote::new("TEST1");
+            e.bid_price = 10.1;
+            e.ask_price = 10.2;
+            e
         }
         .into(),
-        Quote {
-            bid_price: 17.1,
-            ask_price: 17.2,
-            ..Quote::new("TEST2")
+        {
+            let mut e = Quote::new("TEST2");
+            e.bid_price = 17.1;
+            e.ask_price = 17.2;
+            e
         }
         .into(),
-        Trade {
-            price: 10.15,
-            ..Trade::new("TEST1")
+        {
+            let mut e = Trade::new("TEST1");
+            e.price = 10.15;
+            e
         }
         .into(),
     ];

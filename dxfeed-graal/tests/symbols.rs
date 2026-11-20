@@ -7,6 +7,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 
+use dxfeed_graal::__private::live_events;
 use dxfeed_graal::event::{
     Candle, CandleAlignment, CandleAttribute, CandleDataType, CandleExchange, CandlePeriod, CandlePrice,
     CandlePriceLevel, CandleSession, CandleSymbol, CandleType, EventFlags, IndexedEvent, Order, OrderSource, Quote,
@@ -14,7 +15,6 @@ use dxfeed_graal::event::{
 };
 use dxfeed_graal::{
     DXEndpoint, Error, Event, EventType, Observable, ObservableSubscriptionChangeListener, Role, Symbol, TimeFormat,
-    live_events,
 };
 use support::{Hub, candle, collect, order, quote};
 

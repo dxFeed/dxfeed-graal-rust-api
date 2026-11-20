@@ -252,7 +252,7 @@ pub(crate) struct EndpointState {
     endpoint: Handle<sys::dxfg_v4_endpoint_t>,
     pub(crate) feed: Handle<sys::dxfg_v4_feed_t>,
     pub(crate) publisher: Handle<sys::dxfg_v4_publisher_t>,
-    role: Role,
+    pub(crate) role: Role,
     closed: AtomicBool,
     state_listeners: Mutex<Vec<(ListenerId, StateListener)>>,
     #[cfg(feature = "experimental")]
@@ -896,6 +896,19 @@ impl DXEndpoint {
     #[doc(alias = "getPublisher")]
     pub fn get_publisher(&self) -> DXPublisher {
         DXPublisher::new(self.state.clone())
+    }
+}
+
+impl std::fmt::Debug for DXEndpointBuilder {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DXEndpointBuilder")
+            .field("role", &self.role)
+            .field("name", &self.name)
+            .field(
+                "properties",
+                &self.properties.iter().map(|(key, _)| key).collect::<Vec<_>>(),
+            )
+            .finish_non_exhaustive()
     }
 }
 

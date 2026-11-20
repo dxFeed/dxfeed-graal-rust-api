@@ -84,3 +84,12 @@ impl DXPublisher {
         ))
     }
 }
+
+impl std::fmt::Debug for DXPublisher {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DXPublisher")
+            .field("role", &self.state.role)
+            .field("closed", &self.state.is_closed())
+            .finish_non_exhaustive()
+    }
+}
