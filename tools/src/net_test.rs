@@ -13,6 +13,7 @@ mod histogram;
 mod kit;
 mod limiter;
 mod statistics;
+mod summary;
 mod symbols;
 
 use std::panic::{self, AssertUnwindSafe};
@@ -29,12 +30,14 @@ use crate::help::Info;
 
 use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
 use self::consumer::{WATCHDOG_VARIABLE, WatchdogTimeouts, run_consumer};
-use self::events::EventPool;
+use self::events::{EventPool, now_epoch_nanos};
 use self::generator::{Counters, PublishCounters, Settings, run_generator};
 use self::limiter::{ScheduleLimiter, Stop};
 use self::statistics::{
-    InstanceTotals, IntervalTaken, ReporterSettings, RuntimeSample, Side, StatisticsSample, run_reporter, system_clock,
+    InstanceTotals, IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample,
+    run_reporter, system_clock,
 };
+use self::summary::{ProducerTotals, RunResult, connector_summaries, format_summary, producer_report, write_summary};
 use self::symbols::Symbols;
 
 pub const INFO: Info = Info {
@@ -128,10 +131,16 @@ pub fn main(args: &[String]) -> ExitCode {
         Err(Error::Graal(code)) => return fail(&format!("cannot create the isolate (error {code})"), EXIT_FAILURE),
         _ => {}
     }
+    // From here on every end writes the summary: a failure before the run is the status `error` with nothing else.
+    let before_run = now_epoch_nanos();
+    let failed_before_run = |message: String| {
+        eprintln!("NetTest: {message}");
+        finish(&options, &RunResult::failed(message, before_run, now_epoch_nanos()))
+    };
     // The system properties come before the first endpoint.
     for (key, value) in &options.properties {
         if system::set_property(key, value).is_err() {
-            return fail(&format!("cannot set the system property '{key}'"), EXIT_FAILURE);
+            return failed_before_run(format!("cannot set the system property '{key}'"));
         }
     }
     let pool = symbols::build_symbol_pool(&options);
@@ -140,7 +149,7 @@ pub fn main(args: &[String]) -> ExitCode {
     }
     let pool = match pool {
         Ok(pool) => pool,
-        Err(error) => return fail(&error, EXIT_FAILURE),
+        Err(error) => return failed_before_run(error),
     };
     // Ctrl+C and SIGTERM end the run like --duration does: the last statistics are printed and the endpoints close.
     let stop = Arc::new(Stop::default());
@@ -151,19 +160,36 @@ pub fn main(args: &[String]) -> ExitCode {
         handler_stop.request();
     };
     if let Err(error) = ctrlc::set_handler(handler) {
-        return fail(&format!("cannot handle Ctrl+C: {error}"), EXIT_FAILURE);
+        return failed_before_run(format!("cannot handle Ctrl+C: {error}"));
     }
-    if options.mode == Mode::Consumer {
+    // The run starts here, after the symbols and before the endpoints.
+    let started = now_epoch_nanos();
+    let result = if options.mode == Mode::Consumer {
         let timeouts = WatchdogTimeouts::from_variable(std::env::var(WATCHDOG_VARIABLE).ok().as_deref());
-        let outcome = run_consumer(&options, &pool.symbols, &stop, &signalled, timeouts);
-        if let Some(error) = &outcome.error {
-            eprintln!("NetTest: {error}");
-        }
-        return ExitCode::from(outcome.status.exit_code());
+        run_consumer(&options, &pool.symbols, &stop, &signalled, timeouts).into_result(started)
+    } else {
+        run(&options, &pool.symbols, &stop, &signalled, started)
+    };
+    if let Some(error) = &result.error {
+        eprintln!("NetTest: {error}");
     }
-    match run(&options, &pool.symbols, &stop) {
-        Ok(()) => ExitCode::SUCCESS,
-        Err(error) => fail(&error, EXIT_FAILURE),
+    finish(&options, &result)
+}
+
+/// Writes the summary file when `--summary` is given and returns the exit code of the status; a summary that cannot be
+/// written makes it 1 when it would be 0.
+fn finish(options: &Options, result: &RunResult) -> ExitCode {
+    let code = result.status.exit_code();
+    let Some(file) = &options.summary_file else {
+        return ExitCode::from(code);
+    };
+    let text = format_summary(options, system::get_version().ok().as_deref(), result);
+    match write_summary(file, &text) {
+        Ok(()) => ExitCode::from(code),
+        Err(error) => {
+            eprintln!("NetTest: cannot write the summary file '{file}': {error}");
+            ExitCode::from(if code == 0 { EXIT_FAILURE } else { code })
+        }
     }
 }
 
@@ -259,19 +285,19 @@ fn close(instances: &[Instance]) {
 
 /// Starts the instances, runs the generators and the reporter until the stop, the duration or a failed publish, then
 /// joins the threads (the generators first, then the reporter with the last statistics) and closes the endpoints.
-fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> {
+fn run(options: &Options, symbols: &Symbols, stop: &Stop, signalled: &AtomicBool, started: i64) -> RunResult {
     let mut instances = Vec::with_capacity(options.instances);
     let mut pools = Vec::with_capacity(options.instances);
     for index in 1..=options.instances {
-        let started = Instance::create(format!("{}.{index}", options.name), options).and_then(|instance| {
+        let connected = Instance::create(format!("{}.{index}", options.name), options).and_then(|instance| {
             let connected = instance.connect(&options.address);
             // The endpoint that failed to start closes with the others.
             instances.push(instance);
             connected
         });
-        if let Err(error) = started {
+        if let Err(error) = connected {
             close(&instances);
-            return Err(error);
+            return RunResult::failed(error, started, now_epoch_nanos());
         }
         pools.push(EventPool::new(options.event, symbols, index as u64));
     }
@@ -285,11 +311,10 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
     let publish = PublishCounters::default();
     let failure = Mutex::new(None);
     let reporter_stop = Stop::default();
-    std::thread::scope(|scope| {
+    let reporter = std::thread::scope(|scope| {
         let instances = &instances;
         let reporter = scope.spawn(|| {
-            // The interval records are what the summary will keep.
-            let _outcome = run_reporter(
+            run_reporter(
                 ReporterSettings {
                     name: &options.name,
                     side: Side::Producer,
@@ -321,7 +346,7 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
                     }
                 },
                 console::print,
-            );
+            )
         });
         let generators: Vec<_> = instances
             .iter()
@@ -364,16 +389,32 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
             let _ = generator.join();
         }
         reporter_stop.request();
-        if reporter.join().is_err() {
+        reporter.join().unwrap_or_else(|_| {
             failure
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .get_or_insert_with(|| "the reporter thread panicked".to_owned());
-        }
+            ReporterOutcome::default()
+        })
     });
+    // The report is taken before the endpoints close: a closed connector reads 0 for its records.
+    let ended = now_epoch_nanos();
+    let connectors = connector_summaries(instances.iter().map(|instance| &instance.endpoint));
     close(&instances);
-    match failure.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner()) {
-        Some(error) => Err(error),
-        None => Ok(()),
+    let error = failure.into_inner().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let status = match (&error, signalled.load(Ordering::SeqCst)) {
+        (Some(_), _) => Status::Error,
+        (None, true) => Status::StoppedBySignal,
+        (None, false) => Status::Ok,
+    };
+    let totals = ProducerTotals {
+        counters: &publish,
+        events: instances.iter().map(|instance| instance.totals().records).sum(),
+        scheduled: options.records_per_second.is_some(),
+    };
+    RunResult {
+        status,
+        error,
+        report: producer_report(started, ended, reporter, totals, connectors),
     }
 }

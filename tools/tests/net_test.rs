@@ -603,3 +603,211 @@ fn a_connected_consumer_without_records_ends_with_no_data() {
         "{consumer:#?}"
     );
 }
+
+/// A directory in the temporary directory, removed with everything in it when the test ends.
+struct TempDir(PathBuf);
+
+impl TempDir {
+    fn new(name: &str) -> Self {
+        let path = std::env::temp_dir().join(format!("dxfeed-graal-tools-{}-{name}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&path);
+        std::fs::create_dir_all(&path).unwrap();
+        TempDir(path)
+    }
+
+    /// A path in the directory as text, for the command line.
+    fn file(&self, name: &str) -> String {
+        self.0.join(name).to_str().unwrap().to_owned()
+    }
+}
+
+impl Drop for TempDir {
+    fn drop(&mut self) {
+        let _ = std::fs::remove_dir_all(&self.0);
+    }
+}
+
+fn read_summary(file: &str) -> serde_json::Value {
+    let text = std::fs::read_to_string(file).unwrap_or_else(|error| panic!("no summary file {file}: {error}"));
+    serde_json::from_str(&text).unwrap_or_else(|error| panic!("the summary file is not JSON: {error}\n{text}"))
+}
+
+#[test]
+fn a_producer_writes_the_summary_file() {
+    let directory = TempDir::new("summary-producer");
+    let file = directory.file("summary.json");
+    let outcome = run(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "100",
+        "-r",
+        "*/5k",
+        "-s",
+        "1s",
+        "--duration",
+        "3s",
+        "--summary",
+        &file,
+    ]);
+    assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
+    assert!(!std::path::Path::new(&format!("{file}.tmp")).exists());
+    let summary = read_summary(&file);
+    assert_eq!(summary["side"], "producer", "{summary}");
+    assert_eq!(summary["tool"]["implementation"], "rust-api");
+    assert_eq!(summary["status"], "ok");
+    assert_eq!(summary["exit_code"], 0);
+    assert_eq!(summary["error"], serde_json::Value::Null);
+    assert_eq!(summary["schema"], "nettest-summary/1");
+    assert_eq!(summary["config"]["rate_limit"], 5000);
+    assert_eq!(summary["args"][0], "p");
+    assert_eq!(summary["args"].as_array().unwrap().last().unwrap(), file.as_str());
+    let intervals = summary["intervals"].as_array().unwrap();
+    assert!(intervals.len() >= 3, "{summary}");
+    let records: i64 = intervals
+        .iter()
+        .map(|interval| interval["records"].as_i64().unwrap())
+        .sum();
+    assert!(records > 0, "{summary}");
+    assert_eq!(summary["records"], records);
+    assert_eq!(summary["publish_call"]["events"], records);
+    assert!(summary["publish_call"]["calls"].as_i64().unwrap() > 0, "{summary}");
+    assert!(summary["schedule_slip"]["max_ns"].is_i64() || summary["schedule_slip"]["max_ns"].is_u64());
+    assert!(summary["e2e_lag"].is_null() && summary["symbols_seen"].is_null());
+    // Every interval is a measurement, and the intervals follow each other.
+    assert!(
+        intervals.iter().all(|interval| interval["phase"] == "measure"),
+        "{summary}"
+    );
+    for pair in intervals.windows(2) {
+        assert_eq!(pair[0]["end_epoch_ms"], pair[1]["start_epoch_ms"], "{summary}");
+    }
+    assert_eq!(summary["connectors"][0]["address"], "127.0.0.1:1", "{summary}");
+}
+
+#[test]
+fn a_taken_server_port_writes_a_summary_with_the_error() {
+    let (taken, port) = take_wildcard_port();
+    let directory = TempDir::new("summary-port");
+    let file = directory.file("summary.json");
+    let address = format!(":{port}");
+    let outcome = run(&["p", &address, "-S", "10", "--duration", "10s", "--summary", &file]);
+    drop(taken);
+    assert_eq!(outcome.code(), Some(1), "{outcome:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "error", "{summary}");
+    assert_eq!(summary["exit_code"], 1);
+    let error = summary["error"].as_str().unwrap();
+    assert!(error.contains("did not start in 3000 ms"), "{summary}");
+    assert!(outcome.stderr.contains(&format!("NetTest: {error}\n")), "{outcome:#?}");
+    assert_eq!(summary["intervals"], serde_json::json!([]));
+    assert_eq!(summary["records"], 0);
+}
+
+#[test]
+fn a_failure_before_the_run_writes_a_summary_with_the_error() {
+    let directory = TempDir::new("summary-before-run");
+    let file = directory.file("summary.json");
+    let missing = directory.file("no-such-symbols.ipf");
+    let symbols = format!("10@{missing}");
+    let outcome = run(&["p", "127.0.0.1:1", "-S", &symbols, "--summary", &file]);
+    assert_eq!(outcome.code(), Some(1), "{outcome:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "error", "{summary}");
+    assert_eq!(summary["exit_code"], 1);
+    assert_eq!(summary["config"]["symbols_source"], "file");
+    assert!(
+        summary["error"].as_str().unwrap().contains("no-such-symbols.ipf"),
+        "{summary}"
+    );
+    assert_eq!(summary["intervals"], serde_json::json!([]));
+}
+
+#[test]
+fn an_unwritable_summary_path_is_a_bad_command_line_without_a_summary() {
+    let directory = TempDir::new("summary-unwritable");
+    let file = directory.file("no-such-dir/summary.json");
+    let outcome = run(&["p", "127.0.0.1:1", "-S", "10", "--duration", "1s", "--summary", &file]);
+    assert_eq!(outcome.code(), Some(2), "{outcome:#?}");
+    assert!(
+        outcome.stderr.starts_with(&format!(
+            "NetTest: --summary cannot write to the directory of '{file}'\n"
+        )),
+        "{outcome:#?}"
+    );
+    assert!(!std::path::Path::new(&file).exists());
+}
+
+#[test]
+fn a_summary_that_cannot_be_written_at_the_end_exits_with_one() {
+    let directory = TempDir::new("summary-blocked");
+    let file = directory.file("summary.json");
+    // The directory of the file is writable at the start; the temporary file of the end is a directory.
+    std::fs::create_dir(format!("{file}.tmp")).unwrap();
+    let outcome = run(&[
+        "p",
+        "127.0.0.1:1",
+        "-S",
+        "10",
+        "-s",
+        "1s",
+        "--duration",
+        "1s",
+        "--summary",
+        &file,
+    ]);
+    assert_eq!(outcome.code(), Some(1), "{outcome:#?}");
+    assert!(
+        outcome
+            .stderr
+            .contains(&format!("NetTest: cannot write the summary file '{file}': ")),
+        "{outcome:#?}"
+    );
+    assert!(!std::path::Path::new(&file).exists());
+}
+
+#[test]
+fn a_consumer_without_records_writes_a_no_data_summary() {
+    let port = free_port();
+    let endpoint = DXEndpoint::create_with_role(Role::Publisher).unwrap();
+    endpoint.connect(&format!(":{port}")).unwrap();
+    wait_for_port(port);
+    let directory = TempDir::new("summary-consumer");
+    let file = directory.file("summary.json");
+    let client = format!("127.0.0.1:{port}");
+    let consumer = Tool::start_with_env(
+        &[
+            "c",
+            &client,
+            "-S",
+            "5",
+            "-s",
+            "1s",
+            "--duration",
+            "60s",
+            "--summary",
+            &file,
+        ],
+        &[("DXFG_NETTEST_WATCHDOG", "500,1500")],
+    )
+    .finish();
+    endpoint.close_and_await_termination().unwrap();
+    assert_eq!(consumer.code(), Some(1), "{consumer:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["side"], "consumer", "{summary}");
+    assert_eq!(summary["status"], "no_data");
+    assert_eq!(summary["exit_code"], 1);
+    assert!(
+        summary["error"]
+            .as_str()
+            .unwrap()
+            .starts_with("no_data: no records for 1500 ms"),
+        "{summary}"
+    );
+    assert_eq!(summary["records"], 0);
+    assert_eq!(summary["e2e_lag"]["count"], 0);
+    assert_eq!(summary["e2e_lag"]["p50_ns"], serde_json::Value::Null);
+    assert_eq!(summary["symbols_seen"], 0);
+    assert_eq!(summary["publish_call"], serde_json::Value::Null);
+    assert_eq!(summary["connectors"].as_array().unwrap().len(), 1, "{summary}");
+}
