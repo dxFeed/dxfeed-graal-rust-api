@@ -11,17 +11,15 @@ use std::path::PathBuf;
 use dxfeed_graal::{DXEndpoint, MessageConnector, system};
 
 use super::Status;
-use super::cli::{Mode, Options, SPEC_VERSION, role_name};
-use super::exposition::{ConnectorTotals, ConnectorTotalsV2};
+use super::cli::{IMPLEMENTATION, Mode, Options, SPEC_VERSION, role_name};
 use super::generator::PublishCounters;
 use super::histogram::{HISTOGRAM_DIGITS, HISTOGRAM_HIGHEST, HISTOGRAM_LOWEST};
-use super::statistics::{E2eTotals, IntervalRecord, ReporterOutcome, RuntimeSample, TimedRuntime, records_per_second};
+use super::statistics::{
+    BYTES_PER_MB, E2eTotals, IntervalRecord, ReporterOutcome, RuntimeSample, TimedRuntime, records_per_second,
+};
 
 /// The name of the tool in the summary.
 const TOOL_NAME: &str = "NetTest";
-/// The `implementation` of the summary.
-const IMPLEMENTATION: &str = "rust-api";
-const BYTES_PER_MB: i64 = 1024 * 1024;
 
 /// The e2e lag totals of the measured intervals of a consumer. With no lag the values are `None`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -291,6 +289,27 @@ pub fn producer_report(
 /// Whether the SDK reports the connector statistics v2.
 pub fn io_statistics_supported() -> bool {
     system::is_feature_supported(system::feature::MESSAGE_CONNECTOR_IO_STATISTICS).unwrap_or(false)
+}
+
+/// The v2 totals of the connector statistics over all connectors.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConnectorTotalsV2 {
+    /// The subscription records read and written.
+    pub sub_records: i64,
+    /// The sum of the lags of the data records read, in microseconds.
+    pub read_lag_us: i64,
+    /// The sum of the round-trip times of the records read and written, in microseconds.
+    pub rtt_us: i64,
+}
+
+/// The connector statistics summed over the connectors of all instances; `v2` is `None` when the SDK has no v2.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ConnectorTotals {
+    pub read_bytes: i64,
+    pub written_bytes: i64,
+    pub read_records: i64,
+    pub written_records: i64,
+    pub v2: Option<ConnectorTotalsV2>,
 }
 
 /// The statistics of a connector: v2 (which has v1 too) when `io`, v1 otherwise; `None` when they cannot be read.

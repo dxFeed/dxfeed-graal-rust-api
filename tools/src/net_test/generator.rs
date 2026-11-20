@@ -8,6 +8,7 @@ use dxfeed_graal::Event;
 
 use super::events::{EventPool, now_epoch_nanos};
 use super::limiter::{ScheduleLimiter, Stop};
+use super::statistics::InstanceTotals;
 
 /// The cumulative counters of an instance: written by its generator, read by the reporter. The nanoseconds are
 /// weighted by the records: each batch adds records * (the time from the clock read of the batch to the return of the
@@ -16,6 +17,16 @@ use super::limiter::{ScheduleLimiter, Stop};
 pub struct Counters {
     pub records: AtomicI64,
     pub weighted_nanos: AtomicI64,
+}
+
+impl Counters {
+    /// The values now, for the reporter.
+    pub fn totals(&self) -> InstanceTotals {
+        InstanceTotals {
+            records: self.records.load(Ordering::Relaxed),
+            weighted_nanos: self.weighted_nanos.load(Ordering::Relaxed),
+        }
+    }
 }
 
 /// The counters of all generators of a run together: the publishing calls and the schedule slip.

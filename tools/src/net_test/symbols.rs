@@ -5,12 +5,10 @@ use std::sync::Arc;
 
 use dxfeed_graal::ipf::InstrumentProfileReader;
 
-use super::cli::Options;
+use super::cli::{MAX_SYMBOLS, Options};
 
 /// The seed of the symbol generator of QD NetTest.
 const SYMBOL_SEED: i64 = 1_416_948_710_541_751;
-/// The largest set that the tool generates, as the C tool limits it.
-const MAX_GENERATED: i64 = 100_000_000;
 
 const RANDOM_MULTIPLIER: u64 = 0x5_DEEC_E66D;
 const RANDOM_ADDEND: u64 = 0xB;
@@ -94,7 +92,7 @@ pub struct SymbolPool {
 /// `total` distinct symbols of QD NetTest in the order of their first appearance, the same on every run and platform;
 /// empty when `total` is below 1 or above the limit of the tool.
 pub fn generate_symbols(total: i64) -> Vec<String> {
-    if !(1..=MAX_GENERATED).contains(&total) {
+    if !(1..=MAX_SYMBOLS).contains(&total) {
         return Vec::new();
     }
     let total = total as usize;

@@ -7,10 +7,8 @@ use dxfeed_graal::Event;
 use dxfeed_graal::event::{TimeAndSale, Trade};
 
 use super::cli::EventKind;
+use super::statistics::{NANOS_PER_MILLI, NANOS_PER_SECOND};
 use super::symbols::Symbols;
-
-const NANOS_PER_SECOND: i64 = 1_000_000_000;
-const NANOS_PER_MILLI: i64 = 1_000_000;
 
 /// The rows of the price and size table.
 pub const TABLE_SIZE: usize = 1024;

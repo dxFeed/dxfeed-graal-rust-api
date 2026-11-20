@@ -2,14 +2,6 @@
 //! 2.1 as far as the tool needs them. It has the layout of the specification: the lowest value 1 ns, the highest
 //! 3600 s and 3 significant digits.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the consumer and the summary read the percentiles of the intervals"
-    )
-)]
-
 /// The lowest discernible value of the histogram of the specification, in nanoseconds.
 pub const HISTOGRAM_LOWEST: i64 = 1;
 /// The highest value of the histogram of the specification, in nanoseconds: 3600 s.
@@ -121,12 +113,14 @@ impl Histogram {
     }
 
     /// Forgets all recorded values.
+    #[cfg(test)]
     pub fn reset(&mut self) {
         self.counts.fill(0);
         self.total_count = 0;
     }
 
     /// The number of the recorded values.
+    #[cfg(test)]
     pub fn count(&self) -> i64 {
         self.total_count
     }

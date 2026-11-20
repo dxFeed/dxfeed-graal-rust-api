@@ -6,16 +6,16 @@
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
 
-use super::cli::{Mode, Options, SPEC_VERSION, role_name};
+use super::cli::{IMPLEMENTATION, Mode, Options, SPEC_VERSION, role_name};
 use super::consumer::{LAG_BUCKET_BOUNDS_NANOS, LiveLags};
 use super::generator::{Counters, PublishCounters};
+use super::limiter::lock_ignoring_poison;
 use super::statistics::RuntimeSample;
+use super::summary::ConnectorTotals;
 
 /// The content type of `/metrics`.
 pub const CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
 
-/// The `tool` label of the series, the `implementation` of the summary.
-const IMPLEMENTATION: &str = "rust-api";
 /// The buckets of the lag histogram: the bounds and `+Inf`.
 pub const LAG_BUCKETS: usize = LAG_BUCKET_BOUNDS_NANOS.len() + 1;
 /// The bounds of the buckets as the sample of the kit writes them.
@@ -38,27 +38,6 @@ pub struct MetricsInfo {
     pub collector: String,
     /// `p` with `-r`: the schedule slip is exported.
     pub scheduled: bool,
-}
-
-/// The v2 totals of the connector statistics over all connectors.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ConnectorTotalsV2 {
-    /// The subscription records read and written.
-    pub sub_records: i64,
-    /// The sum of the lags of the data records read, in microseconds.
-    pub read_lag_us: i64,
-    /// The sum of the round-trip times of the records read and written, in microseconds.
-    pub rtt_us: i64,
-}
-
-/// The connector statistics summed over the connectors of all instances; `v2` is `None` when the SDK has no v2.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub struct ConnectorTotals {
-    pub read_bytes: i64,
-    pub written_bytes: i64,
-    pub read_records: i64,
-    pub written_records: i64,
-    pub v2: Option<ConnectorTotalsV2>,
 }
 
 /// The e2e lags of a consumer at one moment.
@@ -394,7 +373,7 @@ impl LiveMetrics {
     /// Keeps the values of the last tick of the reporter: the open connections per instance, the connector statistics
     /// and the runtime values.
     pub fn store(&self, connections: Vec<i64>, connectors: ConnectorTotals, runtime: RuntimeSample) {
-        *self.cached.lock().unwrap_or_else(|poisoned| poisoned.into_inner()) = Cached {
+        *lock_ignoring_poison(&self.cached) = Cached {
             connections,
             connectors,
             runtime,
@@ -410,7 +389,7 @@ impl LiveMetrics {
         for (value, live) in buckets.iter_mut().zip(&lags.buckets) {
             *value = live.load(Ordering::Relaxed);
         }
-        let cached = self.cached.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let cached = lock_ignoring_poison(&self.cached);
         let publish = &self.publish;
         Snapshot {
             records: self
@@ -448,6 +427,7 @@ mod tests {
 
     use super::super::consumer::lag_bucket_index;
     use super::super::kit::kit_text;
+    use super::super::summary::ConnectorTotalsV2;
     use super::*;
 
     fn info(producer: bool, name: &str, role: &str, scheduled: bool) -> MetricsInfo {

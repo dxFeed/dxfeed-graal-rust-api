@@ -2,18 +2,18 @@
 //! runtime line of the isolate), the reporter that prints them on the ticks aligned to the wall clock, and the interval
 //! records that the reporter keeps for the summary.
 
-use std::sync::Mutex;
+use std::sync::{Mutex, MutexGuard};
 use std::time::{Duration, SystemTime};
 
 use dxfeed_graal::system::RuntimeStatistics;
 
 use super::histogram::Histogram;
-use super::limiter::Stop;
+use super::limiter::{Stop, lock_ignoring_poison};
 
-const NANOS_PER_SECOND: i64 = 1_000_000_000;
+pub const NANOS_PER_SECOND: i64 = 1_000_000_000;
 const NANOS_PER_MICRO: i64 = 1_000;
-const NANOS_PER_MILLI: i64 = 1_000_000;
-const BYTES_PER_MB: i64 = 1024 * 1024;
+pub const NANOS_PER_MILLI: i64 = 1_000_000;
+pub const BYTES_PER_MB: i64 = 1024 * 1024;
 /// The shortest last block that the reporter prints at the stop.
 const MIN_LAST_BLOCK_NANOS: i64 = NANOS_PER_SECOND;
 const ABSENT_TEXT: &str = "n/a";
@@ -119,16 +119,29 @@ impl LagStats {
     }
 }
 
-/// The e2e lags of one interval of all consumer instances: their statistics and their histogram, where a negative lag
-/// enters as 0.
+/// The e2e lags of one interval: their statistics and their histogram, where a negative lag enters as 0.
 #[derive(Debug, Clone, Default)]
 pub struct LagInterval {
     pub stats: LagStats,
     pub histogram: Histogram,
 }
 
-/// The e2e lags of the current interval: the listeners record them, the reporter takes them at the end of the
-/// interval.
+impl LagInterval {
+    /// Records one lag in nanoseconds with its sign.
+    pub fn record(&mut self, lag: i64) {
+        self.histogram.record(lag);
+        self.stats.add_lag(lag);
+    }
+
+    /// Adds the lags of another interval, as if they were recorded here.
+    pub fn add(&mut self, other: &LagInterval) {
+        self.histogram.add(&other.histogram);
+        self.stats.add(&other.stats);
+    }
+}
+
+/// The e2e lags of the current interval of one consumer instance: its listener records them, the reporter takes them
+/// at the end of the interval.
 #[derive(Debug, Default)]
 pub struct LagRecorder {
     current: Mutex<LagInterval>,
@@ -136,22 +149,24 @@ pub struct LagRecorder {
 
 impl LagRecorder {
     /// Records the lags of one listener call, in nanoseconds with their signs.
+    #[cfg(test)]
     pub fn record(&self, lags: impl IntoIterator<Item = i64>) {
-        let mut current = self.current.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut current = self.lock();
         for lag in lags {
-            current.histogram.record(lag);
-            current.stats.add_lag(lag);
+            current.record(lag);
         }
+    }
+
+    /// The interval being recorded, locked: the listener records the lags of one call under one lock.
+    pub fn lock(&self) -> MutexGuard<'_, LagInterval> {
+        lock_ignoring_poison(&self.current)
     }
 
     /// Takes the lags of the interval and starts the next one.
     pub fn take(&self) -> LagInterval {
-        // The new histogram is allocated outside of the lock: the listeners wait for it.
+        // The new histogram is allocated outside of the lock: the listener waits for it.
         let next = LagInterval::default();
-        std::mem::replace(
-            &mut *self.current.lock().unwrap_or_else(|poisoned| poisoned.into_inner()),
-            next,
-        )
+        std::mem::replace(&mut *self.lock(), next)
     }
 }
 

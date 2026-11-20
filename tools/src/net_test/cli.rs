@@ -12,10 +12,13 @@ use dxfeed_graal::Role;
 
 /// The version of the specification that the tool follows; the usage ends with it.
 pub const SPEC_VERSION: &str = "nettest/1";
+/// The `tool` label of the metrics series and the `implementation` of the summary.
+pub const IMPLEMENTATION: &str = "rust-api";
 
-/// The largest symbol set, batch and number of instances that the tool accepts. A batch shares one time, so it holds
-/// at most 2^22 events: the 22-bit sequence must not wrap inside one batch.
-const MAX_SYMBOLS: i64 = 100_000_000;
+/// The largest symbol set, batch and number of instances that the tool accepts; the symbol set is also the largest
+/// that the tool generates, as the C tool limits it. A batch shares one time, so it holds at most 2^22 events: the
+/// 22-bit sequence must not wrap inside one batch.
+pub const MAX_SYMBOLS: i64 = 100_000_000;
 const MAX_BATCH: i64 = 1 << 22;
 const MAX_INSTANCES: i64 = 1_000;
 
@@ -105,7 +108,6 @@ pub enum Collector {
 
 impl Collector {
     /// The name as the specification writes it.
-    #[allow(dead_code)]
     pub fn name(self) -> &'static str {
         match self {
             Collector::Stream => "stream",
@@ -131,8 +133,6 @@ pub fn role_name(role: Role) -> &'static str {
 const NANO_TIME_PROPERTY: &str = "dxscheme.nanoTime";
 
 /// The parsed and validated command line.
-// The consumer mode, the summary, the metrics and the warm-up read their fields after the parser.
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
 pub struct Options {
     pub mode: Mode,
@@ -225,7 +225,6 @@ impl Options {
 
     /// Whether the consumer receives conflated events: the role `FEED` with `Trade`, which it receives through the
     /// ticker contract. Always false on `p`.
-    #[allow(dead_code)]
     pub fn is_conflated(&self) -> bool {
         self.mode == Mode::Consumer && self.role() == Role::Feed && self.event == EventKind::Trade
     }
@@ -241,7 +240,6 @@ impl Options {
     }
 
     /// Whether the endpoints carry the nanosecond part: `nano_time()` is `true`, in any case, as Java reads it.
-    #[allow(dead_code)]
     pub fn is_nano_time_on(&self) -> bool {
         self.nano_time().eq_ignore_ascii_case("true")
     }

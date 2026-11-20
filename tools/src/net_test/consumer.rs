@@ -14,14 +14,13 @@ use super::cli::{EventKind, Options};
 use super::events::now_epoch_nanos;
 use super::exposition::LiveMetrics;
 use super::generator::Counters;
-use super::limiter::Stop;
+use super::limiter::{Stop, lock_ignoring_poison};
 use super::statistics::{
-    InstanceTotals, IntervalTaken, LagRecorder, ReporterOutcome, ReporterSettings, Side, StatisticsSample,
-    run_reporter, system_clock,
+    IntervalTaken, LagInterval, LagRecorder, ReporterOutcome, ReporterSettings, Side, run_reporter, system_clock,
 };
-use super::summary::{ConnectorSummary, RunReport, RunResult, connector_summaries, connector_totals, consumer_report};
+use super::summary::{ConnectorSummary, RunReport, RunResult, connector_summaries, consumer_report};
 use super::symbols::{Symbols, consumer_slice};
-use super::{Status, connections_of, read_runtime};
+use super::{Status, build_endpoint, connect_endpoint, connections_of, reporter_sample};
 
 /// The consumer stops with `nano_missing` when this many first events all have the nanosecond part 0.
 pub const NANO_CHECK_EVENTS: i64 = 1000;
@@ -182,7 +181,7 @@ impl NanoCheck {
     /// Counts the nanosecond parts of the events of one listener call, in their order, up to `NANO_CHECK_EVENTS` in
     /// all; true when this call completed the check with every part 0.
     pub fn check(&self, nano_parts: &[i32]) -> bool {
-        let mut state = self.state.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut state = lock_ignoring_poison(&self.state);
         if !self.enabled || !self.pending.load(Ordering::SeqCst) {
             return false;
         }
@@ -233,8 +232,8 @@ impl LiveLags {
 /// What the instances of a consumer share; the listeners write it on the threads of the SDK.
 pub struct ConsumerShared {
     stop: Arc<Stop>,
-    /// The e2e lags of the current interval.
-    pub lags: LagRecorder,
+    /// The lag recorders of the instances, one each, so that the listeners never wait for each other.
+    recorders: Mutex<Vec<Arc<LagRecorder>>>,
     pub live: Arc<LiveLags>,
     /// The distinct symbols received by all instances.
     pub symbols_seen: AtomicI64,
@@ -249,7 +248,7 @@ impl ConsumerShared {
     pub fn new(stop: Arc<Stop>, nano_check: bool) -> Self {
         ConsumerShared {
             stop,
-            lags: LagRecorder::default(),
+            recorders: Mutex::default(),
             live: Arc::default(),
             symbols_seen: AtomicI64::new(0),
             nano: NanoCheck::new(nano_check),
@@ -262,6 +261,24 @@ impl ConsumerShared {
     pub fn with_live(mut self, live: Arc<LiveLags>) -> Self {
         self.live = live;
         self
+    }
+
+    /// The recorder of the e2e lags of a new instance; the reporter takes it with the others.
+    fn new_lag_recorder(&self) -> Arc<LagRecorder> {
+        let recorder = Arc::<LagRecorder>::default();
+        lock_ignoring_poison(&self.recorders).push(Arc::clone(&recorder));
+        recorder
+    }
+
+    /// Takes the e2e lags of the current interval of all instances and starts the next one.
+    pub fn take_lags(&self) -> LagInterval {
+        let recorders = lock_ignoring_poison(&self.recorders);
+        let mut taken = recorders.iter().map(|recorder| recorder.take());
+        let mut total = taken.next().unwrap_or_default();
+        for interval in taken {
+            total.add(&interval);
+        }
+        total
     }
 
     pub fn first_record_epoch_nanos(&self) -> Option<i64> {
@@ -277,46 +294,56 @@ impl ConsumerShared {
     }
 }
 
-/// An event of the listener reduced to what the consumer reads.
-pub struct Record<'a> {
+/// An event of the listener reduced to what the consumer reads. The symbol is decoded on demand: it is needed only
+/// until the instance has seen all symbols of its slice.
+pub struct Record<S> {
     /// The time packed with the sequence: `time_sequence` of a Trade, `index` of a TimeAndSale.
     pub packed_time: i64,
     pub nano_part: i32,
-    pub symbol: Cow<'a, str>,
+    pub symbol: S,
 }
 
 /// The state of the listener of one instance.
 struct Receiver {
     shared: Arc<ConsumerShared>,
     counters: Arc<Counters>,
+    /// The e2e lags of the current interval of this instance.
+    lags: Arc<LagRecorder>,
     /// The symbols of the slice that have not come yet.
     unseen: HashSet<String>,
-    lags: Vec<i64>,
     nano_parts: Vec<i32>,
 }
 
 impl Receiver {
     fn new(shared: Arc<ConsumerShared>, counters: Arc<Counters>, slice: &[String]) -> Self {
+        let lags = shared.new_lag_recorder();
         Receiver {
             shared,
             counters,
+            lags,
             unseen: slice.iter().cloned().collect(),
-            lags: Vec::new(),
             nano_parts: Vec::new(),
         }
     }
 
+    /// Whether the slice has symbols that have not come yet, so that the symbols of the events matter.
+    fn wants_symbols(&self) -> bool {
+        !self.unseen.is_empty()
+    }
+
     /// Takes the events of one listener call; `now_nanos` is the one clock read of the call.
-    fn receive<'a>(&mut self, now_nanos: i64, records: impl Iterator<Item = Record<'a>>) {
+    fn receive<'a, S: FnOnce() -> Cow<'a, str>>(&mut self, now_nanos: i64, records: impl Iterator<Item = Record<S>>) {
         let nano_pending = self.shared.nano.is_pending();
-        self.lags.clear();
         self.nano_parts.clear();
         let mut buckets = [0_i64; LAG_BUCKET_BOUNDS_NANOS.len() + 1];
-        let (mut sum, mut positive_sum, mut negative) = (0_i64, 0_i64, 0_i64);
+        let (mut count, mut sum, mut positive_sum, mut negative) = (0_i64, 0_i64, 0_i64, 0_i64);
+        // The lags of the call go in under one lock of the recorder of this instance, which only the reporter shares.
+        let mut interval = self.lags.lock();
         for record in records {
             // A negative lag keeps its sign in the sums; the histogram takes it as 0.
             let lag = event_lag_nanos(now_nanos, record.packed_time, record.nano_part);
-            self.lags.push(lag);
+            interval.record(lag);
+            count += 1;
             sum = sum.wrapping_add(lag);
             buckets[lag_bucket_index(lag)] += 1;
             if lag < 0 {
@@ -324,14 +351,14 @@ impl Receiver {
             } else {
                 positive_sum = positive_sum.wrapping_add(lag);
             }
-            if !self.unseen.is_empty() && self.unseen.remove(&*record.symbol) {
+            if self.wants_symbols() && self.unseen.remove(&*(record.symbol)()) {
                 self.shared.symbols_seen.fetch_add(1, Ordering::Relaxed);
             }
             if nano_pending {
                 self.nano_parts.push(record.nano_part);
             }
         }
-        let count = self.lags.len() as i64;
+        drop(interval);
         if count == 0 {
             return;
         }
@@ -342,7 +369,6 @@ impl Receiver {
         self.counters.records.fetch_add(count, Ordering::Relaxed);
         self.counters.weighted_nanos.fetch_add(sum, Ordering::Relaxed);
         shared.live.add(&buckets, count, positive_sum, negative);
-        shared.lags.record(self.lags.iter().copied());
         shared.last_record_steady_nanos.store(steady_nanos(), Ordering::Relaxed);
         if nano_pending && shared.nano.check(&self.nano_parts) {
             shared.stop.request();
@@ -368,12 +394,7 @@ impl Consumer {
         shared: &Arc<ConsumerShared>,
         counters: Arc<Counters>,
     ) -> Result<Self, String> {
-        let endpoint = DXEndpoint::new_builder()
-            .with_role(options.role())
-            .with_name(&name)
-            .with_property(DXEndpoint::DXSCHEME_NANO_TIME_PROPERTY, options.nano_time())
-            .build()
-            .map_err(|error| format!("cannot create the endpoint {name}: {error}"))?;
+        let endpoint = build_endpoint(&name, options)?;
         let event_type = match options.event {
             EventKind::Trade => EventType::Trade,
             EventKind::TimeAndSale => EventType::TimeAndSale,
@@ -408,18 +429,21 @@ impl Consumer {
                 let now = now_epoch_nanos();
                 receiver.receive(
                     now,
-                    events.filter_map(|event| match (kind, event) {
-                        (EventKind::Trade, EventRef::Trade(trade)) => Some(Record {
-                            packed_time: trade.time_sequence(),
-                            nano_part: trade.time_nano_part(),
-                            symbol: trade.symbol(),
-                        }),
-                        (EventKind::TimeAndSale, EventRef::TimeAndSale(sale)) => Some(Record {
-                            packed_time: sale.index(),
-                            nano_part: sale.time_nano_part(),
-                            symbol: sale.symbol(),
-                        }),
-                        _ => None,
+                    events.filter_map(|event| {
+                        let (packed_time, nano_part) = match (kind, event) {
+                            (EventKind::Trade, EventRef::Trade(trade)) => {
+                                (trade.time_sequence(), trade.time_nano_part())
+                            }
+                            (EventKind::TimeAndSale, EventRef::TimeAndSale(sale)) => {
+                                (sale.index(), sale.time_nano_part())
+                            }
+                            _ => return None,
+                        };
+                        Some(Record {
+                            packed_time,
+                            nano_part,
+                            symbol: move || event.symbol().unwrap_or_default(),
+                        })
                     }),
                 );
             })
@@ -434,18 +458,7 @@ impl Consumer {
     }
 
     fn connect(&self, address: &str) -> Result<(), String> {
-        let name = &self.name;
-        self.endpoint
-            .connect(address)
-            .map(|_| ())
-            .map_err(|error| format!("cannot connect {name} to '{address}': {error}"))
-    }
-
-    fn totals(&self) -> InstanceTotals {
-        InstanceTotals {
-            records: self.counters.records.load(Ordering::Relaxed),
-            weighted_nanos: self.counters.weighted_nanos.load(Ordering::Relaxed),
-        }
+        connect_endpoint(&self.endpoint, &self.name, address)
     }
 
     fn close(&self) {
@@ -498,10 +511,7 @@ struct Failure(Mutex<Option<(Status, String)>>);
 
 impl Failure {
     fn set(&self, status: Status, message: String, stop: &Stop) {
-        self.0
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .get_or_insert((status, message));
+        lock_ignoring_poison(&self.0).get_or_insert((status, message));
         stop.request();
     }
 }
@@ -561,24 +571,14 @@ pub fn run_consumer(
                 },
                 system_clock(&reporter_stop),
                 || {
-                    let connections: Vec<i64> = consumers.iter().map(|c| connections_of(&c.endpoint)).collect();
-                    let runtime = read_runtime();
-                    if serving {
-                        live.store(
-                            connections.clone(),
-                            connector_totals(consumers.iter().map(|consumer| &consumer.endpoint)),
-                            runtime,
-                        );
-                    }
-                    StatisticsSample {
-                        instances: consumers.iter().map(Consumer::totals).collect(),
-                        connections: connections.iter().sum(),
-                        runtime: Some(runtime),
-                    }
+                    let sampled = consumers
+                        .iter()
+                        .map(|consumer| (&consumer.endpoint, &*consumer.counters));
+                    reporter_sample(live, serving, sampled)
                 },
                 || IntervalTaken {
                     warmup_start_epoch_nanos: shared.first_record_epoch_nanos(),
-                    lags: Some(shared.lags.take()),
+                    lags: Some(shared.take_lags()),
                     ..IntervalTaken::default()
                 },
                 crate::console::print,
@@ -670,11 +670,11 @@ mod tests {
         names.iter().map(|name| (*name).to_owned()).collect()
     }
 
-    fn record(packed_time: i64, nano_part: i32, symbol: &str) -> Record<'_> {
+    fn record<'a>(packed_time: i64, nano_part: i32, symbol: &'a str) -> Record<impl FnOnce() -> Cow<'a, str>> {
         Record {
             packed_time,
             nano_part,
-            symbol: Cow::Borrowed(symbol),
+            symbol: move || Cow::Borrowed(symbol),
         }
     }
 
@@ -728,7 +728,7 @@ mod tests {
             .into_iter(),
         );
         // A call without events changes nothing.
-        receiver.receive(EPOCH, std::iter::empty());
+        receiver.receive(EPOCH, std::iter::empty::<Record<fn() -> Cow<'static, str>>>());
         // The clock behind the sender: a negative lag.
         receiver.receive(EPOCH - 1000, [record(packed, 456_789, "B")].into_iter());
         assert_eq!(shared.symbols_seen.load(Ordering::Relaxed), 2);
@@ -739,7 +739,7 @@ mod tests {
             receiver.counters.weighted_nanos.load(Ordering::Relaxed),
             3 * 3000 - 1000
         );
-        let lags = shared.lags.take();
+        let lags = shared.take_lags();
         assert_eq!(
             (lags.stats.count, lags.stats.negative, lags.stats.sum, lags.stats.max),
             (4, 1, 8000, 3000)
