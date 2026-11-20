@@ -245,36 +245,8 @@ impl Instance {
         })
     }
 
-    /// Connects the endpoint. A server socket must bind: the connector of a bound one is connected within
-    /// milliseconds, one that cannot bind stays connecting, so the start waits until every server socket connector is
-    /// connected. A client address never waits: with no peer its connector stays connecting, a normal state.
     fn connect(&self, address: &str) -> Result<(), String> {
-        let name = &self.name;
-        connect_endpoint(&self.endpoint, name, address)?;
-        let deadline = Instant::now() + SERVER_START_TIMEOUT;
-        loop {
-            let pending = self
-                .endpoint
-                .get_connectors()
-                .unwrap_or_default()
-                .iter()
-                .any(|connector| {
-                    connector.get_kind().ok() == Some(MessageConnectorKind::ServerSocket)
-                        && connector
-                            .get_state()
-                            .is_ok_and(|state| state != MessageConnectorState::Connected)
-                });
-            if !pending {
-                return Ok(());
-            }
-            if Instant::now() >= deadline {
-                return Err(format!(
-                    "the server socket '{address}' ({name}) did not start in {} ms (is the port already in use?)",
-                    SERVER_START_TIMEOUT.as_millis()
-                ));
-            }
-            std::thread::sleep(Duration::from_millis(5));
-        }
+        connect_endpoint(&self.endpoint, &self.name, address)
     }
 }
 
@@ -295,12 +267,32 @@ fn build_endpoint(name: &str, options: &Options) -> Result<DXEndpoint, String> {
         .map_err(|error| format!("cannot create the endpoint {name}: {error}"))
 }
 
-/// Connects the endpoint to the address.
+/// Connects the endpoint to the address. A server socket must bind: the connector of a bound one is connected within
+/// milliseconds, one that cannot bind stays connecting, so the start waits until every server socket connector is
+/// connected. A client address never waits: with no peer its connector stays connecting, a normal state.
 fn connect_endpoint(endpoint: &DXEndpoint, name: &str, address: &str) -> Result<(), String> {
     endpoint
         .connect(address)
         .map_err(|error| format!("cannot connect {name} to '{address}': {error}"))?;
-    Ok(())
+    let deadline = Instant::now() + SERVER_START_TIMEOUT;
+    loop {
+        let pending = endpoint.get_connectors().unwrap_or_default().iter().any(|connector| {
+            connector.get_kind().ok() == Some(MessageConnectorKind::ServerSocket)
+                && connector
+                    .get_state()
+                    .is_ok_and(|state| state != MessageConnectorState::Connected)
+        });
+        if !pending {
+            return Ok(());
+        }
+        if Instant::now() >= deadline {
+            return Err(format!(
+                "the server socket '{address}' ({name}) did not start in {} ms (is the port already in use?)",
+                SERVER_START_TIMEOUT.as_millis()
+            ));
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
 }
 
 /// The sample of one reporter tick over the instances (their endpoints and counters): the open connections, the

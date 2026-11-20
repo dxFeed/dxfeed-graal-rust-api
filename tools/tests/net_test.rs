@@ -314,6 +314,21 @@ fn a_taken_server_port_fails_the_start() {
     );
 }
 
+#[test]
+fn a_taken_server_port_fails_the_consumer_start() {
+    let (taken, port) = take_wildcard_port();
+    let address = format!(":{port}");
+    let outcome = run(&["c", &address, "-S", "10", "--duration", "10s"]);
+    drop(taken);
+    assert_eq!(outcome.code(), Some(1), "{outcome:#?}");
+    assert!(
+        outcome.stderr.contains(&format!(
+            "NetTest: the server socket ':{port}' (NetTest.1) did not start in 3000 ms (is the port already in use?)\n"
+        )),
+        "{outcome:#?}"
+    );
+}
+
 /// Takes a free port on both wildcard addresses, as a server socket of the SDK binds it: the IPv6 socket of the
 /// connector is dual-stack, and on macOS it may share the port with a socket that holds only the IPv4 address.
 fn take_wildcard_port() -> (Vec<TcpListener>, u16) {
@@ -878,8 +893,8 @@ fn two_consumer_instances_see_every_symbol_of_a_publisher_process() {
 #[test]
 fn the_limiter_waits_ahead_so_a_batch_is_not_published_late() {
     // Spec test 7: with 50 events per call at 1k per second a batch is due every 50 ms; a limiter that sleeps after
-    // the call would stamp events up to a batch late. The bound is the spec's 50 ms for the mean, 10 times the lag
-    // that loopback shows.
+    // the call would stamp events up to a batch late, a mean lag near 50 ms. The spec asks for a mean well below
+    // 50 ms; the bound is half of it, 5 times the lag that loopback shows.
     let port = free_port();
     let address = format!(":{port}");
     let publisher = Tool::start(&[
@@ -919,7 +934,7 @@ fn the_limiter_waits_ahead_so_a_batch_is_not_published_late() {
     assert_eq!(consumer.code(), Some(0), "{consumer:#?}");
     let (count, mean) = lag_of(&read_summary(&file));
     assert!(count > 100, "{consumer:#?}");
-    assert!((1..50_000_000).contains(&mean), "mean lag {mean} ns\n{consumer:#?}");
+    assert!((1..25_000_000).contains(&mean), "mean lag {mean} ns\n{consumer:#?}");
 }
 
 #[test]
