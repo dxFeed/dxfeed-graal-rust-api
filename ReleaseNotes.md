@@ -1,23 +1,23 @@
 ## v0.5.0
 
-* **\[DXFR-89]\[Rust]** Migrated to dxFeed Graal Native SDK v3.17.0.
-    * The SDK reads the runtime statistics of its isolate (DXFR-90) and keeps the last connection error that a second
+* **\[MDAPI-606]\[RUST]** Migrated to dxFeed Graal Native SDK v3.17.0.
+    * The SDK reads the runtime statistics of its isolate (MDAPI-607) and keeps the last connection error that a second
       socket thread used to lose.
-* **\[DXFR-92]\[Rust]** Migrated to dxFeed Graal Native SDK v3.18.0.
+* **\[MDAPI-609]\[RUST]** Migrated to dxFeed Graal Native SDK v3.18.0.
     * `MessageConnector::get_io_statistics` reads the I/O statistics of a connector as `MessageConnectorIoStatistics`:
       the data and subscription records, the QTP bytes, the data lag and round-trip time sums in microseconds, and the
       open and closed connections. `system::feature::MESSAGE_CONNECTOR_IO_STATISTICS` names the feature for
       `is_feature_supported`.
     * A stopped connector reads 0 for its data records, also in `get_statistics`.
     * The SDK prints the reason of a rejected isolate option on macOS x64 too.
-* **\[DXFR-90]\[Rust]** `system::get_runtime_statistics` reads the runtime statistics of the isolate and its process as
-  `RuntimeStatistics`: heap, garbage collections, threads, process CPU time and uptime. A value that the platform or
+* **\[MDAPI-607]\[RUST]** `system::get_runtime_statistics` reads the runtime statistics of the isolate and its process
+  as `RuntimeStatistics`: heap, garbage collections, threads, process CPU time and uptime. A value that the platform or
   the garbage collector does not give is `None`; times are `Duration`s. `system::feature::RUNTIME_STATISTICS` names the
   feature.
-* **\[DXFR-88]\[Rust]** The docs of `SharedEventQueue::get_executor`, `Promise::when_done` and `TaggedEventStream` say
+* **\[MDAPI-605]\[RUST]** The docs of `SharedEventQueue::get_executor`, `Promise::when_done` and `TaggedEventStream` say
   that the SDK never calls a promise handler that the executor of a closed queue runs, so its closure and its promise
   handle stay.
-* **\[DXFR-91]\[DXFR-93]\[Rust]** `Tools NetTest` follows the NetTest specification `nettest/1` of the SDK.
+* **\[MDAPI-608]\[MDAPI-610]\[RUST]** `Tools NetTest` follows the NetTest specification `nettest/1` of the SDK.
     * The publisher mode `p` and the consumer mode `c`: the command line, the payload, the QD symbol set, the schedule
       rate limiter, the statistics lines and the exit codes of the specification, equal to those of the C and Java
       tools.

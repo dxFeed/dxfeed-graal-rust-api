@@ -9,8 +9,12 @@ the section `## vX.Y.Z`. The tag starts the release workflow (`.github/workflows
    macOS arm64 and x64, it builds `Tools` and the samples in release, packs the Tools and Samples archives, unpacks them
    and runs `Tools` and a sample from the unpacked folders.
 3. It publishes the GitHub release: the text is the notes section, the assets are the ten archives and `SHA256SUMS`.
-4. Once its reviewer approves, it publishes the crates `dxfeed-graal-sys`, `dxfeed-graal-build` and `dxfeed-graal` on
-   crates.io (see [Crates](#crates)).
+4. It publishes the crates `dxfeed-graal-sys`, `dxfeed-graal-build` and `dxfeed-graal` on crates.io (see
+   [Crates](#crates)). Pushing the tag is the decision to publish: nothing waits for an approval.
+
+The items of a notes section start with the keys of their tickets (`**\[MDAPI-N]\[RUST]**`), as the titles of the pull
+requests and their branches do (`[MDAPI-N][RUST] ...`, `feature/MDAPI-N-...`): the release resolves those tickets and
+mails its notes.
 
 ## Versions
 
@@ -77,10 +81,11 @@ git push origin vX.Y.Z
 ```
 
 Follow the run on the Actions page. If a job fails for a reason outside the code (a runner, the network), re-run the
-failed jobs; the publish job runs once all the archives are built, and the `crates.io` job then waits for the approval
-(see [Crates](#crates)). If the code has to change before the crates are published, reject that job, delete the
-release and the tag (`git push origin :refs/tags/vX.Y.Z`, `git tag -d vX.Y.Z`), fix it in a pull request and tag
-again; once a crate is on crates.io, its version is final, so fix it in the next version.
+failed jobs; the publish job runs once all the archives are built, and the `crates.io` job right after it (see
+[Crates](#crates)). If a job fails before the crates are published and the code has to change, delete the release and
+the tag (`git push origin :refs/tags/vX.Y.Z`, `git tag -d vX.Y.Z`), fix it in a pull request and tag again; once a
+crate is on crates.io, its version is final, so fix it in the next version. A draft tag (below) tries the whole
+release without publishing the crates.
 
 ## Prereleases and drafts
 
@@ -122,9 +127,9 @@ dependencies (`dxfeed-graal-sys`, `dxfeed-graal-build`, `dxfeed-graal`). It runs
 
 - holds the crates.io API token as the secret `CARGO_REGISTRY_TOKEN`: the scopes `publish-new` (until the crates
   exist) and `publish-update`, limited to `dxfeed-graal*`, with an expiry; renew it there when it expires;
-- lets only the tags `v*` in;
-- waits for the approval of its reviewer: approve the job (Review deployments) on the page of the run once the
-  GitHub release looks right.
+- lets only the tags `v*` in.
+
+The environment has no required reviewer: the job publishes as soon as the GitHub release is out.
 
 A draft tag publishes nothing on crates.io. A version that is already there is skipped, so a run that failed halfway
 (the network, an expired token) can be re-run after the cause is fixed.
