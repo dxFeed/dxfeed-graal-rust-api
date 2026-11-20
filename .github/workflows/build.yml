@@ -66,6 +66,10 @@ jobs:
           cargo doc --locked --no-deps --all-features --target-dir target/docs-rs
           -p dxfeed-graal-sys -p dxfeed-graal-build -p dxfeed-graal
 
+      # The stable API uses no experimental SDK item outside xtask/experimental-allowlist.txt.
+      - name: experimental boundary
+        run: cargo run --locked -p xtask -- check-experimental
+
       # The crates of the API as crates.io gets them: packed, then built from the packages (HOW_TO_RELEASE.md). Not
       # publish --dry-run, which fails once the version is on crates.io.
       - name: Packages

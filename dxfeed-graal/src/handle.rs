@@ -22,7 +22,8 @@ pub(crate) unsafe trait SdkHandle {
 }
 
 macro_rules! sdk_handle {
-    ($($t:ty),*) => {$(
+    ($($(#[$meta:meta])* $t:ty),* $(,)?) => {$(
+        $(#[$meta])*
         // SAFETY: every listed SDK structure has a `handler` field.
         unsafe impl SdkHandle for $t {
             unsafe fn handler(this: *mut Self) -> *mut sys::dxfg_v4_java_object_handler {
@@ -45,9 +46,13 @@ sdk_handle!(
     sys::dxfg_v4_publisher_t,
     sys::dxfg_v4_executor_t,
     sys::dxfg_v4_event_queue_t,
+    #[cfg(feature = "experimental")]
     sys::dxfg_v4_feed_filter_builder_t,
+    #[cfg(feature = "experimental")]
     sys::dxfg_v4_feed_filter_t,
+    #[cfg(feature = "experimental")]
     sys::dxfg_v4_feed_filter_tracker_t,
+    #[cfg(feature = "experimental")]
     sys::dxfg_v4_feed_filter_listener_t,
     sys::dxfg_v4_subscription_t,
     sys::dxfg_v4_feed_event_listener_t,
@@ -81,6 +86,7 @@ sdk_handle!(
     sys::dxfg_v4_auth_token_t,
     sys::dxfg_v4_logging_listener_t,
     sys::dxfg_v4_message_connector_t,
+    #[cfg(feature = "experimental")]
     sys::dxfg_v4_message_connector_listener_t,
     sys::dxfg_v4_input_stream_t,
     sys::dxfg_v4_price_increments_t,

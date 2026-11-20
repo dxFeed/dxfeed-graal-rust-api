@@ -18,9 +18,19 @@ as system properties in every test process.
 
 The cargo feature `experimental` adds items, so run clippy, rustdoc and the tests with and without `--all-features`.
 
+Check that the stable API uses no SDK function, structure or constant marked `@experimental` outside
+`xtask/experimental-allowlist.txt`: the check expands the crate without the feature (with `RUSTC_BOOTSTRAP` for
+`-Zunpretty`, into `target/xtask-expand`), looks for the names in its code, not in its documentation, and also fails on
+an entry that is no longer used or no longer experimental. Put new code that uses one behind the feature, or add the
+item to the allowlist with the reason; remove the entries that an SDK release stabilizes.
+
+```bash
+cargo run -p xtask -- check-experimental
+```
+
 CI (`.github/workflows/build.yml`) runs the same checks on a pull request and a push to main: on Linux, fmt, rustdoc
-(also without the SDK, as on docs.rs) and the packages of the published crates (`cargo package`, see
-[HOW_TO_RELEASE.md](HOW_TO_RELEASE.md#crates)); on Linux x64 and arm64, Windows x64 and macOS arm64 and x64, clippy
+(also without the SDK, as on docs.rs), `check-experimental` and the packages of the published crates (`cargo package`,
+see [HOW_TO_RELEASE.md](HOW_TO_RELEASE.md#crates)); on Linux x64 and arm64, Windows x64 and macOS arm64 and x64, clippy
 and the tests in debug and release, each with and without `--all-features`, and then `check-deploy`; and `cargo check`
 on the minimum supported Rust version. It uses the toolchain set in the workflow (`RUSTUP_TOOLCHAIN`); update it there
 together with the code that a newer clippy needs.
