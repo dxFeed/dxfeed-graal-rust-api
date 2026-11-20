@@ -27,8 +27,8 @@ use crate::help::Info;
 
 use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
 use self::events::EventPool;
-use self::generator::{Counters, Settings, run_generator};
-use self::limiter::{RateLimiter, Stop};
+use self::generator::{Counters, PublishCounters, Settings, run_generator};
+use self::limiter::{ScheduleLimiter, Stop};
 use self::statistics::{InstanceTotals, RuntimeSample, StatisticsSample, run_reporter, system_clock};
 use self::symbols::Symbols;
 
@@ -218,8 +218,7 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
             close(&instances);
             return Err(error);
         }
-        let seed = 0x9E37_79B9_7F4A_7C15_u64.wrapping_mul(index as u64);
-        pools.push(EventPool::new(options.event, symbols, seed));
+        pools.push(EventPool::new(options.event, symbols, index as u64));
     }
     let settings = Settings {
         batch: options.batch,
@@ -227,7 +226,8 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
     };
     let limiter = options
         .records_per_second
-        .map(|rate| RateLimiter::new(rate, options.batch as i64, stop, Instant::now()));
+        .map(|rate| ScheduleLimiter::new(rate, options.batch as i64, stop));
+    let publish = PublishCounters::default();
     let failure = Mutex::new(None);
     let reporter_stop = Stop::default();
     std::thread::scope(|scope| {
@@ -254,12 +254,18 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
             .iter()
             .zip(pools)
             .map(|(instance, mut pool)| {
-                let (limiter, failure) = (limiter.as_ref(), &failure);
+                let (limiter, failure, publish) = (limiter.as_ref(), &failure, &publish);
                 scope.spawn(move || {
                     let published = panic::catch_unwind(AssertUnwindSafe(|| {
-                        run_generator(&mut pool, settings, limiter, stop, &instance.counters, |events| {
-                            instance.publisher.publish_events(events)
-                        })
+                        run_generator(
+                            &mut pool,
+                            settings,
+                            limiter,
+                            stop,
+                            &instance.counters,
+                            publish,
+                            |events| instance.publisher.publish_events(events),
+                        )
                     }));
                     let error = match published {
                         Ok(Ok(())) => return,
