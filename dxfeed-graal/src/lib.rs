@@ -189,6 +189,26 @@
 //! # Deployment
 //!
 //! The SDK library is linked dynamically and must be found at run time; see the README of the repository.
+//!
+//! # Stability
+//!
+//! From version 1.0.0 on, the crate follows Semantic Versioning: a patch release fixes bugs, a minor release adds to
+//! the API and may move to a newer SDK, and only a major release breaks code that builds against the public API.
+//! Before 1.0.0, a minor release may break the API.
+//!
+//! - The event types, [`InstrumentProfile`](ipf::InstrumentProfile) and the enums that mirror Java enums are
+//!   `#[non_exhaustive]`: a minor release may add fields and variants as the SDK and the Java API grow. Make an event
+//!   with `new` and field writes, and match these enums with a wildcard arm.
+//! - The feature `experimental` is outside this promise: its items wrap SDK functions that the SDK may change in a
+//!   minor release, so they may change in a minor release of the crate too.
+//! - Items hidden from the documentation are not part of the API.
+//! - The behavior that comes from the SDK and the Java API follows them: a newer SDK may fix or change it. The texts of
+//!   `Debug` and of the errors may change in any release; `Display` of the events follows Java `toString`.
+//! - The feature `stream` implements the `Stream` trait of futures-core 0.3. A futures-core 1.0 will get a feature of
+//!   its own; the 0.3 one stays until the next major release.
+//! - Raising the minimum supported Rust version is a minor release, never a patch.
+//!
+//! The README of the repository covers the versions of `dxfeed-graal-sys` and of the SDK.
 #![warn(missing_docs, missing_debug_implementations)]
 
 mod auth_token;
