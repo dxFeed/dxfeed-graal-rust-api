@@ -5,6 +5,7 @@
 //! `-X` and `-XX:` options reach the isolate.
 
 mod cli;
+mod consumer;
 mod events;
 mod generator;
 mod histogram;
@@ -18,7 +19,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::Mutex;
-use std::sync::atomic::Ordering;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use dxfeed_graal::{DXEndpoint, DXPublisher, Error, MessageConnectorKind, MessageConnectorState, system};
@@ -27,6 +28,7 @@ use crate::console;
 use crate::help::Info;
 
 use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
+use self::consumer::{WATCHDOG_VARIABLE, WatchdogTimeouts, run_consumer};
 use self::events::EventPool;
 use self::generator::{Counters, PublishCounters, Settings, run_generator};
 use self::limiter::{ScheduleLimiter, Stop};
@@ -53,6 +55,41 @@ const ISOLATE_ARGUMENT_PARSING_FAILED: i32 = 22;
 /// within milliseconds; the connector of one that could not bind (the port is taken) stays connecting.
 const SERVER_START_TIMEOUT: Duration = Duration::from_millis(3000);
 
+/// How a run ended: the `status` of the summary file and, through it, the exit code.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Status {
+    /// The duration ended the run.
+    Ok,
+    /// SIGINT or SIGTERM ended the run.
+    StoppedBySignal,
+    /// The watchdog of the consumer found open connections without records.
+    NoData,
+    /// The first events of the consumer all lack the nanosecond part.
+    NanoMissing,
+    /// A failure at run time: an endpoint, a port in use, a publishing call.
+    Error,
+}
+
+impl Status {
+    /// The name of the status in the summary file.
+    pub fn name(self) -> &'static str {
+        match self {
+            Status::Ok => "ok",
+            Status::StoppedBySignal => "stopped_by_signal",
+            Status::NoData => "no_data",
+            Status::NanoMissing => "nano_missing",
+            Status::Error => "error",
+        }
+    }
+
+    pub fn exit_code(self) -> u8 {
+        match self {
+            Status::Ok | Status::StoppedBySignal => 0,
+            Status::NoData | Status::NanoMissing | Status::Error => EXIT_FAILURE,
+        }
+    }
+}
+
 fn fail(message: &str, code: u8) -> ExitCode {
     eprintln!("NetTest: {message}");
     ExitCode::from(code)
@@ -74,9 +111,6 @@ pub fn main(args: &[String]) -> ExitCode {
     if options.help {
         console::print(&cli::usage_text());
         return ExitCode::SUCCESS;
-    }
-    if options.mode == Mode::Consumer {
-        return fail("the mode c is not implemented yet", EXIT_FAILURE);
     }
     if let Err(error) = system::set_isolate_arguments(&options.isolate_arguments) {
         return fail(&error.to_string(), EXIT_BAD_ARGUMENTS);
@@ -110,9 +144,22 @@ pub fn main(args: &[String]) -> ExitCode {
     };
     // Ctrl+C and SIGTERM end the run like --duration does: the last statistics are printed and the endpoints close.
     let stop = Arc::new(Stop::default());
-    let handler_stop = Arc::clone(&stop);
-    if let Err(error) = ctrlc::set_handler(move || handler_stop.request()) {
+    let signalled = Arc::new(AtomicBool::new(false));
+    let (handler_stop, handler_signalled) = (Arc::clone(&stop), Arc::clone(&signalled));
+    let handler = move || {
+        handler_signalled.store(true, Ordering::SeqCst);
+        handler_stop.request();
+    };
+    if let Err(error) = ctrlc::set_handler(handler) {
         return fail(&format!("cannot handle Ctrl+C: {error}"), EXIT_FAILURE);
+    }
+    if options.mode == Mode::Consumer {
+        let timeouts = WatchdogTimeouts::from_variable(std::env::var(WATCHDOG_VARIABLE).ok().as_deref());
+        let outcome = run_consumer(&options, &pool.symbols, &stop, &signalled, timeouts);
+        if let Some(error) = &outcome.error {
+            eprintln!("NetTest: {error}");
+        }
+        return ExitCode::from(outcome.status.exit_code());
     }
     match run(&options, &pool.symbols, &stop) {
         Ok(()) => ExitCode::SUCCESS,
@@ -182,13 +229,7 @@ impl Instance {
 
     /// The open connections of all connectors of the endpoint.
     fn connections(&self) -> i64 {
-        self.endpoint
-            .get_connectors()
-            .unwrap_or_default()
-            .iter()
-            .filter_map(|connector| connector.get_connection_count().ok())
-            .map(i64::from)
-            .sum()
+        connections_of(&self.endpoint)
     }
 
     fn totals(&self) -> InstanceTotals {
@@ -197,6 +238,17 @@ impl Instance {
             weighted_nanos: self.counters.weighted_nanos.load(Ordering::Relaxed),
         }
     }
+}
+
+/// The open connections of all connectors of the endpoint.
+fn connections_of(endpoint: &DXEndpoint) -> i64 {
+    endpoint
+        .get_connectors()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|connector| connector.get_connection_count().ok())
+        .map(i64::from)
+        .sum()
 }
 
 fn close(instances: &[Instance]) {

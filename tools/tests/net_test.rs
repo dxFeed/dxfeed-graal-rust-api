@@ -84,9 +84,14 @@ fn read_all(mut pipe: impl Read + Send + 'static) -> JoinHandle<String> {
 
 impl Tool {
     fn start(args: &[&str]) -> Tool {
+        Tool::start_with_env(args, &[])
+    }
+
+    fn start_with_env(args: &[&str], variables: &[(&str, &str)]) -> Tool {
         let mut child = Command::new(env!("CARGO_BIN_EXE_Tools"))
             .arg("NetTest")
             .args(args)
+            .envs(variables.iter().copied())
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -527,5 +532,74 @@ fn sigint_ends_the_run() {
             .unwrap()
             .is_match(summaries[summaries.len() - 1]),
         "{outcome:#?}"
+    );
+}
+
+/// Waits until something accepts connections on the loopback port.
+fn wait_for_port(port: u16) {
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        assert!(Instant::now() < deadline, "the port {port} does not accept");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+#[test]
+fn a_consumer_receives_from_a_publisher_tool_and_exits_with_zero() {
+    let port = free_port();
+    let address = format!(":{port}");
+    // The publisher outlives the consumer by far: the consumer's first endpoint may take seconds on a slow runner.
+    let publisher = Tool::start(&["p", &address, "-S", "20", "-r", "*/2k", "-s", "1s", "--duration", "10s"]);
+    wait_for_port(port);
+    let client = format!("127.0.0.1:{port}");
+    let consumer = run(&["c", &client, "-S", "20", "-s", "1s", "--duration", "3s"]);
+    let publisher = publisher.finish();
+    assert_eq!(publisher.code(), Some(0), "{publisher:#?}");
+    assert_eq!(consumer.code(), Some(0), "{consumer:#?}");
+    // Each block is a summary line, the instance line and the runtime line.
+    let lines: Vec<&str> = consumer.stdout.lines().collect();
+    assert!(lines.len() >= 3 && lines.len().is_multiple_of(3), "{consumer:#?}");
+    for block in lines.chunks(3) {
+        assert!(
+            block[0].starts_with("{*NetTestConsumerSide-NetTest*} data "),
+            "{block:?}"
+        );
+        assert!(block[1].starts_with("    NetTest.1 data "), "{block:?}");
+        assert!(block[2].starts_with("{*NetTestRuntime-NetTest*} heap "), "{block:?}");
+    }
+    let summary = Regex::new(
+        "^[{][*]NetTestConsumerSide-NetTest[*][}] data ([0-9,]+) rps, lag (-?[0-9,]+) us, instances 1, connections ([0-9]+)$",
+    )
+    .unwrap();
+    let received = lines
+        .iter()
+        .filter_map(|line| summary.captures(line))
+        .filter(|captures| &captures[1] != "0" && &captures[3] == "1")
+        .count();
+    assert!(received >= 1, "{consumer:#?}");
+    // The isolate logs to stderr; the tool itself has nothing to say.
+    assert!(!consumer.stderr.contains("NetTest:"), "{consumer:#?}");
+}
+
+#[test]
+fn a_connected_consumer_without_records_ends_with_no_data() {
+    // An endpoint of the test process accepts the connection and publishes nothing.
+    let port = free_port();
+    let endpoint = DXEndpoint::create_with_role(Role::Publisher).unwrap();
+    endpoint.connect(&format!(":{port}")).unwrap();
+    wait_for_port(port);
+    let client = format!("127.0.0.1:{port}");
+    let consumer = Tool::start_with_env(
+        &["c", &client, "-S", "5", "-s", "1s", "--duration", "60s"],
+        &[("DXFG_NETTEST_WATCHDOG", "500,1500")],
+    )
+    .finish();
+    endpoint.close_and_await_termination().unwrap();
+    assert_eq!(consumer.code(), Some(1), "{consumer:#?}");
+    assert!(
+        consumer
+            .stderr
+            .ends_with("NetTest: no_data: no records for 1500 ms after the connection, with 1 open connections\n"),
+        "{consumer:#?}"
     );
 }

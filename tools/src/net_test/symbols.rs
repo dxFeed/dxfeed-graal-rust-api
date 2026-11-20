@@ -114,7 +114,6 @@ pub fn generate_symbols(total: i64) -> Vec<String> {
 /// The symbols of the consumer instance `instance` (from 1) of `count`: those with the index `j` (from 0) where
 /// `j % count == instance - 1`, so that the instances together take each symbol once. An instance outside `1..=count`
 /// has none.
-#[cfg_attr(not(test), expect(dead_code, reason = "the consumer subscribes to its slice"))]
 pub fn consumer_slice(symbols: &[String], instance: usize, count: usize) -> Vec<String> {
     if instance < 1 || instance > count {
         return Vec::new();
