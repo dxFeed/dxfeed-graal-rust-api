@@ -304,7 +304,8 @@ fn stream_trait() {
 // The end of a stream.
 
 /// A closed stream yields its buffered events, then `None`; a task that waits wakes; the events that the queue held
-/// are counted.
+/// are counted. Each section has a hub of its own: a hub gives a new subscription the last events published to its
+/// symbols, a moment later, which would reach the queue of the next section.
 #[test]
 fn close_drains_the_buffer_then_ends() {
     let _serial = serial();
@@ -323,6 +324,7 @@ fn close_drains_the_buffer_then_ends() {
     assert!(matches!(poll(&mut stream, &waker), Poll::Ready(Some((1, _)))));
     assert!(matches!(poll(&mut stream, &waker), Poll::Ready(None)));
 
+    let hub = Hub::with_default_executor();
     let (mut stream, _quotes) = quotes(&hub);
     let waker = CountingWaker::new();
     assert!(poll(&mut stream, &waker).is_pending());
@@ -330,6 +332,7 @@ fn close_drains_the_buffer_then_ends() {
     assert_eq!(waker.total(), 1);
     assert!(matches!(poll(&mut stream, &waker), Poll::Ready(None)));
 
+    let hub = Hub::with_default_executor();
     let (mut stream, _quotes) = quotes(&hub);
     hub.publisher
         .publish_events(&[quote_with_bid("S0", 1.0).into(), quote_with_bid("S1", 1.0).into()])
