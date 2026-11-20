@@ -149,7 +149,9 @@ fn time_millis(packed: i64) -> i64 {
 fn a_client_address_without_a_listener_runs_and_prints_the_statistics() {
     // A free loopback port: nothing listens on it, so the connection count stays 0.
     let address = format!("127.0.0.1:{}", free_port());
-    let outcome = run(&["p", &address, "-S", "100", "-r", "*/5k", "-s", "1s", "--duration", "2s"]);
+    // The first tick only starts the count and a last block under a second is not printed, so 2 seconds left one
+    // printed block that a late wake-up on a busy runner lost; 3 seconds leave a second of margin.
+    let outcome = run(&["p", &address, "-S", "100", "-r", "*/5k", "-s", "1s", "--duration", "3s"]);
     assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
     assert!(
         Regex::new(SUMMARY_LINE_REGEX).unwrap().is_match(&outcome.stdout),
