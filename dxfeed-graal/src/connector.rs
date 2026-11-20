@@ -106,6 +106,55 @@ pub struct MessageConnectorStatistics {
     pub closed_connection_count: i64,
 }
 
+/// The I/O statistics of a [`MessageConnector`] at one moment; see [`MessageConnector::get_io_statistics`].
+///
+/// The ten I/O counters of QD's statistics and the open and closed connections. They cover all the connections of the
+/// connector since it was created and are never reset: a reader takes the differences between two calls.
+///
+/// The lags and the round-trip times are sums over the records in microseconds, not samples; divide the growth of a
+/// sum by the growth of its record count for an average per record, after checking that count did grow:
+/// - `read_data_lag_sum_us / read_data_records`: the lag of the data received, as the peer reported it in its last
+///   heartbeat, plus the round-trip time. It means something on the side that receives data; on a publisher it
+///   stays 0.
+/// - `written_data_lag_sum_us / written_data_records`: the time a record spent in this process. The records that the
+///   application publishes itself count their composing time only, so it is close to 0 on a publisher.
+/// - `read_rtt_sum_us / (read_data_records + read_sub_records)` and
+///   `written_rtt_sum_us / (written_data_records + written_sub_records)`: the round-trip time of the connections,
+///   weighted by their records.
+///
+/// QD measures the round-trip time with its heartbeats, so it is 0 for about a second after the connect. Its time
+/// marks wrap every 2^30 microseconds (about 17.9 minutes): a single lag of more than about 537 s comes out wrong.
+/// The bytes are those of the QTP messages, heartbeats included; they may differ from the socket bytes of
+/// [`MessageConnectorStatistics`], for example with TLS.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
+#[non_exhaustive]
+pub struct MessageConnectorIoStatistics {
+    /// The data records read: they grow only when data arrives.
+    pub read_data_records: i64,
+    /// The data records written.
+    pub written_data_records: i64,
+    /// The subscription records read: those a publisher receives.
+    pub read_sub_records: i64,
+    /// The subscription records written: those a feed sends.
+    pub written_sub_records: i64,
+    /// The bytes of the QTP messages read, heartbeats included.
+    pub read_bytes: i64,
+    /// The bytes of the QTP messages written, heartbeats included.
+    pub written_bytes: i64,
+    /// The sum over the data records read of their lag, in microseconds.
+    pub read_data_lag_sum_us: i64,
+    /// The sum over the data records written of their lag, in microseconds.
+    pub written_data_lag_sum_us: i64,
+    /// The sum over the records read of the round-trip time of the connection, in microseconds.
+    pub read_rtt_sum_us: i64,
+    /// The sum over the records written of the round-trip time of the connection, in microseconds.
+    pub written_rtt_sum_us: i64,
+    /// The open connections.
+    pub active_connection_count: i64,
+    /// The connections closed since the connector was created.
+    pub closed_connection_count: i64,
+}
+
 /// The category of a [`ConnectionError`].
 ///
 /// It prints as the SDK constant without its prefix: `OTHER`, `DNS`, `CONNECT_FAILED`, `READ_TIMEOUT`,
@@ -421,6 +470,9 @@ impl MessageConnector {
     /// The statistics of the connector now: the bytes and the data records read and written, the open and the closed
     /// connections. Data arrives when `read_data_records` grows between two calls; `read_bytes` grows on heartbeats
     /// too.
+    ///
+    /// A stopped connector (replaced by a connect to another address, disconnected, or of a closed endpoint) reads 0
+    /// for the data records, since QD closes its statistics; the bytes and the connection counts stay.
     #[doc(alias = "retrieveCompleteEndpointStats")]
     #[doc(alias = "getStats")]
     pub fn get_statistics(&self) -> Result<MessageConnectorStatistics> {
@@ -440,6 +492,35 @@ impl MessageConnector {
             written_bytes: stats.written_bytes,
             read_data_records: stats.read_data_records,
             written_data_records: stats.written_data_records,
+            active_connection_count: stats.active_connection_count,
+            closed_connection_count: stats.closed_connection_count,
+        })
+    }
+
+    /// The I/O statistics of the connector now: the data and subscription records, the bytes, the lags and the
+    /// round-trip times read and written, the open and the closed connections; see [`MessageConnectorIoStatistics`]
+    /// for how to read the sums.
+    ///
+    /// A stopped connector (replaced by a connect to another address, disconnected, or of a closed endpoint) reads 0
+    /// for the ten I/O counters, since QD closes its statistics: read them before such a stop to keep the last values.
+    /// [`DXEndpoint::reconnect`](crate::DXEndpoint::reconnect) and dropped connections keep them.
+    #[doc(alias = "getStats")]
+    pub fn get_io_statistics(&self) -> Result<MessageConnectorIoStatistics> {
+        let c = self.as_ptr();
+        let mut stats = sys::dxfg_v4_message_connector_io_stats_t::default();
+        // SAFETY: the connector is live and the out-pointer is valid for writes.
+        call(|t| unsafe { sys::dxfg_v4_MessageConnector_getIoStatistics(t, c, &mut stats) })?;
+        Ok(MessageConnectorIoStatistics {
+            read_data_records: stats.read_data_records,
+            written_data_records: stats.written_data_records,
+            read_sub_records: stats.read_sub_records,
+            written_sub_records: stats.written_sub_records,
+            read_bytes: stats.read_bytes,
+            written_bytes: stats.written_bytes,
+            read_data_lag_sum_us: stats.read_data_lag_sum_us,
+            written_data_lag_sum_us: stats.written_data_lag_sum_us,
+            read_rtt_sum_us: stats.read_rtt_sum_us,
+            written_rtt_sum_us: stats.written_rtt_sum_us,
             active_connection_count: stats.active_connection_count,
             closed_connection_count: stats.closed_connection_count,
         })

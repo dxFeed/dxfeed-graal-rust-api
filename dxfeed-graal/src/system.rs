@@ -125,6 +125,9 @@ pub mod feature {
     /// The runtime statistics of the isolate and its process
     /// ([`get_runtime_statistics`](super::get_runtime_statistics)).
     pub const RUNTIME_STATISTICS: &str = "runtime_statistics";
+    /// The I/O statistics of a message connector
+    /// ([`MessageConnector::get_io_statistics`](crate::MessageConnector::get_io_statistics)).
+    pub const MESSAGE_CONNECTOR_IO_STATISTICS: &str = "message_connector_io_statistics";
 }
 
 /// The runtime statistics of the isolate of the SDK and of its process, from [`get_runtime_statistics`].

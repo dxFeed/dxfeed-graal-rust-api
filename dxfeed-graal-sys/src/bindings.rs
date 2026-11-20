@@ -61,6 +61,8 @@ pub const DXFG_V4_FEATURE_MESSAGE_CONNECTORS: &[u8; 19] = b"message_connectors\0
 pub const DXFG_V4_FEATURE_CONNECTION_ERRORS: &[u8; 18] = b"connection_errors\0";
 #[doc = " @brief The name of the feature \"runtime statistics\" (dxfg_v4_system_get_runtime_statistics(),\n dxfg_v4_runtime_stats_t) for dxfg_v4_system_is_feature_supported().\n @since 3.17.0"]
 pub const DXFG_V4_FEATURE_RUNTIME_STATISTICS: &[u8; 19] = b"runtime_statistics\0";
+#[doc = " @brief The name of the feature \"message connector I/O statistics\" (dxfg_v4_message_connector.h:\n dxfg_v4_MessageConnector_getIoStatistics(), dxfg_v4_message_connector_io_stats_t) for\n dxfg_v4_system_is_feature_supported().\n @since 3.18.0"]
+pub const DXFG_V4_FEATURE_MESSAGE_CONNECTOR_IO_STATISTICS: &[u8; 32] = b"message_connector_io_statistics\0";
 #[repr(C)]
 #[derive(Debug)]
 pub struct __graal_isolate_t {
@@ -77,7 +79,7 @@ pub struct __graal_isolatethread_t {
 pub type graal_isolatethread_t = __graal_isolatethread_t;
 #[doc = " @brief An unsigned integer of the size of a pointer: the type of the sizes in graal_create_isolate_params_t."]
 pub type __graal_uword = ::std::os::raw::c_ulonglong;
-#[doc = " @brief The parameters of graal_create_isolate().\n\n Zero the structure, then set `version` to #__graal_create_isolate_params_version and the fields to change; the\n fields that are 0 keep their defaults. The isolate reads only the fields of the given version, so a program built\n with an older header works with a newer library.\n\n The isolate arguments (`argc`, `argv`) are parsed like the command line of a native executable, and `argv[0]` (the\n program name) is skipped:\n - `-D<name>=<value>` sets a system property, as dxfg_system_set_property() does after the creation (for example the\n   properties that must be set before the first endpoint is created);\n - `-Xmx<size>`, `-Xms<size>`, `-Xmn<size>` set the maximum, the initial and the young generation sizes of the heap\n   (`64m`, `1g`);\n - `-XX:<option>=<value>`, `-XX:+<option>`, `-XX:-<option>` set the runtime options of the isolate, for example\n   `-XX:TearDownWarningSeconds=<seconds>` (prints the threads that block graal_tear_down_isolate(); the debug builds\n   of the SDK use 10 seconds) or `-XX:-EnableSignalHandling` (on Linux and macOS the isolate does not install its\n   handlers of `SIGPIPE` and `SIGXFSZ`).\n\n An unknown `-XX:` option or a wrong value (`-Xmx64q`) fails graal_create_isolate() and prints the reason to stderr,\n unless `ignore_unrecognized_args` is 1. The other arguments are not checked.\n\n @code{.c}\n char *argv[] = {\"app\", \"-Dlog.level=OFF\", \"-XX:TearDownWarningSeconds=10\"};\n graal_create_isolate_params_t params;\n memset(&params, 0, sizeof(params));\n params.version = __graal_create_isolate_params_version;\n params.argc = 3;\n params.argv = argv;\n if (graal_create_isolate(&params, &isolate, &thread) != 0) { ... }\n @endcode"]
+#[doc = " @brief The parameters of graal_create_isolate().\n\n Zero the structure, then set `version` to #__graal_create_isolate_params_version and the fields to change; the\n fields that are 0 keep their defaults. The isolate reads only the fields of the given version, so a program built\n with an older header works with a newer library.\n\n The isolate arguments (`argc`, `argv`) are parsed like the command line of a native executable, and `argv[0]` (the\n program name) is skipped:\n - `-D<name>=<value>` sets a system property, as dxfg_system_set_property() does after the creation (for example the\n   properties that must be set before the first endpoint is created);\n - `-Xmx<size>`, `-Xms<size>`, `-Xmn<size>` set the maximum, the initial and the young generation sizes of the heap\n   (`64m`, `1g`);\n - `-Xss<size>` sets the stack size of the threads that the isolate starts (`1m`);\n - `-XX:<option>=<value>`, `-XX:+<option>`, `-XX:-<option>` set the runtime options of the isolate, for example\n   `-XX:TearDownWarningSeconds=<seconds>` (prints the threads that block graal_tear_down_isolate(); the debug builds\n   of the SDK use 10 seconds) or `-XX:-EnableSignalHandling` (on Linux and macOS the isolate does not install its\n   handlers of `SIGPIPE` and `SIGXFSZ`).\n\n An unknown `-XX:` option or a wrong value (`-Xmx64q`) fails graal_create_isolate() and prints the reason to stderr,\n unless `ignore_unrecognized_args` is 1. The other arguments are not checked.\n\n @code{.c}\n char *argv[] = {\"app\", \"-Dlog.level=OFF\", \"-XX:TearDownWarningSeconds=10\"};\n graal_create_isolate_params_t params;\n memset(&params, 0, sizeof(params));\n params.version = __graal_create_isolate_params_version;\n params.argc = 3;\n params.argv = argv;\n if (graal_create_isolate(&params, &isolate, &thread) != 0) { ... }\n @endcode"]
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct __graal_create_isolate_params_t {
@@ -8568,7 +8570,7 @@ impl Default for dxfg_v4_message_connector_list {
         }
     }
 }
-#[doc = " @brief The statistics of a message connector (dxfg_v4_MessageConnector_getStatistics()).\n\n The counters cover all the connections of the connector since it was created, the closed ones included. The layout\n of the struct does not change: new counters will come with a new function.\n\n On iOS and the iOS Simulator, `read_data_records` and `written_data_records` stay 0: the SDK of these platforms has\n no QD monitoring (`qds-monitoring`), which keeps the statistics they come from. The other counters work there too.\n @since 3.14.0"]
+#[doc = " @brief The statistics of a message connector (dxfg_v4_MessageConnector_getStatistics()).\n\n The counters cover all the connections of the connector since it was created, the closed ones included. The layout\n of the struct does not change: new counters will come with a new function.\n\n A stopped connector (replaced by a connect to another address, disconnected, or of a closed endpoint) reads 0 for\n `read_data_records` and `written_data_records`: QD closes its statistics. The bytes and connection counts stay.\n\n On iOS and the iOS Simulator, `read_data_records` and `written_data_records` stay 0: the SDK of these platforms has\n no QD monitoring (`qds-monitoring`), which keeps the statistics they come from. The other counters work there too.\n @since 3.14.0"]
 #[repr(C)]
 #[derive(Debug, Default, Copy, Clone)]
 pub struct dxfg_v4_message_connector_stats_t {
@@ -8602,6 +8604,66 @@ const _: () = {
         [::std::mem::offset_of!(dxfg_v4_message_connector_stats_t, active_connection_count) - 32usize];
     ["Offset of field: dxfg_v4_message_connector_stats_t::closed_connection_count"]
         [::std::mem::offset_of!(dxfg_v4_message_connector_stats_t, closed_connection_count) - 40usize];
+};
+#[doc = " @brief The I/O statistics of a message connector (dxfg_v4_MessageConnector_getIoStatistics()): the ten cumulative\n I/O counters of QD's statistics and the open and closed connections.\n\n The counters cover all the connections of the connector since it was created, the closed ones included, and are\n never reset: a reader takes the differences between two calls. Units: records, bytes, and microseconds for the lags\n and the round-trip times. The layout of the struct does not change: new counters will come with a new function.\n\n The lags and the round-trip times are sums over the records, not samples: for each record QD adds the current value\n of its connection. Divide a sum by the matching record count for an average per record:\n - `read_data_lag_sum_us / read_data_records` is the average lag of the data received: the lag that the peer reported\n   in its last heartbeat (how long the data waited in the peer and upstream of it) plus the round-trip time of the\n   connection. It means something on the side that receives data (a feed); on a publisher it stays 0.\n - `written_data_lag_sum_us / written_data_records` is the average time a record spent in this process: from its\n   arrival on another connection to the end of the composing of its message. The records that the application\n   publishes itself have no arrival time and count the composing time only, so on a publisher the value is close to 0\n   and does not measure a delivery delay.\n - `read_rtt_sum_us / (read_data_records + read_sub_records)` and\n   `written_rtt_sum_us / (written_data_records + written_sub_records)` are the round-trip time of the connections,\n   weighted by their records.\n\n An interval without records has no average: check that the record difference is not 0 before dividing.\n\n QD measures the round-trip time with its heartbeats: it is 0 until the first heartbeats have gone both ways (about a\n second after the connect, the first heartbeat is sent after 0.5 s), so the records of the first moments add 0 to the\n round-trip sums and to the read lag sum. The time marks are microseconds of a 30-bit clock that wraps every 2^30 us\n (about 17.9 minutes), and each lag or round-trip time is a signed difference of two marks: a value of more than about\n 537 s comes out wrong, and a sum may then even decrease.\n\n On iOS and the iOS Simulator the ten I/O counters stay 0: the SDK of these platforms has no QD monitoring\n (`qds-monitoring`), which keeps the statistics they come from. The connection counts work there too.\n\n A connector stopped by a connect to another address, by dxfg_v4_DXEndpoint_disconnect() or by the close of its\n endpoint reads 0 for the ten I/O counters: QD closes its statistics and adds them to those of the endpoint. The\n connection counts stay. Read the statistics before such a stop to keep the last values; dxfg_v4_DXEndpoint_reconnect()\n and the drops of the connections do not stop the connector and keep the counters.\n\n The bytes are those of the QTP messages as QD's statistics count them, heartbeats included; they may differ from the\n socket bytes of dxfg_v4_message_connector_stats_t (`read_bytes`, `written_bytes`), e.g. with TLS.\n @since 3.18.0"]
+#[repr(C)]
+#[derive(Debug, Default, Copy, Clone)]
+pub struct dxfg_v4_message_connector_io_stats_t {
+    #[doc = " The data records read (`IO_DATA_READ_RECORDS`): they grow only when data arrives."]
+    pub read_data_records: i64,
+    #[doc = " The data records written (`IO_DATA_WRITE_RECORDS`)."]
+    pub written_data_records: i64,
+    #[doc = " The subscription records read (`IO_SUB_READ_RECORDS`): those a publisher receives."]
+    pub read_sub_records: i64,
+    #[doc = " The subscription records written (`IO_SUB_WRITE_RECORDS`): those a feed sends."]
+    pub written_sub_records: i64,
+    #[doc = " The bytes of the QTP messages read, heartbeats included (`IO_READ_BYTES`)."]
+    pub read_bytes: i64,
+    #[doc = " The bytes of the QTP messages written, heartbeats included (`IO_WRITE_BYTES`)."]
+    pub written_bytes: i64,
+    #[doc = " The sum over the data records read of their lag, in microseconds (`IO_DATA_READ_LAGS`)."]
+    pub read_data_lag_sum_us: i64,
+    #[doc = " The sum over the data records written of their lag, in microseconds (`IO_DATA_WRITE_LAGS`)."]
+    pub written_data_lag_sum_us: i64,
+    #[doc = " The sum over the records read of the round-trip time of the connection, in microseconds (`IO_READ_RTTS`)."]
+    pub read_rtt_sum_us: i64,
+    #[doc = " The sum over the records written of the round-trip time of the connection, in microseconds (`IO_WRITE_RTTS`)."]
+    pub written_rtt_sum_us: i64,
+    #[doc = " The open connections."]
+    pub active_connection_count: i64,
+    #[doc = " The connections closed since the connector was created."]
+    pub closed_connection_count: i64,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of dxfg_v4_message_connector_io_stats_t"]
+        [::std::mem::size_of::<dxfg_v4_message_connector_io_stats_t>() - 96usize];
+    ["Alignment of dxfg_v4_message_connector_io_stats_t"]
+        [::std::mem::align_of::<dxfg_v4_message_connector_io_stats_t>() - 8usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::read_data_records"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, read_data_records) - 0usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::written_data_records"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, written_data_records) - 8usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::read_sub_records"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, read_sub_records) - 16usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::written_sub_records"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, written_sub_records) - 24usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::read_bytes"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, read_bytes) - 32usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::written_bytes"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, written_bytes) - 40usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::read_data_lag_sum_us"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, read_data_lag_sum_us) - 48usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::written_data_lag_sum_us"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, written_data_lag_sum_us) - 56usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::read_rtt_sum_us"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, read_rtt_sum_us) - 64usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::written_rtt_sum_us"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, written_rtt_sum_us) - 72usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::active_connection_count"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, active_connection_count) - 80usize];
+    ["Offset of field: dxfg_v4_message_connector_io_stats_t::closed_connection_count"]
+        [::std::mem::offset_of!(dxfg_v4_message_connector_io_stats_t, closed_connection_count) - 88usize];
 };
 #[doc = " @brief The handle of a listener of the state changes of the message connectors of an endpoint\n (dxfg_v4_MessageConnectorListener_new()).\n @experimental\n @since 3.14.0"]
 #[repr(C)]
@@ -8721,6 +8783,14 @@ unsafe extern "C" {
         thread: *mut graal_isolatethread_t,
         connector: *mut dxfg_v4_message_connector_t,
         stats: *mut dxfg_v4_message_connector_stats_t,
+    ) -> i32;
+}
+unsafe extern "C" {
+    #[doc = " @brief Reads the I/O statistics of a message connector: the data and subscription records, the bytes, the lags and\n the round-trip times read and written, the open and the closed connections.\n\n The counters are cumulative since the connector was created; dxfg_v4_message_connector_io_stats_t describes their\n units and how to read the sums. Nothing is reset: other readers of QD's statistics see the same values. The values\n are read one by one, not as one consistent set. On iOS and the iOS Simulator, and for a stopped connector, the I/O\n counters are 0.\n\n A wrapper that loads the library at run time checks #DXFG_V4_FEATURE_MESSAGE_CONNECTOR_IO_STATISTICS with\n dxfg_v4_system_is_feature_supported() first. dxfg_v4_MessageConnector_getStatistics() and its struct stay as they\n are.\n\n Java: `QDStats.getValue(SValue)` of `MessageConnector.getStats()` with the ten `QDStats.SValue.IO_*` values, and\n `MessageConnector.retrieveCompleteEndpointStats()` for the connections.\n\n @param[in] thread The current GraalVM Isolate's thread.\n @param[in] connector The connector; must not be NULL.\n @param[out] stats The pointer to the structure that receives the statistics; must not be NULL. It is written on\n success only.\n @return #DXFG_EXECUTE_SUCCESSFULLY (0) on successful function execution or #DXFG_EXECUTE_FAIL (-1) on error. Use\n dxfg_v4_get_and_clear_thread_exception() to determine if an exception was thrown.\n @since 3.18.0"]
+    pub fn dxfg_v4_MessageConnector_getIoStatistics(
+        thread: *mut graal_isolatethread_t,
+        connector: *mut dxfg_v4_message_connector_t,
+        stats: *mut dxfg_v4_message_connector_io_stats_t,
     ) -> i32;
 }
 unsafe extern "C" {

@@ -72,7 +72,7 @@ pub fn main(args: &[String]) -> ExitCode {
     // The isolate is created lazily: the first call creates it here, so that a rejected option is a bad command line.
     match system::get_runtime_statistics() {
         Err(Error::Graal(ISOLATE_ARGUMENT_PARSING_FAILED)) => {
-            // GraalVM may print the reason above, or not at all: the line names what the tool passed.
+            // GraalVM prints the reason above; the line names what the tool passed, as every NetTest does.
             let passed = options.isolate_arguments.join(" ");
             return fail(
                 &format!("the isolate rejected one of the options: {passed}"),

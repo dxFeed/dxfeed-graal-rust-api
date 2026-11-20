@@ -155,6 +155,50 @@ fn the_statistics_grow_with_the_data() {
 }
 
 #[test]
+fn the_io_statistics_count_the_data_the_subscription_and_the_round_trips() {
+    let (publisher, port) = listening_publisher();
+    let feed = DXEndpoint::create().unwrap();
+    let subscription = feed.get_feed().create_subscription::<Quote>().unwrap();
+    subscription.add_symbols(["IO_STATS"]).unwrap();
+    feed.connect(&format!("127.0.0.1:{port}")).unwrap();
+    let connector = only_connector(&feed);
+
+    // The round-trip time comes with the heartbeats, about a second after the connect, so the publisher keeps sending
+    // new prices: each one is a new record, and the records after the first heartbeats add to the sums.
+    let mut price = 0.0;
+    wait_until("data records with a round-trip time", || {
+        price += 1.0;
+        let quote = Quote {
+            bid_price: price,
+            ..Quote::new("IO_STATS")
+        };
+        publisher.get_publisher().publish_events(&[quote.into()]).unwrap();
+        std::thread::sleep(Duration::from_millis(10));
+        let stats = connector.get_io_statistics().unwrap();
+        stats.read_data_records > 0 && stats.read_rtt_sum_us > 0
+    });
+    let feed_side = connector.get_io_statistics().unwrap();
+    assert!(feed_side.written_sub_records > 0, "{feed_side:?}");
+    assert!(feed_side.read_bytes > 0 && feed_side.written_bytes > 0, "{feed_side:?}");
+    assert!(feed_side.read_data_lag_sum_us > 0, "{feed_side:?}");
+    assert_eq!(feed_side.active_connection_count, 1);
+    assert_eq!(feed_side.closed_connection_count, 0);
+
+    let server = only_connector(&publisher);
+    let publisher_side = server.get_io_statistics().unwrap();
+    assert!(publisher_side.read_sub_records > 0, "{publisher_side:?}");
+    assert!(publisher_side.written_data_records > 0, "{publisher_side:?}");
+    assert_eq!(publisher_side.read_data_records, 0, "{publisher_side:?}");
+
+    // A stopped connector reads 0 for the I/O counters; the connection counts stay.
+    feed.disconnect().unwrap();
+    let stopped = connector.get_io_statistics().unwrap();
+    assert_eq!(stopped.read_data_records, 0, "{stopped:?}");
+    assert_eq!(stopped.read_rtt_sum_us, 0, "{stopped:?}");
+    assert_eq!(stopped.active_connection_count, 0, "{stopped:?}");
+}
+
+#[test]
 fn a_connector_to_a_port_nobody_listens_on_is_connecting() {
     let feed = DXEndpoint::create().unwrap();
     feed.connect(&format!("127.0.0.1:{}", free_port())).unwrap();
