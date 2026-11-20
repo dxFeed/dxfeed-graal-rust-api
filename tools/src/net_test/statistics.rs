@@ -2,13 +2,7 @@
 //! runtime line of the isolate), the reporter that prints them on the ticks aligned to the wall clock, and the interval
 //! records that the reporter keeps for the summary.
 
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the consumer fills the lags and the summary reads the interval records"
-    )
-)]
+#![cfg_attr(not(test), expect(dead_code, reason = "the summary reads the interval records"))]
 
 use std::sync::Mutex;
 use std::time::{Duration, SystemTime};
