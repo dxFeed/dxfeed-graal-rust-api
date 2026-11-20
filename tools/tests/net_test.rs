@@ -232,8 +232,8 @@ fn an_option_that_the_isolate_rejects_is_a_bad_command_line() {
     ]);
     assert_eq!(outcome.code(), Some(2), "{outcome:#?}");
     assert_eq!(outcome.stdout, "", "{outcome:#?}");
-    // The last line names the isolate options in command-line order, repeats kept; the reason that GraalVM may print
-    // itself stays above it (the SDK for macOS x86-64 prints none).
+    // The last line names the isolate options in command-line order, repeats kept; the reason that GraalVM prints
+    // itself stays above it.
     // The regex of the spec with \S spelled in ASCII: the regex crate of the tests is built without Unicode classes.
     let pattern =
         Regex::new(r"^NetTest: the isolate rejected one of the options: ([^ \t\r\n]+(?: [^ \t\r\n]+)*)$").unwrap();

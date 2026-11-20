@@ -230,7 +230,10 @@ mod time_zone;
 pub use auth_token::AuthToken;
 #[cfg(feature = "experimental")]
 pub use connector::{ConnectionError, ConnectionErrorCategory};
-pub use connector::{MessageConnector, MessageConnectorKind, MessageConnectorState, MessageConnectorStatistics};
+pub use connector::{
+    MessageConnector, MessageConnectorIoStatistics, MessageConnectorKind, MessageConnectorState,
+    MessageConnectorStatistics,
+};
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, JavaExceptionClass, Result};
 pub use error_manager::{ErrorInfo, ErrorManager};
