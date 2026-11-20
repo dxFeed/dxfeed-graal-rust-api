@@ -27,6 +27,13 @@ Before 1.0.0 a breaking change takes the next minor version. `dxfeed-graal-build
 take the version of the workspace (`xtask release-notes` checks the latter); from 1.0.0 the bindings get a version of
 their own, as the README describes.
 
+The SemVer job of the CI (`.github/scripts/semver-checks.sh`) checks the public API of `dxfeed-graal` and
+`dxfeed-graal-build` against the latest release tag with cargo-semver-checks, without `experimental`. While the
+version is that of the release, it checks a change as a minor one (before 1.0.0 as a patch), so a breaking change
+shows on its pull request; once the version is bumped, it checks the release as what its version says. Before 1.0.0 a
+breaking change is a warning, from 1.0.0 on an error. Run it locally with `cargo install cargo-semver-checks` and
+`DOCS_RS=1 bash .github/scripts/semver-checks.sh`.
+
 ## Prepare
 
 On a branch, in a pull request:
