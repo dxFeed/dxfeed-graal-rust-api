@@ -272,8 +272,12 @@ where
             .poll(&mut context)
             .is_pending()
     );
-    thread::spawn(move || promise.complete().unwrap());
-    seen.recv_timeout(LONG).expect("the waker deadlocked or was not woken")
+    let completer = thread::spawn(move || promise.complete().unwrap());
+    let text = seen.recv_timeout(LONG).expect("the waker deadlocked or was not woken");
+    // The completer still releases the handles of the promise, the handler and the future after it woke the waker;
+    // the tests that count live handles must not start before it ends.
+    completer.join().unwrap();
+    text
 }
 
 #[test]
