@@ -123,8 +123,9 @@ pub fn live_handles() -> usize {
 /// An owned SDK handle, released on `Drop`.
 pub(crate) struct Handle<T: SdkHandle>(NonNull<T>);
 
-// SAFETY: the handle is a pointer to SDK memory usable from any attached thread, and the Java objects behind the
-// handle types of this crate are thread-safe.
+// SAFETY: the handle is a pointer to SDK memory usable from any attached thread: it refers to a Java object that the
+// garbage collector of the isolate manages, and Java keeps memory safe under concurrent calls. Some of these objects,
+// such as the models, are not thread-safe in Java; their types document how to call them.
 unsafe impl<T: SdkHandle> Send for Handle<T> {}
 // SAFETY: as above.
 unsafe impl<T: SdkHandle> Sync for Handle<T> {}

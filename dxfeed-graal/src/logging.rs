@@ -204,7 +204,7 @@ unsafe extern "C" fn log_trampoline(
     if isolate::exiting() || IN_HANDLER.get() {
         return;
     }
-    let _ = panic::catch_unwind(AssertUnwindSafe(|| {
+    crate::error_manager::drop_panic(panic::catch_unwind(AssertUnwindSafe(|| {
         let _scope = CallbackScope::enter(thread);
         let Some(handler) = crate::lock(&HANDLER).clone() else {
             return;
@@ -226,5 +226,5 @@ unsafe extern "C" fn log_trampoline(
         let result = panic::catch_unwind(AssertUnwindSafe(|| handler(&record)));
         IN_HANDLER.set(false);
         crate::error_manager::report_panic("logging", "the logging handler", result);
-    }));
+    })));
 }
