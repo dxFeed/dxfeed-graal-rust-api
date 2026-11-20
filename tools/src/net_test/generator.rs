@@ -48,13 +48,11 @@ impl PublishCounters {
     }
 
     /// The largest slip since the previous call, which starts a new interval.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the reporter of the statistics reads it"))]
     pub fn take_interval_slip_max_nanos(&self) -> i64 {
         self.slip_interval_max_nanos.swap(0, Ordering::Relaxed)
     }
 
     /// The time of the first batch in nanoseconds since the Unix epoch; `None` before it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "the reporter of the statistics reads it"))]
     pub fn first_batch_epoch_nanos(&self) -> Option<i64> {
         Some(self.first_batch_epoch_nanos.load(Ordering::Relaxed)).filter(|&time| time != 0)
     }

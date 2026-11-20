@@ -7,6 +7,7 @@
 mod cli;
 mod events;
 mod generator;
+mod histogram;
 #[cfg(test)]
 mod kit;
 mod limiter;
@@ -29,7 +30,9 @@ use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
 use self::events::EventPool;
 use self::generator::{Counters, PublishCounters, Settings, run_generator};
 use self::limiter::{ScheduleLimiter, Stop};
-use self::statistics::{InstanceTotals, RuntimeSample, StatisticsSample, run_reporter, system_clock};
+use self::statistics::{
+    InstanceTotals, IntervalTaken, ReporterSettings, RuntimeSample, Side, StatisticsSample, run_reporter, system_clock,
+};
 use self::symbols::Symbols;
 
 pub const INFO: Info = Info {
@@ -233,9 +236,14 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
     std::thread::scope(|scope| {
         let instances = &instances;
         let reporter = scope.spawn(|| {
-            run_reporter(
-                &options.name,
-                options.period_millis,
+            // The interval records are what the summary will keep.
+            let _outcome = run_reporter(
+                ReporterSettings {
+                    name: &options.name,
+                    side: Side::Producer,
+                    period_millis: options.period_millis,
+                    warmup_millis: options.warmup_millis,
+                },
                 system_clock(&reporter_stop),
                 || StatisticsSample {
                     instances: instances.iter().map(Instance::totals).collect(),
@@ -246,6 +254,19 @@ fn run(options: &Options, symbols: &Symbols, stop: &Stop) -> Result<(), String> 
                             .map(|statistics| RuntimeSample::from_statistics(&statistics))
                             .unwrap_or_default(),
                     ),
+                },
+                || {
+                    // Taken once per interval, with or without a schedule; only a schedule reports it.
+                    let slip_max = publish.take_interval_slip_max_nanos();
+                    let slip_end = publish.slip_last_nanos.load(Ordering::Relaxed);
+                    let scheduled = limiter.is_some();
+                    IntervalTaken {
+                        warmup_start_epoch_nanos: publish.first_batch_epoch_nanos(),
+                        publish_nanos_total: publish.nanos.load(Ordering::Relaxed),
+                        slip_max_nanos: scheduled.then_some(slip_max),
+                        slip_end_nanos: scheduled.then_some(slip_end),
+                        lags: None,
+                    }
                 },
                 console::print,
             );
