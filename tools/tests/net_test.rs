@@ -147,18 +147,9 @@ fn time_millis(packed: i64) -> i64 {
 
 #[test]
 fn a_client_address_without_a_listener_runs_and_prints_the_statistics() {
-    let outcome = run(&[
-        "p",
-        "127.0.0.1:1",
-        "-S",
-        "100",
-        "-r",
-        "*/5k",
-        "-s",
-        "1s",
-        "--duration",
-        "3s",
-    ]);
+    // A free loopback port: nothing listens on it, so the connection count stays 0.
+    let address = format!("127.0.0.1:{}", free_port());
+    let outcome = run(&["p", &address, "-S", "100", "-r", "*/5k", "-s", "1s", "--duration", "2s"]);
     assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
     assert!(
         Regex::new(SUMMARY_LINE_REGEX).unwrap().is_match(&outcome.stdout),
@@ -508,7 +499,9 @@ fn sigint_ends_the_run() {
     }
     let port = free_port();
     let address = format!(":{port}");
-    let tool = Tool::start(&["p", &address, "-S", "100", "-r", "*/5k", "-s", "1m"]);
+    let directory = TempDir::new("sigint");
+    let file = directory.file("summary.json");
+    let tool = Tool::start(&["p", &address, "-S", "100", "-r", "*/5k", "-s", "1m", "--summary", &file]);
     // The port accepts once the tool listens, after it has installed the Ctrl+C handler; then the run lasts
     // well over the second that the last block needs.
     let deadline = Instant::now() + Duration::from_secs(30);
@@ -533,6 +526,10 @@ fn sigint_ends_the_run() {
             .is_match(summaries[summaries.len() - 1]),
         "{outcome:#?}"
     );
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "stopped_by_signal", "{summary}");
+    assert_eq!(summary["exit_code"], 0);
+    assert!(summary["records"].as_i64().unwrap() > 0, "{summary}");
 }
 
 /// Waits until something accepts connections on the loopback port.
@@ -668,7 +665,8 @@ fn a_producer_writes_the_summary_file() {
         .iter()
         .map(|interval| interval["records"].as_i64().unwrap())
         .sum();
-    assert!(records > 0, "{summary}");
+    // 3 s at 5k per second: at least one second's worth, and not above the schedule plus a generous catch-up.
+    assert!((5_000..=20_000).contains(&records), "{summary}");
     assert_eq!(summary["records"], records);
     assert_eq!(summary["publish_call"]["events"], records);
     assert!(summary["publish_call"]["calls"].as_i64().unwrap() > 0, "{summary}");
@@ -810,6 +808,165 @@ fn a_consumer_without_records_writes_a_no_data_summary() {
     assert_eq!(summary["symbols_seen"], 0);
     assert_eq!(summary["publish_call"], serde_json::Value::Null);
     assert_eq!(summary["connectors"].as_array().unwrap().len(), 1, "{summary}");
+}
+
+/// The e2e lag block of a consumer summary: the count and the mean in nanoseconds.
+fn lag_of(summary: &serde_json::Value) -> (i64, i64) {
+    let lag = &summary["e2e_lag"];
+    (lag["count"].as_i64().unwrap(), lag["mean_ns"].as_i64().unwrap())
+}
+
+#[test]
+fn two_consumer_instances_see_every_symbol_of_a_publisher_process() {
+    let port = free_port();
+    let address = format!(":{port}");
+    let publisher = Tool::start(&[
+        "p",
+        &address,
+        "-S",
+        "100",
+        "-r",
+        "*/2k",
+        "-s",
+        "1s",
+        "--duration",
+        "12s",
+    ]);
+    wait_for_port(port);
+    let directory = TempDir::new("pair-consumer");
+    let file = directory.file("summary.json");
+    let client = format!("127.0.0.1:{port}");
+    let consumer = run(&[
+        "c",
+        &client,
+        "-S",
+        "100",
+        "-C",
+        "2",
+        "-s",
+        "1s",
+        "--duration",
+        "5s",
+        "--summary",
+        &file,
+    ]);
+    let publisher = publisher.finish();
+    assert_eq!(publisher.code(), Some(0), "{publisher:#?}");
+    assert_eq!(consumer.code(), Some(0), "{consumer:#?}");
+    let both_connected = Regex::new(
+        "[{][*]NetTestConsumerSide-NetTest[*][}] data [1-9][0-9,]* rps, lag -?[0-9,]+ us, instances 2, connections 2",
+    )
+    .unwrap();
+    assert!(both_connected.is_match(&consumer.stdout), "{consumer:#?}");
+    assert!(consumer.stdout.contains("\n    NetTest.2 data "), "{consumer:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "ok", "{summary}");
+    assert_eq!(summary["symbols_seen"], 100, "{summary}");
+    assert_eq!(summary["connectors"].as_array().unwrap().len(), 2, "{summary}");
+    let (count, mean) = lag_of(&summary);
+    assert!(count > 0, "{summary}");
+    // Positive (the lag has the nanosecond part) and well below a second on loopback.
+    assert!((1..1_000_000_000).contains(&mean), "{summary}");
+    let intervals = summary["intervals"].as_array().unwrap();
+    let records: i64 = intervals
+        .iter()
+        .map(|interval| interval["records"].as_i64().unwrap())
+        .sum();
+    assert_eq!(summary["records"], records, "{summary}");
+}
+
+#[test]
+fn the_limiter_waits_ahead_so_a_batch_is_not_published_late() {
+    // Spec test 7: with 50 events per call at 1k per second a batch is due every 50 ms; a limiter that sleeps after
+    // the call would stamp events up to a batch late. The bound is the spec's 50 ms for the mean, 10 times the lag
+    // that loopback shows.
+    let port = free_port();
+    let address = format!(":{port}");
+    let publisher = Tool::start(&[
+        "p",
+        &address,
+        "-S",
+        "100",
+        "-r",
+        "*/1k",
+        "--batch",
+        "50",
+        "-s",
+        "1s",
+        "--duration",
+        "12s",
+    ]);
+    wait_for_port(port);
+    let directory = TempDir::new("pair-batch");
+    let file = directory.file("summary.json");
+    let client = format!("127.0.0.1:{port}");
+    let consumer = run(&[
+        "c",
+        &client,
+        "-S",
+        "100",
+        "-s",
+        "1s",
+        "--warmup",
+        "1s",
+        "--duration",
+        "5s",
+        "--summary",
+        &file,
+    ]);
+    let publisher = publisher.finish();
+    assert_eq!(publisher.code(), Some(0), "{publisher:#?}");
+    assert_eq!(consumer.code(), Some(0), "{consumer:#?}");
+    let (count, mean) = lag_of(&read_summary(&file));
+    assert!(count > 100, "{consumer:#?}");
+    assert!((1..50_000_000).contains(&mean), "mean lag {mean} ns\n{consumer:#?}");
+}
+
+#[test]
+fn a_consumer_that_finds_no_nanosecond_part_ends_with_nano_missing() {
+    let port = free_port();
+    let address = format!(":{port}");
+    let publisher = Tool::start(&[
+        "p",
+        &address,
+        "-S",
+        "100",
+        "-r",
+        "*/2k",
+        "-s",
+        "1s",
+        "--duration",
+        "10s",
+        "-Ddxscheme.nanoTime=false",
+    ]);
+    wait_for_port(port);
+    let directory = TempDir::new("pair-nano");
+    let file = directory.file("summary.json");
+    let client = format!("127.0.0.1:{port}");
+    let consumer = run(&[
+        "c",
+        &client,
+        "-S",
+        "100",
+        "-s",
+        "1s",
+        "--duration",
+        "60s",
+        "--summary",
+        &file,
+    ]);
+    let publisher = publisher.finish();
+    assert_eq!(publisher.code(), Some(0), "{publisher:#?}");
+    assert_eq!(consumer.code(), Some(1), "{consumer:#?}");
+    assert!(
+        consumer
+            .stderr
+            .contains("NetTest: nano_missing: the first 1000 events have the nanosecond part 0"),
+        "{consumer:#?}"
+    );
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "nano_missing", "{summary}");
+    assert_eq!(summary["exit_code"], 1);
 }
 
 /// The answer of the metrics server to a request, read until it closes the connection.
