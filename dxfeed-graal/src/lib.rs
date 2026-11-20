@@ -176,6 +176,11 @@
 //! trace and causes; invalid arguments, such as strings with NUL bytes, are rejected before any SDK call. A wait that
 //! times out returns [`Error::Timeout`].
 //!
+//! A method that calls the SDK returns [`Result`], getters included, since any call into Java may throw; one that only
+//! reads the state that the crate keeps, such as [`AnyOf::is_done`] or a field of an event, returns its value.
+//! Instants are `i64` milliseconds since the Unix epoch, as in Java; spans of time are
+//! [`Duration`](std::time::Duration)s, and the periods that Java gives as `TimePeriod` are [`TimePeriod`]s.
+//!
 //! # Closing and exit
 //!
 //! Close an endpoint with [`DXEndpoint::close_and_await_termination`], which waits for the notifications already

@@ -20,6 +20,9 @@ use crate::isolate::call;
 /// [`read_from_file_with_token`](Self::read_from_file_with_token). [`read_from_bytes`](Self::read_from_bytes) reads
 /// data that is already in memory.
 ///
+/// As in Java, a reader keeps the last modification time and the completeness of its last read: reads on several
+/// threads at once report those of either, so give each thread a reader of its own.
+///
 /// ```no_run
 /// use dxfeed_graal::ipf::InstrumentProfileReader;
 ///
