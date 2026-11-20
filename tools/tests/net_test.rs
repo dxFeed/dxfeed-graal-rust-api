@@ -195,14 +195,18 @@ fn an_unknown_flag_is_a_bad_command_line() {
     assert!(
         outcome
             .stderr
-            .starts_with("NetTest: unknown flag --no-such-flag\n\nUsage: Tools NetTest p <address> -S <symbols>"),
+            .starts_with("NetTest: unknown flag --no-such-flag\n\nUsage: Tools NetTest p|c <address> -S <symbols>"),
         "{outcome:#?}"
     );
     assert!(outcome.stdout.is_empty(), "{outcome:#?}");
+    assert!(outcome.stderr.ends_with("\nspec_version nettest/1\n"), "{outcome:#?}");
 
     let legacy = run(&["p", "127.0.0.1:1", "-S", "1", "--legacy"]);
     assert_eq!(legacy.code(), Some(2), "{legacy:#?}");
-    assert!(legacy.stderr.contains("--legacy"), "{legacy:#?}");
+    assert!(
+        legacy.stderr.starts_with("NetTest: unsupported option: --legacy"),
+        "{legacy:#?}"
+    );
 }
 
 #[test]
@@ -212,9 +216,35 @@ fn no_arguments_print_the_usage() {
     assert!(
         outcome
             .stdout
-            .starts_with("Usage: Tools NetTest p <address> -S <symbols> [options]\n\n"),
+            .starts_with("Usage: Tools NetTest p|c <address> -S <symbols> [options]\n\n"),
         "{outcome:#?}"
     );
+    assert!(outcome.stdout.ends_with("\nspec_version nettest/1\n"), "{outcome:#?}");
+    assert_eq!(outcome.stderr, "", "{outcome:#?}");
+}
+
+#[test]
+fn help_prints_the_usage_to_stdout_and_exits_with_zero() {
+    for args in [
+        &["--help"][..],
+        &["p", "127.0.0.1:1", "-S", "10", "--help"],
+        &["c", "--help"],
+    ] {
+        let outcome = run(args);
+        assert_eq!(outcome.code(), Some(0), "{args:?} {outcome:#?}");
+        assert!(
+            outcome
+                .stdout
+                .starts_with("Usage: Tools NetTest p|c <address> -S <symbols> [options]\n\n"),
+            "{outcome:#?}"
+        );
+        assert_eq!(
+            outcome.stdout.lines().last(),
+            Some("spec_version nettest/1"),
+            "{outcome:#?}"
+        );
+        assert_eq!(outcome.stderr, "", "{outcome:#?}");
+    }
 }
 
 #[test]

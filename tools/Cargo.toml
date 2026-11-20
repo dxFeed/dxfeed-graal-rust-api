@@ -15,9 +15,12 @@ path = "src/main.rs"
 [dependencies]
 ctrlc = { version = "3.5.2", features = ["termination"] }
 dxfeed-graal = { path = "../dxfeed-graal" }
+# Not used in the code: a direct dependency is what hands the SDK location to build.rs (the kit of the NetTest tests).
+dxfeed-graal-sys = { version = "0.4.0", path = "../dxfeed-graal-sys" }
 
 [dev-dependencies]
 regex = { version = "1.13", default-features = false, features = ["std"] }
+serde_json = "1.0.140"
 
 [build-dependencies]
 dxfeed-graal-build = { path = "../dxfeed-graal-build" }

@@ -6,7 +6,7 @@ use std::time::SystemTime;
 use dxfeed_graal::Event;
 use dxfeed_graal::event::{TimeAndSale, Trade};
 
-use super::options::EventKind;
+use super::cli::EventKind;
 use super::symbols::Symbols;
 
 const NANOS_PER_SECOND: i64 = 1_000_000_000;
