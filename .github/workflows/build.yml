@@ -4,7 +4,8 @@
 name: CI
 
 # The same checks as the local gates (HOW_TO_DEVELOP.md): fmt and rustdoc once, clippy, the tests and the deployment
-# check on every platform of the SDK, and a check on the minimum supported Rust version.
+# check on every platform of the SDK, a check on the minimum supported Rust version, and a check of the public API
+# against the latest release (cargo-semver-checks).
 on:
   pull_request:
   push:
@@ -129,3 +130,36 @@ jobs:
 
       - name: check, all features
         run: cargo +${{ env.MSRV }} check --locked --workspace --all-targets --all-features
+
+  semver:
+    name: SemVer
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      SEMVER_CHECKS_VERSION: 0.51.0
+      # The API needs no SDK: the build scripts link nothing, as on docs.rs.
+      DOCS_RS: 1
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The release tags, for the baseline.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+
+      - name: Restore cargo-semver-checks
+        id: semver-checks
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-semver-checks
+          key: cargo-semver-checks-${{ env.SEMVER_CHECKS_VERSION }}-${{ runner.os }}-${{ runner.arch }}
+
+      - name: Install cargo-semver-checks
+        if: steps.semver-checks.outputs.cache-hit != 'true'
+        run: cargo install --locked "cargo-semver-checks@$SEMVER_CHECKS_VERSION"
+
+      # The public API of dxfeed-graal and dxfeed-graal-build against the latest release, without the features outside
+      # SemVer (experimental): a breaking change needs a new major version (README, Stability). While the version is
+      # that of the release, the change is checked as a minor one, or before 1.0.0 as a patch, so that any breaking
+      # change shows; a bumped version is checked as what it is. Before 1.0.0 a breaking change is a warning only.
+      - name: cargo semver-checks
+        run: .github/scripts/semver-checks.sh
