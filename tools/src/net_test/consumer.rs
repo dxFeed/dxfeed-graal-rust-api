@@ -931,6 +931,16 @@ mod tests {
 
     /// Runs the consumer of the tool with the arguments against a publisher with the property value.
     fn run_against_publisher(publisher_nano_time: &str, extra: &[&str]) -> (ConsumerOutcome, Duration) {
+        let (outcome, elapsed, _) = run_against_publisher_live(publisher_nano_time, extra);
+        (outcome, elapsed)
+    }
+
+    /// Like [`run_against_publisher`], and the live counters of the run: the endpoints are closed by then, so no
+    /// listener runs and the counters are settled.
+    fn run_against_publisher_live(
+        publisher_nano_time: &str,
+        extra: &[&str],
+    ) -> (ConsumerOutcome, Duration, LiveMetrics) {
         let port = free_port();
         let address = format!("127.0.0.1:{port}");
         let mut args = vec!["c", &address, "-S", "5", "-s", "1s"];
@@ -940,32 +950,41 @@ mod tests {
         let _publisher = TestPublisher::start(port, publisher_nano_time, symbols.to_vec());
         let stop = Arc::new(Stop::default());
         let started = Instant::now();
+        let live = LiveMetrics::for_run(&options, None);
         let outcome = run_consumer(
             &options,
             &symbols,
             &stop,
             &AtomicBool::new(false),
             WatchdogTimeouts::default(),
-            &LiveMetrics::for_run(&options, None),
+            &live,
         );
-        (outcome, started.elapsed())
+        (outcome, started.elapsed(), live)
     }
 
     #[test]
     fn a_publisher_with_the_builder_property_feeds_two_consumer_instances() {
-        let (outcome, _) = run_against_publisher("true", &["-C", "2", "--duration", "4s"]);
+        let (outcome, _, live) = run_against_publisher_live("true", &["-C", "2", "--duration", "4s"]);
         assert_eq!(outcome.status, Status::Ok, "{outcome:?}");
         assert_eq!(outcome.error, None);
         // The two slices together hold the five symbols, and every one of them came.
         assert_eq!(outcome.symbols_seen, 5, "{outcome:?}");
         let records: i64 = outcome.reporter.intervals.iter().map(|interval| interval.records).sum();
         assert!(records > 0, "{outcome:?}");
-        // Every record gives a lag. As in the C tool, the reporter reads the record counters and then takes the lags,
-        // while the listeners still run, so the last interval may hold a few lags more or less than records.
+        // Every record gives a lag: once the listeners have stopped, the two totals are equal.
+        let delivered: i64 = live
+            .records
+            .iter()
+            .map(|counters| counters.records.load(Ordering::Relaxed))
+            .sum();
+        assert_eq!(live.lags.count.load(Ordering::Relaxed), delivered);
+        // The reporter reads the record counters, then takes the lags, while the listeners still run, so the report
+        // holds the lags of every record it counts, and of no record that the listeners did not deliver. How many lags
+        // it holds beyond its records depends on the scheduling: a stalled listener call is a whole batch.
         let lags = outcome.reporter.e2e.stats.count;
         assert!(
-            (lags - records).abs() * 100 <= records,
-            "{lags} lags, {records} records"
+            (records..=delivered).contains(&lags),
+            "{lags} lags, {records} records, {delivered} delivered"
         );
     }
 
