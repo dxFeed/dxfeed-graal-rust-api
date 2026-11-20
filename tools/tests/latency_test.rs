@@ -25,12 +25,13 @@ fn write_tape(name: &str) -> TempFile {
     let events: Vec<Event> = (0..20)
         .map(|i| {
             let (symbol, exchange) = if i % 2 == 0 { ("TEST1", 'Q') } else { ("TEST2", 'N') };
-            Quote {
-                bid_time: 1_000_000,
-                bid_exchange_code: exchange,
-                bid_price: f64::from(i),
-                ask_exchange_code: exchange,
-                ..Quote::new(symbol)
+            {
+                let mut e = Quote::new(symbol);
+                e.bid_time = 1_000_000;
+                e.bid_exchange_code = exchange;
+                e.bid_price = f64::from(i);
+                e.ask_exchange_code = exchange;
+                e
             }
             .into()
         })

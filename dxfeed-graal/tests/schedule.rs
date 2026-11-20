@@ -227,12 +227,10 @@ fn the_defaults_give_the_venues_and_holidays_of_profiles() {
     );
     Schedule::set_defaults(defaults.as_bytes()).unwrap();
 
-    let profile = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "TEST".into(),
-        trading_hours: "RustVenue()".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut profile = InstrumentProfile::new();
+    profile.instrument_type = "STOCK".into();
+    profile.symbol = "TEST".into();
+    profile.trading_hours = "RustVenue()".into();
     assert_eq!(Schedule::get_trading_venues(&profile).unwrap(), ["RustVenue"]);
     let schedule = Schedule::get_instance(&profile).unwrap();
     assert_eq!(schedule.get_name().unwrap(), "Rust Venue");

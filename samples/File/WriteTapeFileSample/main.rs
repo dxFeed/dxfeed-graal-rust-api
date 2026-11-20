@@ -19,16 +19,12 @@ fn main() -> dxfeed_graal::Result<()> {
     let pubr = endpoint.get_publisher();
 
     // Creates new Quote market events.
-    let quote1 = Quote {
-        bid_price: 10.1,
-        ask_price: 10.2,
-        ..Quote::new("TEST1")
-    };
-    let quote2 = Quote {
-        bid_price: 17.1,
-        ask_price: 17.2,
-        ..Quote::new("TEST2")
-    };
+    let mut quote1 = Quote::new("TEST1");
+    quote1.bid_price = 10.1;
+    quote1.ask_price = 10.2;
+    let mut quote2 = Quote::new("TEST2");
+    quote2.bid_price = 17.1;
+    quote2.ask_price = 17.2;
 
     // Publish events.
     pubr.publish_events(&[Event::Quote(quote1), Event::Quote(quote2)])?;

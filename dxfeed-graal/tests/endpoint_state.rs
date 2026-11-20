@@ -128,15 +128,17 @@ fn a_tape_file_written_by_a_publisher_is_read_back() {
     let file = temp_file("quotes.txt");
     let _ = std::fs::remove_file(&file);
     let sent = [
-        Quote {
-            bid_price: 10.1,
-            ask_price: 10.2,
-            ..Quote::new("TEST1")
+        {
+            let mut e = Quote::new("TEST1");
+            e.bid_price = 10.1;
+            e.ask_price = 10.2;
+            e
         },
-        Quote {
-            bid_price: 17.1,
-            ask_price: 17.2,
-            ..Quote::new("TEST2")
+        {
+            let mut e = Quote::new("TEST2");
+            e.bid_price = 17.1;
+            e.ask_price = 17.2;
+            e
         },
     ];
 

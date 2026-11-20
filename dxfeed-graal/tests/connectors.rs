@@ -168,10 +168,8 @@ fn the_io_statistics_count_the_data_the_subscription_and_the_round_trips() {
     let mut price = 0.0;
     wait_until("data records with a round-trip time", || {
         price += 1.0;
-        let quote = Quote {
-            bid_price: price,
-            ..Quote::new("IO_STATS")
-        };
+        let mut quote = Quote::new("IO_STATS");
+        quote.bid_price = price;
         publisher.get_publisher().publish_events(&[quote.into()]).unwrap();
         std::thread::sleep(Duration::from_millis(10));
         let stats = connector.get_io_statistics().unwrap();

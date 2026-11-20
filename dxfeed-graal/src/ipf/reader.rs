@@ -186,3 +186,9 @@ unsafe fn profiles(list: *const sys::dxfg_v4_instrument_profile_data_list) -> Re
         .map(|&data| unsafe { InstrumentProfile::from_sys(data) })
         .collect()
 }
+
+impl std::fmt::Debug for InstrumentProfileReader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstrumentProfileReader").finish_non_exhaustive()
+    }
+}

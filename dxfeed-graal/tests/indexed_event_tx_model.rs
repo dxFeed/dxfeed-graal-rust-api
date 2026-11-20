@@ -16,13 +16,11 @@ type Call = (Vec<i64>, bool);
 
 /// An order of the NTV book with the index and the flags.
 fn order(index: i64, flags: EventFlags) -> Order {
-    let mut order = Order {
-        index,
-        price: 100.0 + index as f64,
-        size: 10.0,
-        event_flags: flags,
-        ..Order::new("EVENT")
-    };
+    let mut order = Order::new("EVENT");
+    order.index = index;
+    order.price = 100.0 + index as f64;
+    order.size = 10.0;
+    order.event_flags = flags;
     order.set_source(OrderSource::NTV).unwrap();
     order.set_order_side(Side::Buy);
     order

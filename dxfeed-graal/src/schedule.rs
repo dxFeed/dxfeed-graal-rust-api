@@ -34,6 +34,7 @@ use crate::time_zone::TimeZone;
 
 /// The type of a session (`SessionType`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SessionType {
     /// No trading: the time before, between or after the trading sessions, or a non-trading day.
     NoTrading,
@@ -87,6 +88,7 @@ impl fmt::Display for SessionType {
 
 /// A predefined filter of days for the searches of [`Day`] (`DayFilter`); [`CustomDayFilter`] makes others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum DayFilter {
     /// Any day (`DayFilter.ANY`).
     Any,
@@ -175,6 +177,7 @@ impl fmt::Display for DayFilter {
 /// A predefined filter of sessions for the searches of [`Day`], [`Session`] and [`Schedule`] (`SessionFilter`);
 /// [`CustomSessionFilter`] makes others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum SessionFilter {
     /// Any session (`SessionFilter.ANY`).
     Any,
@@ -946,6 +949,15 @@ mod private {
     pub enum FilterHandle<'a, T: SdkHandle + 'static> {
         Made(Handle<T>),
         Kept(&'a Handle<T>),
+    }
+
+    impl<T: SdkHandle + 'static> std::fmt::Debug for FilterHandle<'_, T> {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str(match self {
+                FilterHandle::Made(_) => "FilterHandle::Made",
+                FilterHandle::Kept(_) => "FilterHandle::Kept",
+            })
+        }
     }
 
     impl<T: SdkHandle + 'static> FilterHandle<'_, T> {

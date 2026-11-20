@@ -255,3 +255,9 @@ pub(crate) unsafe fn collect(iterator: *mut sys::dxfg_v4_iterable_ip_t) -> Resul
         profiles.push(profile?);
     }
 }
+
+impl std::fmt::Debug for InstrumentProfileCollector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("InstrumentProfileCollector").finish_non_exhaustive()
+    }
+}

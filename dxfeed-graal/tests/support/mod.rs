@@ -275,107 +275,105 @@ where
 
 /// A quote with a distinct non-zero value in every field.
 pub fn quote(symbol: &str) -> Quote {
-    Quote {
-        event_time: 1_700_000_000_500,
-        time_millis_sequence: (123 << 22) | 7,
-        time_nano_part: 456,
-        bid_time: 1_700_000_000_000,
-        bid_exchange_code: 'Q',
-        bid_price: 189.5,
-        bid_size: 100.0,
-        ask_time: 1_700_000_001_000, // Whole seconds: the SDK truncates the time to seconds.
-        ask_exchange_code: 'N',
-        ask_price: 189.75,
-        ask_size: 200.0,
-        ..Quote::new(symbol)
-    }
+    let mut e = Quote::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.time_millis_sequence = (123 << 22) | 7;
+    e.time_nano_part = 456;
+    e.bid_time = 1_700_000_000_000;
+    e.bid_exchange_code = 'Q';
+    e.bid_price = 189.5;
+    e.bid_size = 100.0;
+    e.ask_time = 1_700_000_001_000;
+    e.ask_exchange_code = 'N';
+    e.ask_price = 189.75;
+    e.ask_size = 200.0;
+    e
 }
 
 /// A trade with a distinct non-zero value in every field.
 pub fn trade(symbol: &str) -> Trade {
-    Trade {
-        event_time: 1_700_000_000_500,
-        time_sequence: (1_700_000_000_000 << 22) | 9,
-        time_nano_part: 321,
-        exchange_code: 'Q',
-        price: 190.25,
-        change: 0.5,
-        size: 300.0,
-        day_id: 19_675,
-        day_volume: 1_000_000.0,
-        day_turnover: 190_000_000.0,
-        flags: 4,
-        trade_id: 42,
-        ..Trade::new(symbol)
-    }
+    let mut e = Trade::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.time_sequence = (1_700_000_000_000 << 22) | 9;
+    e.time_nano_part = 321;
+    e.exchange_code = 'Q';
+    e.price = 190.25;
+    e.change = 0.5;
+    e.size = 300.0;
+    e.day_id = 19_675;
+    e.day_volume = 1_000_000.0;
+    e.day_turnover = 190_000_000.0;
+    e.flags = 4;
+    e.trade_id = 42;
+    e
 }
 
 /// A trade in extended trading hours with the values of [`trade`].
 pub fn trade_eth(symbol: &str) -> TradeETH {
     let t = trade(symbol);
-    TradeETH {
-        event_time: t.event_time,
-        time_sequence: t.time_sequence,
-        time_nano_part: t.time_nano_part,
-        exchange_code: t.exchange_code,
-        price: t.price,
-        change: t.change,
-        size: t.size,
-        day_id: t.day_id,
-        day_volume: t.day_volume,
-        day_turnover: t.day_turnover,
-        flags: t.flags | 1,
-        trade_id: t.trade_id,
-        ..TradeETH::new(symbol)
+    {
+        let mut e = TradeETH::new(symbol);
+        e.event_time = t.event_time;
+        e.time_sequence = t.time_sequence;
+        e.time_nano_part = t.time_nano_part;
+        e.exchange_code = t.exchange_code;
+        e.price = t.price;
+        e.change = t.change;
+        e.size = t.size;
+        e.day_id = t.day_id;
+        e.day_volume = t.day_volume;
+        e.day_turnover = t.day_turnover;
+        e.flags = t.flags | 1;
+        e.trade_id = t.trade_id;
+        e
     }
 }
 
 /// A Nuam trade with the values of [`trade`] and distinct non-zero statistics.
 pub fn nuam_trade(symbol: &str) -> NuamTrade {
     let t = trade(symbol);
-    NuamTrade {
-        event_time: t.event_time,
-        time_sequence: t.time_sequence,
-        time_nano_part: t.time_nano_part,
-        exchange_code: t.exchange_code,
-        price: t.price,
-        change: t.change,
-        size: t.size,
-        day_id: t.day_id,
-        day_volume: t.day_volume,
-        day_turnover: t.day_turnover,
-        flags: t.flags,
-        trade_id: t.trade_id,
-        trade_stat_time: 1_700_000_002_000,
-        last_significant_price: 190.5,
-        last_price_for_all: 190.75,
-        number_of_trades: 12_345,
-        vwap: 190.125,
-        ..NuamTrade::new(symbol)
+    {
+        let mut e = NuamTrade::new(symbol);
+        e.event_time = t.event_time;
+        e.time_sequence = t.time_sequence;
+        e.time_nano_part = t.time_nano_part;
+        e.exchange_code = t.exchange_code;
+        e.price = t.price;
+        e.change = t.change;
+        e.size = t.size;
+        e.day_id = t.day_id;
+        e.day_volume = t.day_volume;
+        e.day_turnover = t.day_turnover;
+        e.flags = t.flags;
+        e.trade_id = t.trade_id;
+        e.trade_stat_time = 1_700_000_002_000;
+        e.last_significant_price = 190.5;
+        e.last_price_for_all = 190.75;
+        e.number_of_trades = 12_345;
+        e.vwap = 190.125;
+        e
     }
 }
 
 /// A profile with a distinct non-zero value in every field.
 pub fn profile(symbol: &str) -> Profile {
-    let mut profile = Profile {
-        event_time: 1_700_000_000_500,
-        description: Some("Apple Inc.".to_owned()),
-        status_reason: Some("news".to_owned()),
-        halt_start_time: 1_700_000_000_000,
-        halt_end_time: 1_700_000_100_000,
-        high_limit_price: 200.0,
-        low_limit_price: 150.0,
-        high_52_week_price: 199.5,
-        low_52_week_price: 120.25,
-        beta: 1.25,
-        earnings_per_share: 6.5,
-        dividend_frequency: 4.0,
-        ex_dividend_amount: 0.24,
-        ex_dividend_day_id: 19_600,
-        shares: 15_500_000_000.0,
-        free_float: 15_400_000_000.0,
-        ..Profile::new(symbol)
-    };
+    let mut profile = Profile::new(symbol);
+    profile.event_time = 1_700_000_000_500;
+    profile.description = Some("Apple Inc.".to_owned());
+    profile.status_reason = Some("news".to_owned());
+    profile.halt_start_time = 1_700_000_000_000;
+    profile.halt_end_time = 1_700_000_100_000;
+    profile.high_limit_price = 200.0;
+    profile.low_limit_price = 150.0;
+    profile.high_52_week_price = 199.5;
+    profile.low_52_week_price = 120.25;
+    profile.beta = 1.25;
+    profile.earnings_per_share = 6.5;
+    profile.dividend_frequency = 4.0;
+    profile.ex_dividend_amount = 0.24;
+    profile.ex_dividend_day_id = 19_600;
+    profile.shares = 15_500_000_000.0;
+    profile.free_float = 15_400_000_000.0;
     profile.set_short_sale_restriction(ShortSaleRestriction::Active);
     profile.set_trading_status(TradingStatus::Halted);
     profile
@@ -383,19 +381,17 @@ pub fn profile(symbol: &str) -> Profile {
 
 /// A summary with a distinct non-zero value in every field.
 pub fn summary(symbol: &str) -> Summary {
-    let mut summary = Summary {
-        event_time: 1_700_000_000_500,
-        day_id: 19_675,
-        day_open_price: 189.0,
-        day_high_price: 191.5,
-        day_low_price: 188.25,
-        day_close_price: 190.0,
-        prev_day_id: 19_674,
-        prev_day_close_price: 188.5,
-        prev_day_volume: 55_000_000.0,
-        open_interest: 1234,
-        ..Summary::new(symbol)
-    };
+    let mut summary = Summary::new(symbol);
+    summary.event_time = 1_700_000_000_500;
+    summary.day_id = 19_675;
+    summary.day_open_price = 189.0;
+    summary.day_high_price = 191.5;
+    summary.day_low_price = 188.25;
+    summary.day_close_price = 190.0;
+    summary.prev_day_id = 19_674;
+    summary.prev_day_close_price = 188.5;
+    summary.prev_day_volume = 55_000_000.0;
+    summary.open_interest = 1234;
     summary.set_day_close_price_type(PriceType::Final);
     summary.set_prev_day_close_price_type(PriceType::Preliminary);
     summary
@@ -406,85 +402,79 @@ const INDEX: i64 = (1_700_000_000 << 32) | 5;
 
 /// Greeks with a distinct non-zero value in every field but the event flags.
 pub fn greeks(symbol: &str) -> Greeks {
-    Greeks {
-        event_time: 1_700_000_000_500,
-        index: INDEX,
-        price: 12.5,
-        volatility: 0.3,
-        delta: 0.55,
-        gamma: 0.02,
-        theta: -0.05,
-        rho: 0.1,
-        vega: 0.2,
-        ..Greeks::new(symbol)
-    }
+    let mut e = Greeks::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.index = INDEX;
+    e.price = 12.5;
+    e.volatility = 0.3;
+    e.delta = 0.55;
+    e.gamma = 0.02;
+    e.theta = -0.05;
+    e.rho = 0.1;
+    e.vega = 0.2;
+    e
 }
 
 /// An underlying with a distinct non-zero value in every field but the event flags.
 pub fn underlying(symbol: &str) -> Underlying {
-    Underlying {
-        event_time: 1_700_000_000_500,
-        index: INDEX,
-        volatility: 0.25,
-        front_volatility: 0.24,
-        back_volatility: 0.26,
-        call_volume: 1000.0,
-        put_volume: 800.0,
-        put_call_ratio: 0.8,
-        ..Underlying::new(symbol)
-    }
+    let mut e = Underlying::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.index = INDEX;
+    e.volatility = 0.25;
+    e.front_volatility = 0.24;
+    e.back_volatility = 0.26;
+    e.call_volume = 1000.0;
+    e.put_volume = 800.0;
+    e.put_call_ratio = 0.8;
+    e
 }
 
 /// A theoretical price with a distinct non-zero value in every field but the event flags.
 pub fn theo_price(symbol: &str) -> TheoPrice {
-    TheoPrice {
-        event_time: 1_700_000_000_500,
-        index: INDEX,
-        price: 12.4,
-        underlying_price: 190.0,
-        delta: 0.56,
-        gamma: 0.03,
-        dividend: 0.01,
-        interest: 0.05,
-        ..TheoPrice::new(symbol)
-    }
+    let mut e = TheoPrice::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.index = INDEX;
+    e.price = 12.4;
+    e.underlying_price = 190.0;
+    e.delta = 0.56;
+    e.gamma = 0.03;
+    e.dividend = 0.01;
+    e.interest = 0.05;
+    e
 }
 
 /// A series with a distinct non-zero value in every field but the event flags.
 pub fn series(symbol: &str) -> Series {
-    Series {
-        event_time: 1_700_000_000_500,
-        index: 17,
-        time_sequence: INDEX,
-        expiration: 19_700,
-        volatility: 0.27,
-        call_volume: 1100.0,
-        put_volume: 900.0,
-        put_call_ratio: 0.81,
-        forward_price: 190.5,
-        dividend: 0.02,
-        interest: 0.04,
-        ..Series::new(symbol)
-    }
+    let mut e = Series::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.index = 17;
+    e.time_sequence = INDEX;
+    e.expiration = 19_700;
+    e.volatility = 0.27;
+    e.call_volume = 1100.0;
+    e.put_volume = 900.0;
+    e.put_call_ratio = 0.81;
+    e.forward_price = 190.5;
+    e.dividend = 0.02;
+    e.interest = 0.04;
+    e
 }
 
 /// A time and sale with a distinct non-zero value in every field but the event flags.
 pub fn time_and_sale(symbol: &str) -> TimeAndSale {
-    let mut sale = TimeAndSale {
-        event_time: 1_700_000_000_500,
-        index: INDEX,
-        time_nano_part: 7,
-        exchange_code: 'Q',
-        price: 190.5,
-        size: 300.0,
-        bid_price: 190.25,
-        ask_price: 190.75,
-        exchange_sale_conditions: Some("F01".to_owned()),
-        buyer: Some("buyer_1".to_owned()),
-        seller: Some("seller_1".to_owned()),
-        trade_id: 4242,
-        ..TimeAndSale::new(symbol)
-    };
+    let mut sale = TimeAndSale::new(symbol);
+    sale.event_time = 1_700_000_000_500;
+    sale.index = INDEX;
+    sale.time_nano_part = 7;
+    sale.exchange_code = 'Q';
+    sale.price = 190.5;
+    sale.size = 300.0;
+    sale.bid_price = 190.25;
+    sale.ask_price = 190.75;
+    sale.exchange_sale_conditions = Some("F01".to_owned());
+    sale.buyer = Some("buyer_1".to_owned());
+    sale.seller = Some("seller_1".to_owned());
+    sale.trade_id = 4242;
     sale.set_trade_through_exempt('X').unwrap();
     sale.set_aggressor_side(Side::Buy);
     sale.set_valid_tick(true);
@@ -495,44 +485,43 @@ pub fn time_and_sale(symbol: &str) -> TimeAndSale {
 /// A Nuam time and sale with a distinct non-zero value in every field but the event flags.
 pub fn nuam_time_and_sale(symbol: &str) -> NuamTimeAndSale {
     let sale = time_and_sale(symbol);
-    NuamTimeAndSale {
-        event_time: sale.event_time,
-        index: sale.index,
-        time_nano_part: sale.time_nano_part,
-        exchange_code: sale.exchange_code,
-        price: sale.price,
-        size: sale.size,
-        bid_price: sale.bid_price,
-        ask_price: sale.ask_price,
-        exchange_sale_conditions: sale.exchange_sale_conditions,
-        flags: sale.flags,
-        trade_id: sale.trade_id,
-        buyer: sale.buyer,
-        seller: sale.seller,
-        match_id: 99,
-        ..NuamTimeAndSale::new(symbol)
+    {
+        let mut e = NuamTimeAndSale::new(symbol);
+        e.event_time = sale.event_time;
+        e.index = sale.index;
+        e.time_nano_part = sale.time_nano_part;
+        e.exchange_code = sale.exchange_code;
+        e.price = sale.price;
+        e.size = sale.size;
+        e.bid_price = sale.bid_price;
+        e.ask_price = sale.ask_price;
+        e.exchange_sale_conditions = sale.exchange_sale_conditions;
+        e.flags = sale.flags;
+        e.trade_id = sale.trade_id;
+        e.buyer = sale.buyer;
+        e.seller = sale.seller;
+        e.match_id = 99;
+        e
     }
 }
 
 /// An option sale with a distinct non-zero value in every field but the event flags.
 pub fn option_sale(symbol: &str) -> OptionSale {
-    let mut sale = OptionSale {
-        event_time: 1_700_000_000_500,
-        index: 17,
-        time_sequence: INDEX,
-        time_nano_part: 7,
-        exchange_code: 'C',
-        price: 2.5,
-        size: 10.0,
-        bid_price: 2.45,
-        ask_price: 2.55,
-        exchange_sale_conditions: Some("F02".to_owned()),
-        underlying_price: 190.0,
-        volatility: 0.3,
-        delta: 0.45,
-        option_symbol: Some(".AAPL250117C150".to_owned()),
-        ..OptionSale::new(symbol)
-    };
+    let mut sale = OptionSale::new(symbol);
+    sale.event_time = 1_700_000_000_500;
+    sale.index = 17;
+    sale.time_sequence = INDEX;
+    sale.time_nano_part = 7;
+    sale.exchange_code = 'C';
+    sale.price = 2.5;
+    sale.size = 10.0;
+    sale.bid_price = 2.45;
+    sale.ask_price = 2.55;
+    sale.exchange_sale_conditions = Some("F02".to_owned());
+    sale.underlying_price = 190.0;
+    sale.volatility = 0.3;
+    sale.delta = 0.45;
+    sale.option_symbol = Some(".AAPL250117C150".to_owned());
     sale.set_aggressor_side(Side::Sell);
     sale.set_spread_leg(true);
     sale
@@ -540,42 +529,42 @@ pub fn option_sale(symbol: &str) -> OptionSale {
 
 /// A candle with a distinct non-zero value in every field but the event flags.
 pub fn candle(symbol: &str) -> Candle {
-    Candle {
-        event_time: 1_700_000_000_500,
-        index: INDEX,
-        count: 120,
-        open: 189.0,
-        high: 191.0,
-        low: 188.5,
-        close: 190.5,
-        volume: 50_000.0,
-        vwap: 190.1,
-        bid_volume: 20_000.0,
-        ask_volume: 30_000.0,
-        imp_volatility: 0.28,
-        open_interest: 7000.0,
-        ..Candle::new(symbol)
-    }
+    let mut e = Candle::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.index = INDEX;
+    e.count = 120;
+    e.open = 189.0;
+    e.high = 191.0;
+    e.low = 188.5;
+    e.close = 190.5;
+    e.volume = 50_000.0;
+    e.vwap = 190.1;
+    e.bid_volume = 20_000.0;
+    e.ask_volume = 30_000.0;
+    e.imp_volatility = 0.28;
+    e.open_interest = 7000.0;
+    e
 }
 
 /// A daily candle with the values of [`candle`].
 pub fn daily_candle(symbol: &str) -> DailyCandle {
     let candle = candle(symbol);
-    DailyCandle {
-        event_time: candle.event_time,
-        index: candle.index,
-        count: candle.count,
-        open: candle.open,
-        high: candle.high,
-        low: candle.low,
-        close: candle.close,
-        volume: candle.volume,
-        vwap: candle.vwap,
-        bid_volume: candle.bid_volume,
-        ask_volume: candle.ask_volume,
-        imp_volatility: candle.imp_volatility,
-        open_interest: candle.open_interest,
-        ..DailyCandle::new(symbol)
+    {
+        let mut e = DailyCandle::new(symbol);
+        e.event_time = candle.event_time;
+        e.index = candle.index;
+        e.count = candle.count;
+        e.open = candle.open;
+        e.high = candle.high;
+        e.low = candle.low;
+        e.close = candle.close;
+        e.volume = candle.volume;
+        e.vwap = candle.vwap;
+        e.bid_volume = candle.bid_volume;
+        e.ask_volume = candle.ask_volume;
+        e.imp_volatility = candle.imp_volatility;
+        e.open_interest = candle.open_interest;
+        e
     }
 }
 
@@ -583,24 +572,22 @@ pub fn daily_candle(symbol: &str) -> DailyCandle {
 /// the event flags, and the fields given.
 macro_rules! sample_order {
     ($type:ident($symbol:expr) { $($field:ident: $value:expr,)* }) => {{
-        let mut order = $type {
-            event_time: 1_700_000_000_500,
-            index: 17,
-            time_sequence: INDEX,
-            time_nano_part: 7,
-            action_time: 1_700_000_000_400,
-            order_id: 1001,
-            aux_order_id: 1002,
-            price: 189.5,
-            size: 300.0,
-            executed_size: 100.0,
-            count: 4,
-            trade_id: 42,
-            trade_price: 189.25,
-            trade_size: 50.0,
-            $($field: $value,)*
-            ..$type::new($symbol)
-        };
+        let mut order = $type::new($symbol);
+        order.event_time = 1_700_000_000_500;
+        order.index = 17;
+        order.time_sequence = INDEX;
+        order.time_nano_part = 7;
+        order.action_time = 1_700_000_000_400;
+        order.order_id = 1001;
+        order.aux_order_id = 1002;
+        order.price = 189.5;
+        order.size = 300.0;
+        order.executed_size = 100.0;
+        order.count = 4;
+        order.trade_id = 42;
+        order.trade_price = 189.25;
+        order.trade_size = 50.0;
+        $(order.$field = $value;)*
         order.set_action(OrderAction::Partial);
         order.set_exchange_code('Q').unwrap();
         order.set_order_side(Side::Buy);
@@ -682,18 +669,16 @@ pub fn nuam_order(symbol: &str) -> NuamOrder {
 
 /// A market maker with a distinct non-zero value in every field but the event flags.
 pub fn market_maker(symbol: &str) -> MarketMaker {
-    let mut market_maker = MarketMaker {
-        event_time: 1_700_000_000_500,
-        bid_time: 1_700_000_000_000,
-        bid_price: 189.5,
-        bid_size: 100.0,
-        bid_count: 3,
-        ask_time: 1_700_000_001_000,
-        ask_price: 189.75,
-        ask_size: 200.0,
-        ask_count: 4,
-        ..MarketMaker::new(symbol)
-    };
+    let mut market_maker = MarketMaker::new(symbol);
+    market_maker.event_time = 1_700_000_000_500;
+    market_maker.bid_time = 1_700_000_000_000;
+    market_maker.bid_price = 189.5;
+    market_maker.bid_size = 100.0;
+    market_maker.bid_count = 3;
+    market_maker.ask_time = 1_700_000_001_000;
+    market_maker.ask_price = 189.75;
+    market_maker.ask_size = 200.0;
+    market_maker.ask_count = 4;
     market_maker.set_exchange_code('Q').unwrap();
     market_maker.set_market_maker("MM5").unwrap();
     market_maker
@@ -701,16 +686,14 @@ pub fn market_maker(symbol: &str) -> MarketMaker {
 
 /// An order imbalance from the default source with a distinct non-zero value in every other field.
 pub fn order_imbalance(symbol: &str) -> OrderImbalance {
-    let mut imbalance = OrderImbalance {
-        event_time: 1_700_000_000_500,
-        time_sequence: INDEX,
-        ref_price: 189.5,
-        paired_size: 1000.0,
-        imbalance_size: 250.0,
-        near_price: 189.6,
-        far_price: 189.4,
-        ..OrderImbalance::new(symbol)
-    };
+    let mut imbalance = OrderImbalance::new(symbol);
+    imbalance.event_time = 1_700_000_000_500;
+    imbalance.time_sequence = INDEX;
+    imbalance.ref_price = 189.5;
+    imbalance.paired_size = 1000.0;
+    imbalance.imbalance_size = 250.0;
+    imbalance.near_price = 189.6;
+    imbalance.far_price = 189.4;
     imbalance.set_imbalance_side(ImbalanceSide::Sell);
     imbalance.set_auction_type(AuctionType::Closing);
     imbalance
@@ -719,22 +702,20 @@ pub fn order_imbalance(symbol: &str) -> OrderImbalance {
 /// The order as `LOCAL_HUB` delivers it: the SDK does not carry through the hub the event time, the nanosecond part,
 /// the action time, the order ids, the executed size and the trade of an order; they come back as zero or NaN.
 macro_rules! delivered_order {
-    ($type:ident($sent:expr) { $($field:ident: $value:expr,)* }) => {
-        $type {
-            event_time: 0,
-            time_nano_part: 0,
-            action_time: 0,
-            order_id: 0,
-            aux_order_id: 0,
-            executed_size: f64::NAN,
-            trade_id: 0,
-            trade_price: f64::NAN,
-            trade_size: f64::NAN,
-            $($field: $value,)*
-            ..$sent
-        }
-        .into()
-    };
+    ($type:ident($sent:expr) { $($field:ident: $value:expr,)* }) => {{
+        let mut order: $type = $sent;
+        order.event_time = 0;
+        order.time_nano_part = 0;
+        order.action_time = 0;
+        order.order_id = 0;
+        order.aux_order_id = 0;
+        order.executed_size = f64::NAN;
+        order.trade_id = 0;
+        order.trade_price = f64::NAN;
+        order.trade_size = f64::NAN;
+        $(order.$field = $value;)*
+        order.into()
+    }};
 }
 
 /// Whether the events are the same, NaN values included: their `Debug` texts are equal.
@@ -744,42 +725,38 @@ pub fn same_events<T: std::fmt::Debug + ?Sized>(a: &T, b: &T) -> bool {
 
 /// A configuration with a distinct non-zero value in every field.
 pub fn configuration(symbol: &str) -> Configuration {
-    Configuration {
-        event_time: 1_700_000_000_500,
-        version: 3,
-        attachment: Some("{\"mode\": \"test\"}".to_owned()),
-        ..Configuration::new(symbol)
-    }
+    let mut e = Configuration::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.version = 3;
+    e.attachment = Some("{\"mode\": \"test\"}".to_owned());
+    e
 }
 
 /// A message with a distinct non-zero value in every field.
 pub fn message(symbol: &str) -> Message {
-    Message {
-        event_time: 1_700_000_000_500,
-        attachment: Some("attach \u{e9}".to_owned()),
-        ..Message::new(symbol)
-    }
+    let mut e = Message::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.attachment = Some("attach \u{e9}".to_owned());
+    e
 }
 
 /// A text message with a distinct non-zero value in every field.
 pub fn text_message(symbol: &str) -> TextMessage {
-    TextMessage {
-        event_time: 1_700_000_000_500,
-        time_sequence: INDEX,
-        text: Some("halt \u{1F600}".to_owned()),
-        ..TextMessage::new(symbol)
-    }
+    let mut e = TextMessage::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.time_sequence = INDEX;
+    e.text = Some("halt \u{1F600}".to_owned());
+    e
 }
 
 /// A text configuration with a distinct non-zero value in every field.
 pub fn text_configuration(symbol: &str) -> TextConfiguration {
-    TextConfiguration {
-        event_time: 1_700_000_000_500,
-        time_sequence: INDEX,
-        version: 2,
-        text: Some("mode=test".to_owned()),
-        ..TextConfiguration::new(symbol)
-    }
+    let mut e = TextConfiguration::new(symbol);
+    e.event_time = 1_700_000_000_500;
+    e.time_sequence = INDEX;
+    e.version = 2;
+    e.text = Some("mode=test".to_owned());
+    e
 }
 
 /// The candle symbol of the samples of candles for `symbol`: its daily candles.
@@ -825,61 +802,78 @@ pub fn all_events(symbol: &str) -> Vec<Event> {
 /// order; they come back as zero, NaN or `None`. Compare with [`same_events`]: NaN is not equal to itself.
 pub fn delivered(event: Event) -> Event {
     match event {
-        Event::Quote(e) => Quote {
-            event_time: 0,
-            time_millis_sequence: 0,
-            time_nano_part: 0,
-            ..e
+        Event::Quote(mut e) => {
+            e.event_time = 0;
+            e.time_millis_sequence = 0;
+            e.time_nano_part = 0;
+            e.into()
         }
-        .into(),
-        Event::Profile(e) => Profile { event_time: 0, ..e }.into(),
-        Event::Summary(e) => Summary { event_time: 0, ..e }.into(),
-        Event::Greeks(e) => Greeks { event_time: 0, ..e }.into(),
-        Event::Underlying(e) => Underlying { event_time: 0, ..e }.into(),
-        Event::TheoPrice(e) => TheoPrice { event_time: 0, ..e }.into(),
-        Event::Trade(e) => Trade {
-            event_time: 0,
-            time_nano_part: 0,
-            ..e
+        Event::Profile(mut e) => {
+            e.event_time = 0;
+            e.into()
         }
-        .into(),
-        Event::TradeETH(e) => TradeETH {
-            event_time: 0,
-            time_nano_part: 0,
-            ..e
+        Event::Summary(mut e) => {
+            e.event_time = 0;
+            e.into()
         }
-        .into(),
-        Event::Series(e) => Series { event_time: 0, ..e }.into(),
-        Event::NuamTrade(e) => NuamTrade {
-            event_time: 0,
-            time_nano_part: 0,
-            ..e
+        Event::Greeks(mut e) => {
+            e.event_time = 0;
+            e.into()
         }
-        .into(),
-        Event::TimeAndSale(e) => TimeAndSale {
-            event_time: 0,
-            time_nano_part: 0,
-            buyer: None,
-            seller: None,
-            ..e
+        Event::Underlying(mut e) => {
+            e.event_time = 0;
+            e.into()
         }
-        .into(),
-        Event::NuamTimeAndSale(e) => NuamTimeAndSale {
-            event_time: 0,
-            time_nano_part: 0,
-            buyer: None,
-            seller: None,
-            ..e
+        Event::TheoPrice(mut e) => {
+            e.event_time = 0;
+            e.into()
         }
-        .into(),
-        Event::OptionSale(e) => OptionSale {
-            event_time: 0,
-            time_nano_part: 0,
-            ..e
+        Event::Trade(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.into()
         }
-        .into(),
-        Event::Candle(e) => Candle { event_time: 0, ..e }.into(),
-        Event::DailyCandle(e) => DailyCandle { event_time: 0, ..e }.into(),
+        Event::TradeETH(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.into()
+        }
+        Event::Series(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::NuamTrade(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.into()
+        }
+        Event::TimeAndSale(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.buyer = None;
+            e.seller = None;
+            e.into()
+        }
+        Event::NuamTimeAndSale(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.buyer = None;
+            e.seller = None;
+            e.into()
+        }
+        Event::OptionSale(mut e) => {
+            e.event_time = 0;
+            e.time_nano_part = 0;
+            e.into()
+        }
+        Event::Candle(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::DailyCandle(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
         Event::Order(e) => delivered_order!(Order(e) {}),
         Event::AnalyticOrder(e) => delivered_order!(AnalyticOrder(e) {
             iceberg_peak_size: f64::NAN,
@@ -892,22 +886,39 @@ pub fn delivered(event: Event) -> Event {
         Event::NuamOrder(e) => delivered_order!(NuamOrder(e) {
             market_maker: None,
         }),
-        Event::MarketMaker(e) => MarketMaker { event_time: 0, ..e }.into(),
-        Event::OrderImbalance(e) => OrderImbalance { event_time: 0, ..e }.into(),
-        Event::Configuration(e) => Configuration { event_time: 0, ..e }.into(),
-        Event::Message(e) => Message { event_time: 0, ..e }.into(),
-        Event::TextMessage(e) => TextMessage { event_time: 0, ..e }.into(),
-        Event::TextConfiguration(e) => TextConfiguration { event_time: 0, ..e }.into(),
+        Event::MarketMaker(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::OrderImbalance(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::Configuration(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::Message(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::TextMessage(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
+        Event::TextConfiguration(mut e) => {
+            e.event_time = 0;
+            e.into()
+        }
         other => panic!("no delivered form of {other}"),
     }
 }
 
 /// [`quote`] with another bid price: the hub does not deliver a quote identical to the last one.
 pub fn quote_with_bid(symbol: &str, bid_price: f64) -> Quote {
-    Quote {
-        bid_price,
-        ..quote(symbol)
-    }
+    let mut e = quote(symbol);
+    e.bid_price = bid_price;
+    e
 }
 
 fn digits(s: &str, n: usize) -> bool {

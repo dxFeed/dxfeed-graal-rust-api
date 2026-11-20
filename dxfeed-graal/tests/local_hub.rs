@@ -23,23 +23,19 @@ use support::{
 
 /// The quote as `LOCAL_HUB` delivers it: the SDK does not carry the event time, the millisecond-sequence and the
 /// nanosecond part of a quote through the hub, they come back as zero.
-fn delivered_quote(sent: Quote) -> Quote {
-    Quote {
-        event_time: 0,
-        time_millis_sequence: 0,
-        time_nano_part: 0,
-        ..sent
-    }
+fn delivered_quote(mut sent: Quote) -> Quote {
+    sent.event_time = 0;
+    sent.time_millis_sequence = 0;
+    sent.time_nano_part = 0;
+    sent
 }
 
 /// The trade as `LOCAL_HUB` delivers it: the SDK does not carry the event time and the nanosecond part of a trade
 /// through the hub, they come back as zero.
-fn delivered_trade(sent: Trade) -> Trade {
-    Trade {
-        event_time: 0,
-        time_nano_part: 0,
-        ..sent
-    }
+fn delivered_trade(mut sent: Trade) -> Trade {
+    sent.event_time = 0;
+    sent.time_nano_part = 0;
+    sent
 }
 
 fn received(receiver: &Receiver<Event>) -> Vec<Event> {
@@ -371,14 +367,16 @@ fn invalid_events_are_rejected() {
     let hub = Hub::new();
     let wide = '\u{1F600}'; // Does not fit a Java char.
     let events: [Event; 3] = [
-        Quote {
-            bid_exchange_code: wide,
-            ..quote("AAPL")
+        {
+            let mut e = quote("AAPL");
+            e.bid_exchange_code = wide;
+            e
         }
         .into(),
-        Trade {
-            exchange_code: wide,
-            ..trade("AAPL")
+        {
+            let mut e = trade("AAPL");
+            e.exchange_code = wide;
+            e
         }
         .into(),
         quote("A\0B").into(),
@@ -745,9 +743,10 @@ fn attachments_survive_the_hub() {
     let sent: Vec<Event> = [None, Some(""), Some("x")]
         .into_iter()
         .map(|attachment| {
-            Message {
-                attachment: attachment.map(str::to_owned),
-                ..Message::new("AAPL")
+            {
+                let mut e = Message::new("AAPL");
+                e.attachment = attachment.map(str::to_owned);
+                e
             }
             .into()
         })
@@ -759,10 +758,8 @@ fn attachments_survive_the_hub() {
 #[test]
 fn attachment_with_nul_is_rejected() {
     let hub = Hub::new();
-    let message = Message {
-        attachment: Some("a\0b".to_owned()),
-        ..Message::new("AAPL")
-    };
+    let mut message = Message::new("AAPL");
+    message.attachment = Some("a\0b".to_owned());
     let result = hub.publisher.publish_events(&[message.into()]);
     assert!(matches!(result, Err(Error::InvalidArgument(_))), "{result:?}");
 }
@@ -776,20 +773,23 @@ fn invalid_orders_are_refused_by_java() {
     undefined_side.set_order_side(Side::Undefined);
     let events: [Event; 5] = [
         order_base("AAPL").into(),
-        Order {
-            index: -1,
-            ..order("AAPL")
+        {
+            let mut e = order("AAPL");
+            e.index = -1;
+            e
         }
         .into(),
-        Order {
-            event_flags: EventFlags::SNAPSHOT_END,
-            ..order("AAPL")
+        {
+            let mut e = order("AAPL");
+            e.event_flags = EventFlags::SNAPSHOT_END;
+            e
         }
         .into(),
         undefined_side.into(),
-        Order {
-            market_maker: Some("ABCDEFGHI".to_owned()),
-            ..order("AAPL")
+        {
+            let mut e = order("AAPL");
+            e.market_maker = Some("ABCDEFGHI".to_owned());
+            e
         }
         .into(),
     ];
@@ -806,10 +806,8 @@ fn order_market_maker_keeps_4_characters() {
     let subscription = hub.feed.create_subscription::<Order>().unwrap();
     let events = collect(&subscription);
     subscription.add_symbols(["AAPL"]).unwrap();
-    let long = Order {
-        market_maker: Some("MM123".to_owned()),
-        ..order("AAPL")
-    };
+    let mut long = order("AAPL");
+    long.market_maker = Some("MM123".to_owned());
     hub.publish_and_process(&[long.into()]);
     let received = received(&events);
     assert!(

@@ -24,6 +24,7 @@ use crate::isolate::{self, call};
 /// and hash as in Java's `equals` and `hashCode`: a NaN number equals NaN, `0.0` differs from `-0.0`, and a custom
 /// field with an empty value counts as missing.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct InstrumentProfile {
     /// The type of the instrument, such as `STOCK`, `FUTURE`, `OPTION` or `REMOVED` (`getType`).
     #[doc(alias = "type")]

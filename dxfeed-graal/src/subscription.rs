@@ -705,3 +705,17 @@ impl<E: SubscriptionItem> Deref for DXFeedTimeSeriesSubscription<E> {
         &self.subscription
     }
 }
+
+impl<E: SubscriptionItem> std::fmt::Debug for DXFeedSubscription<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DXFeedSubscription").finish_non_exhaustive()
+    }
+}
+
+impl<E: SubscriptionItem> std::fmt::Debug for DXFeedTimeSeriesSubscription<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DXFeedTimeSeriesSubscription")
+            .field("from_time", &self.from_time.load(std::sync::atomic::Ordering::Acquire))
+            .finish_non_exhaustive()
+    }
+}

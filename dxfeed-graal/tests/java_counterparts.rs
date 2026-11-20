@@ -8,6 +8,7 @@ use std::hash::{BuildHasher, RandomState};
 use std::sync::{Mutex, MutexGuard, PoisonError, mpsc};
 use std::time::Duration;
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::{
     BaseEvent, Candle, CandleAlignment, CandlePrice, CandleSession, CandleType, Configuration, Message, Order,
     OrderSource, Quote, Scope, TextConfiguration, TextMessage,
@@ -17,7 +18,7 @@ use dxfeed_graal::model::{
     IndexedEventModel, IndexedTxModel, OrderBookModel, OrderBookModelFilter, TimeSeriesEventModel,
 };
 use dxfeed_graal::schedule::{DayFilter, Schedule, SessionFilter};
-use dxfeed_graal::{DXEndpoint, Role, live_handles};
+use dxfeed_graal::{DXEndpoint, Role};
 use support::{Hub, order, quote_with_bid};
 
 /// Runs the tests of this file one by one, so that each can count the live handles.
@@ -91,13 +92,15 @@ fn complete_gives_a_list_promise_its_events() {
         .unwrap();
     assert!(!promise.is_done().unwrap());
     let orders = [
-        Order {
-            index: 2,
-            ..order("BOOK")
+        {
+            let mut e = order("BOOK");
+            e.index = 2;
+            e
         },
-        Order {
-            index: 1,
-            ..order("BOOK")
+        {
+            let mut e = order("BOOK");
+            e.index = 1;
+            e
         },
     ];
 
@@ -181,12 +184,10 @@ fn session_filters_accept_the_sessions_of_the_sdk_filters() {
 #[test]
 fn instrument_profiles_are_equal_as_in_java() {
     let hasher = RandomState::new();
-    let profile = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "AAPL".into(),
-        strike: f64::NAN,
-        ..InstrumentProfile::default()
-    };
+    let mut profile = InstrumentProfile::default();
+    profile.instrument_type = "STOCK".into();
+    profile.symbol = "AAPL".into();
+    profile.strike = f64::NAN;
     let same = |change: fn(&mut InstrumentProfile)| {
         let mut other = profile.clone();
         change(&mut other);

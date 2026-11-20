@@ -16,6 +16,7 @@ use crate::subscription::ListenerId;
 
 /// The state of an [`InstrumentProfileConnection`] (`InstrumentProfileConnection.State`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub enum ConnectionState {
     /// Created, not started yet.
     NotConnected,

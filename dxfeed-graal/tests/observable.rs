@@ -139,9 +139,10 @@ fn a_listener_publishes_what_feeds_ask_for() {
                 .iter()
                 .filter_map(|symbol| match symbol {
                     Symbol::String(symbol) => Some(
-                        Profile {
-                            description: Some("Test symbol".into()),
-                            ..Profile::new(symbol)
+                        {
+                            let mut e = Profile::new(symbol);
+                            e.description = Some("Test symbol".into());
+                            e
                         }
                         .into(),
                     ),

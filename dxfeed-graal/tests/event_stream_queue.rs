@@ -8,12 +8,10 @@ use std::task::{Context, Poll, Wake, Waker};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dxfeed_graal::__private::{live_events, live_handles};
 use dxfeed_graal::event::{Quote, SubscriptionItem, TimeAndSale, Trade};
 use dxfeed_graal::event_queue::{EventQueue, PollResult};
-use dxfeed_graal::{
-    DXFeedSubscription, Error, Event, EventStream, EventType, JavaExceptionClass, StreamOptions, live_events,
-    live_handles,
-};
+use dxfeed_graal::{DXFeedSubscription, Error, Event, EventStream, EventType, JavaExceptionClass, StreamOptions};
 use support::{CountingWaker, Hub, block_on_with, quote_with_bid, time_and_sale, trade};
 
 /// Runs the tests of this file one by one, so that each can count the live handles.
@@ -144,10 +142,8 @@ fn an_unpolled_queue_keeps_every_time_and_sale() {
     let queue = EventQueue::new(&subscription).unwrap();
     subscription.add_symbols(["S0"]).unwrap();
     for price in [1.0, 2.0, 3.0] {
-        let sale = TimeAndSale {
-            price,
-            ..time_and_sale("S0")
-        };
+        let mut sale = time_and_sale("S0");
+        sale.price = price;
         hub.publisher.publish_events(&[sale.into()]).unwrap();
         settle();
     }
@@ -280,12 +276,9 @@ fn time_series_stream_keeps_every_event() {
     stream.subscription().add_symbols(["S0"]).unwrap();
     for (n, price) in [1.0, 2.0, 3.0].into_iter().enumerate() {
         // A sale of a time series with the index of an earlier one would replace it.
-        let sale = time_and_sale("S0");
-        let sale = TimeAndSale {
-            price,
-            index: sale.index + n as i64,
-            ..sale
-        };
+        let mut sale = time_and_sale("S0");
+        sale.price = price;
+        sale.index += n as i64;
         hub.publisher.publish_events(&[sale.into()]).unwrap();
         settle();
     }

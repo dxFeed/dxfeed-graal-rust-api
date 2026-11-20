@@ -2,10 +2,11 @@
 
 use std::cell::RefCell;
 
+use dxfeed_graal::__private::live_handles;
 use dxfeed_graal::event::{Order, Quote, TimeAndSale};
 use dxfeed_graal::model::{IndexedTxModel, TimeSeriesTxModel};
 use dxfeed_graal::schedule::Schedule;
-use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Role, live_handles};
+use dxfeed_graal::{DXEndpoint, DXFeedSubscription, Role};
 
 thread_local! {
     static KEPT: RefCell<Option<DXEndpoint>> = const { RefCell::new(None) };

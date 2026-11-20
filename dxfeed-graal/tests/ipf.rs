@@ -25,29 +25,25 @@ fn fixture() -> String {
 const DECEMBER_18_2026: i32 = 20805;
 
 fn expected() -> Vec<InstrumentProfile> {
-    let mut stock = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "AAPL".into(),
-        description: "Apple Inc.".into(),
-        country: "US".into(),
-        currency: "USD".into(),
-        icb: 9572,
-        multiplier: 1.0,
-        ..InstrumentProfile::new()
-    };
+    let mut stock = InstrumentProfile::new();
+    stock.instrument_type = "STOCK".into();
+    stock.symbol = "AAPL".into();
+    stock.description = "Apple Inc.".into();
+    stock.country = "US".into();
+    stock.currency = "USD".into();
+    stock.icb = 9572;
+    stock.multiplier = 1.0;
     stock.custom_fields.insert("CUSTOM_NOTE".into(), "first".into());
-    let option = InstrumentProfile {
-        instrument_type: "OPTION".into(),
-        symbol: ".AAPL261218C200".into(),
-        description: "AAPL Dec 2026 200 Call".into(),
-        underlying: "AAPL".into(),
-        spc: 100.0,
-        multiplier: 100.0,
-        expiration: DECEMBER_18_2026,
-        strike: 200.5,
-        option_type: "STAN".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut option = InstrumentProfile::new();
+    option.instrument_type = "OPTION".into();
+    option.symbol = ".AAPL261218C200".into();
+    option.description = "AAPL Dec 2026 200 Call".into();
+    option.underlying = "AAPL".into();
+    option.spc = 100.0;
+    option.multiplier = 100.0;
+    option.expiration = DECEMBER_18_2026;
+    option.strike = 200.5;
+    option.option_type = "STAN".into();
     vec![stock, option]
 }
 
@@ -118,11 +114,9 @@ fn the_collector_keeps_and_tells_the_updates() {
     collector.update_instrument_profile(&stock).unwrap();
     assert_eq!(updates.recv_timeout(Duration::from_secs(10)).unwrap(), [stock.clone()]);
 
-    let removed = InstrumentProfile {
-        instrument_type: InstrumentProfile::REMOVED.into(),
-        symbol: "AAPL".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut removed = InstrumentProfile::new();
+    removed.instrument_type = InstrumentProfile::REMOVED.into();
+    removed.symbol = "AAPL".into();
     collector.update_instrument_profile(&removed).unwrap();
     let update = updates.recv_timeout(Duration::from_secs(10)).unwrap();
     assert!(update[0].is_removed());
@@ -362,12 +356,13 @@ fn types_and_profiles_sort_as_in_java() {
     assert_eq!(compare("AAA", "BBB"), Ordering::Less);
     assert_eq!(compare("FOREX", "FOREX"), Ordering::Equal);
 
-    let profile = |instrument_type: &str, symbol: &str, underlying: &str, strike: f64| InstrumentProfile {
-        instrument_type: instrument_type.into(),
-        symbol: symbol.into(),
-        underlying: underlying.into(),
-        strike,
-        ..InstrumentProfile::new()
+    let profile = |instrument_type: &str, symbol: &str, underlying: &str, strike: f64| {
+        let mut e = InstrumentProfile::new();
+        e.instrument_type = instrument_type.into();
+        e.symbol = symbol.into();
+        e.underlying = underlying.into();
+        e.strike = strike;
+        e
     };
     let mut profiles = [
         profile("CUSTOM", "C", "", 0.0),
@@ -406,11 +401,9 @@ fn generations_are_removed_together() {
 
     let collector = InstrumentProfileCollector::new().unwrap();
     let [stock, option] = <[InstrumentProfile; 2]>::try_from(expected()).unwrap();
-    let untagged = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "MSFT".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut untagged = InstrumentProfile::new();
+    untagged.instrument_type = "STOCK".into();
+    untagged.symbol = "MSFT".into();
     collector
         .update_instrument_profiles(slice::from_ref(&stock), Some(&a))
         .unwrap();
@@ -594,11 +587,9 @@ fn the_writer_writes_to_a_stream() {
 /// A custom field with an empty value is not written.
 #[test]
 fn empty_custom_fields_are_not_written() {
-    let mut profile = InstrumentProfile {
-        instrument_type: "STOCK".into(),
-        symbol: "IBM".into(),
-        ..InstrumentProfile::new()
-    };
+    let mut profile = InstrumentProfile::new();
+    profile.instrument_type = "STOCK".into();
+    profile.symbol = "IBM".into();
     profile.custom_fields.insert("CUSTOM_EMPTY".into(), String::new());
     profile.custom_fields.insert("CUSTOM_NOTE".into(), "kept".into());
     let bytes = InstrumentProfileWriter::new()

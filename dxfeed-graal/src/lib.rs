@@ -189,7 +189,7 @@
 //! # Deployment
 //!
 //! The SDK library is linked dynamically and must be found at run time; see the README of the repository.
-#![warn(missing_docs)]
+#![warn(missing_docs, missing_debug_implementations)]
 
 mod auth_token;
 mod connector;
@@ -237,13 +237,9 @@ pub use connector::{
 pub use endpoint::{DXEndpoint, DXEndpointBuilder, Role, State};
 pub use error::{Error, JavaException, JavaExceptionClass, Result};
 pub use error_manager::{ErrorInfo, ErrorManager};
-#[doc(hidden)]
-pub use event::sdk_event::live_events;
 pub use event::{Event, EventKind, EventRef, EventType, Events, SubscriptionItem};
 pub use executor::{Executor, ManualExecutor};
 pub use feed::DXFeed;
-#[doc(hidden)]
-pub use handle::live_handles;
 pub use observable::{Observable, ObservableSubscription, ObservableSubscriptionChangeListener};
 pub use promise::{AnyOf, AnyOfFuture, Promise, PromiseFuture, PromiseResult, Promises};
 pub use publisher::DXPublisher;
@@ -254,6 +250,13 @@ pub use symbol::Symbol;
 pub use time_format::TimeFormat;
 pub use time_period::{TimePeriod, TimePeriodInfo};
 pub use time_zone::TimeZone;
+
+/// Hooks for the tests of this crate. Not part of the API: they may change or go away in any release.
+#[doc(hidden)]
+pub mod __private {
+    pub use crate::event::sdk_event::live_events;
+    pub use crate::handle::live_handles;
+}
 
 /// Locks `mutex`, ignoring poisoning: the data it guards stays consistent when a holder panics.
 fn lock<T>(mutex: &std::sync::Mutex<T>) -> std::sync::MutexGuard<'_, T> {

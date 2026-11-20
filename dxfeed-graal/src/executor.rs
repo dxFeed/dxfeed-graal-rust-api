@@ -110,3 +110,15 @@ impl From<ManualExecutor> for Executor {
         executor.executor
     }
 }
+
+impl std::fmt::Debug for Executor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Executor").finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for ManualExecutor {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ManualExecutor").finish_non_exhaustive()
+    }
+}

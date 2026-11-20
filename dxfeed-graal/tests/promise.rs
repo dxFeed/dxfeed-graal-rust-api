@@ -7,11 +7,9 @@ use std::sync::{Mutex, MutexGuard, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dxfeed_graal::__private::{live_events, live_handles};
 use dxfeed_graal::event::{BaseEvent, Candle, Quote, TimeAndSale};
-use dxfeed_graal::{
-    AnyOf, DXEndpoint, Error, ErrorManager, Executor, JavaExceptionClass, Promise, Promises, Role, live_events,
-    live_handles,
-};
+use dxfeed_graal::{AnyOf, DXEndpoint, Error, ErrorManager, Executor, JavaExceptionClass, Promise, Promises, Role};
 use support::{Hub, candle, candle_symbol, delivered, quote, same_events, time_and_sale};
 
 /// Runs the tests of this file one by one, so that each can count the live handles and events.

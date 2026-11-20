@@ -873,3 +873,11 @@ impl SysEvents {
         }
     }
 }
+
+impl<E: SubscriptionItem> std::fmt::Debug for Events<'_, E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Events")
+            .field("remaining", &(self.elements.len() - self.next))
+            .finish_non_exhaustive()
+    }
+}

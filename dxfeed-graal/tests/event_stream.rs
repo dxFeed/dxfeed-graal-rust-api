@@ -6,10 +6,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll, Wake, Waker};
 use std::time::Duration;
 
+use dxfeed_graal::__private::{live_events, live_handles};
 use dxfeed_graal::event::{Candle, Quote, SubscriptionItem, TimeAndSale};
 use dxfeed_graal::{
     DXFeedSubscription, DXFeedTimeSeriesSubscription, Error, Event, EventStream, EventType, JavaExceptionClass,
-    StreamOptions, live_events, live_handles,
+    StreamOptions,
 };
 use support::{CountingWaker, Hub, block_on_with, delivered, quote, quote_with_bid, same_events, time_and_sale, trade};
 

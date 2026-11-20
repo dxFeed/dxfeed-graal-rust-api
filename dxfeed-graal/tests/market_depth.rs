@@ -21,13 +21,11 @@ fn order(index: i64, side: Side, price: f64, size: f64, flags: EventFlags) -> Or
 
 /// A price level of the book of `source`.
 fn order_of(source: IndexedEventSource, index: i64, side: Side, price: f64, size: f64, flags: EventFlags) -> Order {
-    let mut order = Order {
-        index,
-        price,
-        size,
-        event_flags: flags,
-        ..Order::new("DEPTH")
-    };
+    let mut order = Order::new("DEPTH");
+    order.index = index;
+    order.price = price;
+    order.size = size;
+    order.event_flags = flags;
     order.set_source(source).unwrap();
     order.set_order_side(side);
     order.set_scope(Scope::Aggregate);

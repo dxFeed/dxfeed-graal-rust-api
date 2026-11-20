@@ -21,9 +21,10 @@ fn write_tape(name: &str) -> TempFile {
     let _ = std::fs::remove_file(&file.0);
     let events: Vec<Event> = (0..100)
         .map(|i| {
-            Quote {
-                bid_price: f64::from(i),
-                ..Quote::new(if i % 2 == 0 { "TEST1" } else { "TEST2" })
+            {
+                let mut e = Quote::new(if i % 2 == 0 { "TEST1" } else { "TEST2" });
+                e.bid_price = f64::from(i);
+                e
             }
             .into()
         })
