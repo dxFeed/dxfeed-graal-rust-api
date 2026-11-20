@@ -69,7 +69,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use crate::net_test::options::EventKind;
+    use crate::net_test::cli::EventKind;
     use crate::net_test::symbols::generate_symbols;
 
     fn pool() -> EventPool {

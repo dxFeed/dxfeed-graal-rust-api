@@ -4,10 +4,12 @@
 //! It parses its own command line and runs before the common system properties of the tools are set, so that its
 //! `-X` and `-XX:` options reach the isolate.
 
+mod cli;
 mod events;
 mod generator;
+#[cfg(test)]
+mod kit;
 mod limiter;
-mod options;
 mod statistics;
 mod symbols;
 
@@ -23,10 +25,10 @@ use dxfeed_graal::{DXEndpoint, DXPublisher, Error, MessageConnectorKind, Message
 use crate::console;
 use crate::help::Info;
 
+use self::cli::{Mode, OPTION_LINES, Options, SYNOPSIS};
 use self::events::EventPool;
 use self::generator::{Counters, Settings, run_generator};
 use self::limiter::{RateLimiter, Stop};
-use self::options::{OPTION_LINES, Options, SYNOPSIS};
 use self::statistics::{InstanceTotals, RuntimeSample, StatisticsSample, run_reporter, system_clock};
 use self::symbols::Symbols;
 
@@ -56,16 +58,23 @@ fn fail(message: &str, code: u8) -> ExitCode {
 /// Runs `Tools NetTest <args>`, the arguments after the tool name; returns the exit code.
 pub fn main(args: &[String]) -> ExitCode {
     if args.is_empty() {
-        console::print(&options::usage_text());
+        console::print(&cli::usage_text());
         return ExitCode::from(EXIT_BAD_ARGUMENTS);
     }
-    let options = match options::parse(args) {
+    let options = match cli::parse(args) {
         Ok(options) => options,
         Err(error) => {
-            eprint!("NetTest: {error}\n\n{}", options::usage_text());
+            eprint!("NetTest: {error}\n\n{}", cli::usage_text());
             return ExitCode::from(EXIT_BAD_ARGUMENTS);
         }
     };
+    if options.help {
+        console::print(&cli::usage_text());
+        return ExitCode::SUCCESS;
+    }
+    if options.mode == Mode::Consumer {
+        return fail("the mode c is not implemented yet", EXIT_FAILURE);
+    }
     if let Err(error) = system::set_isolate_arguments(&options.isolate_arguments) {
         return fail(&error.to_string(), EXIT_BAD_ARGUMENTS);
     }
@@ -120,8 +129,9 @@ impl Instance {
     /// Creates the endpoint of the name and its publisher.
     fn create(name: String, options: &Options) -> Result<Self, String> {
         let endpoint = DXEndpoint::new_builder()
-            .with_role(options.role)
+            .with_role(options.role())
             .with_name(&name)
+            .with_property(DXEndpoint::DXSCHEME_NANO_TIME_PROPERTY, options.nano_time())
             .build()
             .map_err(|error| format!("cannot create the endpoint {name}: {error}"))?;
         let publisher = endpoint.get_publisher();

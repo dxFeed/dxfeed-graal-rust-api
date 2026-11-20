@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use dxfeed_graal::ipf::InstrumentProfileReader;
 
-use super::options::Options;
+use super::cli::Options;
 
 const SYMBOL_SEED: u64 = 0x5EED_0FD4_F3ED_5EED;
 const MAX_GENERATED: i64 =

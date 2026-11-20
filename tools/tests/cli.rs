@@ -72,11 +72,11 @@ fn help_shows_tools_and_articles() {
     assert!(stdout(&["Help", "qds"]).starts_with("\nQds\n===\n"));
     let net_test = stdout(&["Help", "NetTest"]);
     assert!(
-        net_test.contains("\nUsage:\n  NetTest p <address> -S <symbols> [options]\n"),
+        net_test.contains("\nUsage:\n  NetTest p|c <address> -S <symbols> [options]\n"),
         "{net_test}"
     );
     assert!(
-        net_test.contains("\n  --role <role>        the role of the endpoints:"),
+        net_test.contains("\n  --role <role>        PUBLISHER or STREAM_PUBLISHER on p, FEED or STREAM_FEED on c\n"),
         "{net_test}"
     );
     let address = stdout(&["help", "address"]);
