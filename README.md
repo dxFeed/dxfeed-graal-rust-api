@@ -611,24 +611,26 @@ target/release/Tools NetTest c localhost:6666 -S 100 -C 2 -s 1s --duration 5s --
 `ok` or `stopped_by_signal`), 1 for `no_data`, `nano_missing` and `error`, and 2 for a bad command line, an unwritable
 `--summary` path or an option that the isolate rejects, all without a summary.
 
-Differences from the specification:
+The tool has no differences from `nettest/1`. The choices the specification leaves to the tool:
 
-- `tool.implementation` is `rust-api`; `qd_version` and the values of `build` are `null` (the SDK does not report
-  them); `config.reuse_effective` is `false`, as the Rust API copies the events into native structures on every call;
-  `tool.version` is the version of the crate and `tool.sdk_version` comes from the SDK at run time.
-- `--legacy` is rejected with `unsupported option: --legacy`: the Rust API has no deprecated publishing entry point.
-  The vectors of the kit that need it are skipped by the tests.
-- The optional `-X<option>` and `-XX:<option>` take `-Xmx`, `-Xms`, `-Xmn`, `-Xss` and `-XX:<option>` of the
-  isolate, and a rejected one ends the run with 2; `-XX:+PrintGCSummary` is accepted but prints nothing, as the
-  isolate is never torn down. `--reuse` overwrites one batch in place and saves the Rust allocations only.
-- Metrics: the label `tool` is `rust-api`. The connector statistics v2 families are exported only when the SDK
-  reports `MESSAGE_CONNECTOR_IO_STATISTICS`, and the connector lag only on `c`. `nettest_schedule_slip_seconds` has a
-  value only with `-r`. The runtime, connection and connector values are those of the last reporter tick, so the
-  server thread never calls into the isolate. The server speaks HTTP/1.0, one request at a time, and reads a request
-  head of at most 8192 bytes within 2 seconds.
-- An IPv6 host of `--metrics-port` keeps its brackets in the printed line.
-- The environment variable `DXFG_NETTEST_WATCHDOG=<ms after a record>,<ms after the connection>` shortens the
-  watchdog of `c` for tests; it is not part of the usage.
+- The summary: `tool.implementation` and the metrics label `tool` are `rust-api`, from the list of the specification;
+  `tool.version` is the version of the crate and `tool.sdk_version` comes from the SDK at run time. `qd_version` and
+  the values of `build` are `null`, as the SDK does not report them. `config.reuse_effective` is `false`, which the
+  specification asks of a tool whose API copies the events anyway: the Rust API copies them into native structures on
+  every call, so `--reuse` overwrites one batch in place and saves the Rust allocations only.
+- The optional options: `--legacy` is rejected with `unsupported option: --legacy`, the text that the specification
+  gives for an optional option that a tool does not implement, as the Rust API has no deprecated publishing entry
+  point; the tests skip the vectors of the kit that need it. `-X<option>` and `-XX:<option>` take `-Xmx`, `-Xms`,
+  `-Xmn`, `-Xss` and `-XX:<option>` of the isolate, and a rejected one ends the run with 2; `-XX:+PrintGCSummary` is
+  accepted but prints nothing, as the isolate is never torn down.
+- The metrics: with the SDK, which reports `MESSAGE_CONNECTOR_IO_STATISTICS`, a scrape has every family of its side
+  that the samples of the kit have, the connector statistics v2 included, and the connector lag only on `c`;
+  `nettest_schedule_slip_seconds` has a value only with `-r`, as there is no schedule without it. The runtime,
+  connection and connector values are those of the last reporter tick, so a scrape never calls into the isolate. The
+  server speaks HTTP/1.0, one request at a time, and reads a request head of at most 8192 bytes within 2 seconds. An
+  IPv6 host of `--metrics-port` is printed in brackets, as a URL writes it: `http://[::1]:9100/metrics`.
+- A test hook: the environment variable `DXFG_NETTEST_WATCHDOG=<ms after a record>,<ms after the connection>`
+  shortens the watchdog of `c` for tests; it is not part of the usage.
 
 ## Samples
 
