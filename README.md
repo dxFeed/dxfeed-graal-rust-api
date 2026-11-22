@@ -598,7 +598,8 @@ target/release/Tools Qds "help connect"
 kit. Mode `p` publishes the generated events through `-C` publisher endpoints at an optional total rate (`-r */<rate>`),
 mode `c` subscribes `-C` feed endpoints to their slices of the symbols and reports the signed end-to-end lag of every
 event. Both print a statistics block per `-s` period (the summary line, a line per instance and the runtime line of the
-isolate); `Tools NetTest --help` lists every option. For example, on loopback, a publisher and a consumer:
+isolate); `Tools NetTest --help` (or `-h`, `-help`, anywhere outside the value of an option) lists every option. For
+example, on loopback, a publisher and a consumer:
 
 ```shell
 target/release/Tools NetTest p :6666 -S 100 -r */5k -s 1s --duration 10s
@@ -609,7 +610,10 @@ target/release/Tools NetTest c localhost:6666 -S 100 -C 2 -s 1s --duration 5s --
 `--metrics-port [<host>:]<port>` serves `GET /metrics` in the Prometheus text format and prints its address in a line
 `{*NetTestMetrics-<name>*}`. The exit code is 0 for a run that ends by `--duration` or by SIGINT and SIGTERM (status
 `ok` or `stopped_by_signal`), 1 for `no_data`, `nano_missing` and `error`, and 2 for a bad command line, an unwritable
-`--summary` path or an option that the isolate rejects, all without a summary.
+`--summary` path or an option that the isolate rejects, all without a summary. The tool takes SIGINT and SIGTERM (and
+SIGBREAK on Windows) once its isolate is up: a signal while the symbols are read ends it with the summary of
+`stopped_by_signal` before the endpoints start, and a second signal ends the process at once, by the default action of
+the signal, without the last block and the summary.
 
 The tool has no differences from `nettest/1`. The choices the specification leaves to the tool:
 
