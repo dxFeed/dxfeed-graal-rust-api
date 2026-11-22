@@ -14,6 +14,7 @@ mod http;
 #[cfg(test)]
 mod kit;
 mod limiter;
+mod signals;
 mod statistics;
 mod summary;
 mod symbols;
@@ -37,11 +38,13 @@ use self::exposition::LiveMetrics;
 use self::generator::{Counters, Settings, run_generator};
 use self::http::MetricsServer;
 use self::limiter::{ScheduleLimiter, Stop, lock_ignoring_poison};
+use self::signals::SignalWatcher;
 use self::statistics::{
     IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample, run_reporter, system_clock,
 };
 use self::summary::{
-    ProducerTotals, RunResult, connector_summaries, connector_totals, format_summary, producer_report, write_summary,
+    ProducerTotals, RunReport, RunResult, connector_summaries, connector_totals, format_summary, producer_report,
+    write_summary,
 };
 use self::symbols::Symbols;
 
@@ -138,6 +141,12 @@ pub fn main(args: &[String]) -> ExitCode {
         Err(Error::Graal(code)) => return fail(&format!("cannot create the isolate (error {code})"), EXIT_FAILURE),
         _ => {}
     }
+    // SIGINT and SIGTERM end the run like --duration does: the last statistics are printed and the endpoints close.
+    // The watcher comes once the isolate exists, so that a signal while the symbols are read also ends with the
+    // summary; a second signal ends the process.
+    let stop = Arc::new(Stop::default());
+    let signalled = Arc::new(AtomicBool::new(false));
+    let signal_watcher = SignalWatcher::install(Arc::clone(&stop), Arc::clone(&signalled));
     // From here on every end writes the summary: a failure before the run is the status `error` with nothing else.
     let before_run = now_epoch_nanos();
     let failed_before_run = |message: String| {
@@ -180,16 +189,15 @@ pub fn main(args: &[String]) -> ExitCode {
         }
         Err(error) => return failed_before_run(error),
     };
-    // Ctrl+C and SIGTERM end the run like --duration does: the last statistics are printed and the endpoints close.
-    let stop = Arc::new(Stop::default());
-    let signalled = Arc::new(AtomicBool::new(false));
-    let (handler_stop, handler_signalled) = (Arc::clone(&stop), Arc::clone(&signalled));
-    let handler = move || {
-        handler_signalled.store(true, Ordering::SeqCst);
-        handler_stop.request();
-    };
-    if let Err(error) = ctrlc::set_handler(handler) {
-        return failed_before_run(format!("cannot handle Ctrl+C: {error}"));
+    // A signal before the endpoints start: the summary of the empty run, without the endpoints.
+    if signal_watcher.received() {
+        drop(server);
+        let result = RunResult {
+            status: Status::StoppedBySignal,
+            error: None,
+            report: RunReport::at(before_run, now_epoch_nanos()),
+        };
+        return finish(&options, &result);
     }
     // The run starts here, after the symbols and before the endpoints.
     let started = now_epoch_nanos();

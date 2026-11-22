@@ -35,14 +35,18 @@ impl Drop for TempFile {
 /// The five symbols of the IPF fixture, not in alphabetical order.
 const FIXTURE_SYMBOLS: [&str; 5] = ["IBM", "AAPL", "MSFT", "GOOG", "TSLA"];
 
-fn write_fixture(name: &str) -> TempFile {
-    let file = TempFile(std::env::temp_dir().join(format!("dxfeed-graal-tools-{}-{name}", std::process::id())));
+fn fixture_text() -> String {
     let mut text = "#STOCK::=TYPE,SYMBOL,DESCRIPTION\n".to_owned();
     for symbol in FIXTURE_SYMBOLS {
         text.push_str(&format!("STOCK,{symbol},{symbol} Inc\n"));
     }
     text.push_str("##COMPLETE\n");
-    std::fs::write(&file.0, text).unwrap();
+    text
+}
+
+fn write_fixture(name: &str) -> TempFile {
+    let file = TempFile(std::env::temp_dir().join(format!("dxfeed-graal-tools-{}-{name}", std::process::id())));
+    std::fs::write(&file.0, fixture_text()).unwrap();
     file
 }
 
@@ -225,8 +229,12 @@ fn no_arguments_print_the_usage() {
 fn help_prints_the_usage_to_stdout_and_exits_with_zero() {
     for args in [
         &["--help"][..],
+        &["-h"],
+        &["-help"],
         &["p", "127.0.0.1:1", "-S", "10", "--help"],
+        &["p", "127.0.0.1:1", "-S", "abc", "--help"],
         &["c", "--help"],
+        &["c", "--no-such-flag", "-h"],
     ] {
         let outcome = run(args);
         assert_eq!(outcome.code(), Some(0), "{args:?} {outcome:#?}");
@@ -547,6 +555,95 @@ fn sigint_ends_the_run() {
     assert_eq!(summary["status"], "stopped_by_signal", "{summary}");
     assert_eq!(summary["exit_code"], 0);
     assert!(summary["records"].as_i64().unwrap() > 0, "{summary}");
+}
+
+/// Makes a FIFO as the symbol file: the tool waits in reading it until the test writes the symbols, as it would in a
+/// large file.
+#[cfg(unix)]
+fn make_fifo(directory: &TempDir) -> String {
+    let path = directory.file("symbols.ipf");
+    let made = Command::new("mkfifo").arg(&path).status().unwrap();
+    assert!(made.success(), "mkfifo {path}");
+    path
+}
+
+/// Opens the FIFO for writing once the tool has opened it for reading, which it does with its signal handler up.
+#[cfg(unix)]
+fn open_fifo_writer(path: &str) -> std::fs::File {
+    use std::os::unix::fs::OpenOptionsExt;
+    let deadline = Instant::now() + Duration::from_secs(30);
+    loop {
+        // Without a reader a non-blocking open for writing fails.
+        match std::fs::OpenOptions::new()
+            .write(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(path)
+        {
+            Ok(file) => return file,
+            Err(error) => {
+                assert!(Instant::now() < deadline, "NetTest does not open {path}: {error}");
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+
+#[cfg(unix)]
+fn send_signal(tool: &Tool, signal: &str) {
+    let sent = Command::new("kill")
+        .args([signal, &tool.child.id().to_string()])
+        .status()
+        .unwrap();
+    assert!(sent.success(), "kill {signal}");
+}
+
+/// A signal while the symbols are read ends the tool with the summary and 0, without the endpoints.
+#[cfg(unix)]
+#[test]
+fn a_signal_while_the_symbols_are_read_ends_with_the_summary() {
+    let directory = TempDir::new("signal-symbols");
+    let fifo = make_fifo(&directory);
+    let file = directory.file("summary.json");
+    let address = format!(":{}", free_port());
+    let symbols = format!("5@{fifo}");
+    let tool = Tool::start(&["p", &address, "-S", &symbols, "-s", "1s", "--summary", &file]);
+    let mut writer = open_fifo_writer(&fifo);
+    send_signal(&tool, "-TERM");
+    // The reading does not check the stop: it ends with the symbols.
+    std::thread::sleep(Duration::from_millis(300));
+    writer.write_all(fixture_text().as_bytes()).unwrap();
+    drop(writer);
+    let outcome = tool.finish();
+    assert_eq!(outcome.code(), Some(0), "{outcome:#?}");
+    assert!(outcome.summaries().is_empty(), "{outcome:#?}");
+    let summary = read_summary(&file);
+    assert_eq!(summary["status"], "stopped_by_signal", "{summary}");
+    assert_eq!(summary["exit_code"], 0, "{summary}");
+}
+
+/// A second signal ends the process at once, with the default action of the signal and without the summary.
+#[cfg(unix)]
+#[test]
+fn a_second_signal_ends_the_process_at_once() {
+    use std::os::unix::process::ExitStatusExt;
+
+    let directory = TempDir::new("second-signal");
+    let fifo = make_fifo(&directory);
+    let file = directory.file("summary.json");
+    let address = format!(":{}", free_port());
+    let tool = Tool::start(&["p", &address, "-S", &format!("5@{fifo}"), "--summary", &file]);
+    let writer = open_fifo_writer(&fifo);
+    send_signal(&tool, "-INT");
+    std::thread::sleep(Duration::from_millis(300));
+    send_signal(&tool, "-INT");
+    let outcome = tool.finish();
+    drop(writer);
+    assert_eq!(outcome.status.signal(), Some(libc::SIGINT), "{outcome:#?}");
+    assert!(outcome.summaries().is_empty(), "{outcome:#?}");
+    assert!(
+        !std::path::Path::new(&file).exists(),
+        "a summary after the second signal"
+    );
 }
 
 /// Waits until something accepts connections on the loopback port.

@@ -58,7 +58,7 @@ pub const OPTION_LINES: &[&str] = &[
     "                       the maximum, initial and young generation heap sizes and the thread stack size of the",
     "                       isolate (512m, 1g)",
     "  -XX:<option>         an option of the isolate (for example -XX:+PrintGC -XX:+PrintGCSummary)",
-    "  --help               print this text and exit",
+    "  --help, -h, -help    print this text and exit",
     "",
     "A long option also takes its value as --option=value.",
     "",
@@ -392,6 +392,8 @@ const OPTIONS: &[Spec] = &[
     spec("--summary", Flag::Summary, true, false),
     spec("--metrics-port", Flag::MetricsPort, true, false),
     spec("--help", Flag::Help, false, false),
+    spec("-h", Flag::Help, false, false),
+    spec("-help", Flag::Help, false, false),
     spec("-w", Flag::Wildcard, false, false),
     spec("--wildcard", Flag::Wildcard, false, false),
 ];
@@ -647,7 +649,7 @@ impl Parser {
         let Some(mode) = args.first() else {
             return Err("no mode".to_owned());
         };
-        if mode == "--help" {
+        if asks_for_help(args) {
             self.options.help = true;
             return Ok(());
         }
@@ -708,13 +710,31 @@ impl Parser {
                 ""
             };
             self.apply(flag_spec, flag, value)?;
-            // --help ends the parsing: the usage is printed whatever follows.
-            if self.options.help {
-                return Ok(());
-            }
         }
         self.validate()
     }
+}
+
+/// Whether an argument is `--help` or one of its aliases.
+fn is_help_flag(argument: &str) -> bool {
+    matches!(argument, "--help" | "-h" | "-help")
+}
+
+/// Whether the arguments ask for the usage: a help flag anywhere except as the value of an option. An exact option name
+/// that takes a value skips the argument after it, so `-n --help` names the tool `--help`.
+fn asks_for_help(args: &[String]) -> bool {
+    let mut index = 0;
+    while index < args.len() {
+        let argument = args[index].as_str();
+        if is_help_flag(argument) {
+            return true;
+        }
+        if OPTIONS.iter().any(|spec| spec.name == argument && spec.has_value) {
+            index += 1;
+        }
+        index += 1;
+    }
+    false
 }
 
 fn parse_number(flag: &str, value: &str, limit: i64) -> Result<i64, String> {
@@ -726,8 +746,9 @@ fn parse_time(flag: &str, value: &str) -> Result<i64, String> {
         .ok_or_else(|| format!("{flag} needs a positive time with ms, s or m (for example 10s): '{value}'"))
 }
 
-/// Parses the arguments after `NetTest`, the mode first; the error is the message of the first failure. With `--help`
-/// right after the mode the other arguments are not read.
+/// Parses the arguments after `NetTest`, the mode first; the error is the message of the first failure. A help flag
+/// (`--help`, `-h`, `-help`) anywhere except as the value of an option asks for the usage, whatever else the arguments
+/// hold.
 pub fn parse(args: &[String]) -> Result<Options, String> {
     let mut parser = Parser::default();
     parser.run(args)?;
@@ -997,23 +1018,30 @@ mod tests {
     }
 
     #[test]
-    fn help_stops_the_parsing() {
-        assert!(options(&["--help"]).help);
-        assert!(options(&["--help", "--no-such-flag"]).help);
-        assert!(options(&["c", "--help", "--no-such-flag"]).help);
-        // Nothing is validated after it: no address and no symbols.
-        assert!(options(&["p", "--help"]).help);
-        assert!(options(&["p", "--help", "-S", "0", "extra"]).help);
-        // An error before it wins.
-        rejected(&["p", "--no-such-flag", "--help"], "unknown flag --no-such-flag");
-        rejected(
-            &["p", "-S", "0", "--help"],
-            "-S needs <total> or <total>@<file>, where <total> is a number from 1 to 100000000: '0'",
-        );
+    fn help_wins_over_everything_else() {
+        for help in ["--help", "-h", "-help"] {
+            assert!(options(&[help]).help, "{help}");
+            assert!(options(&[help, "--no-such-flag"]).help, "{help}");
+            assert!(options(&["c", help, "--no-such-flag"]).help, "{help}");
+            // Nothing is validated: no address and no symbols.
+            assert!(options(&["p", help]).help, "{help}");
+            assert!(options(&["p", help, "-S", "0", "extra"]).help, "{help}");
+            // An invalid argument before it does not matter either, nor does the mode.
+            assert!(options(&["p", "--no-such-flag", help]).help, "{help}");
+            assert!(options(&["p", "-S", "0", help]).help, "{help}");
+            assert!(options(&["x", help]).help, "{help}");
+            // An unknown flag takes no value.
+            assert!(options(&["c", ":7001", "--no-such-flag", help]).help, "{help}");
+        }
+        // The value of an option is not a help flag, even when it looks like one.
+        let named = options(&["p", ":7001", "-S", "1", "-n", "--help"]);
+        assert!(!named.help);
+        assert_eq!(named.name, "--help");
+        assert!(!options(&["p", ":7001", "-S", "1", "--name", "-h"]).help);
+        assert!(!options(&["p", ":7001", "-S", "1", "--name=-h"]).help);
         // A switch takes no value.
         rejected(&["p", "--help=yes"], "--help takes no value: '--help=yes'");
-        // Only the first argument may be --help without a mode.
-        rejected(&["x", "--help"], "unknown mode 'x'; the mode is p or c");
+        rejected(&["x", "--no-help"], "unknown mode 'x'; the mode is p or c");
         assert_eq!(parse_args(&[]), Err("no mode".to_owned()));
     }
 
@@ -1353,7 +1381,7 @@ mod tests {
             "-D<key>=<value>",
             "-Xmx<size>",
             "-XX:<option>",
-            "--help",
+            "--help, -h, -help",
         ] {
             assert!(usage.contains(option), "the usage lacks {option}");
         }
