@@ -8,7 +8,8 @@
 use std::fs;
 use std::path::PathBuf;
 
-use dxfeed_graal::{DXEndpoint, MessageConnector, system};
+use dxfeed_graal::system::{self, build_info};
+use dxfeed_graal::{DXEndpoint, MessageConnector};
 
 use super::Status;
 use super::cli::{IMPLEMENTATION, Mode, Options, SPEC_VERSION, role_name};
@@ -603,20 +604,47 @@ fn array_of<T>(items: &[T], format: impl Fn(&T) -> String) -> String {
     format!("[\n{}\n  ]", lines.join(",\n"))
 }
 
-/// The text of the summary file of a run. `sdk_version` is `None` when the isolate did not give it.
-pub fn format_summary(options: &Options, sdk_version: Option<&str>, result: &RunResult) -> String {
+/// What the SDK tells about itself for `tool` of the summary; a value that it does not give is `None`.
+#[derive(Debug, Clone, Default)]
+pub struct ToolInfo {
+    pub sdk_version: Option<String>,
+    pub qd_version: Option<String>,
+    /// The vendor and the version of the runtime.
+    pub vendor: Option<String>,
+    /// The target machine of the build.
+    pub march: Option<String>,
+    /// The garbage collectors, separated by `, `.
+    pub gc: Option<String>,
+}
+
+impl ToolInfo {
+    /// Reads the values from the SDK.
+    pub fn read() -> Self {
+        let info = |key| system::get_build_info(key).ok().flatten();
+        ToolInfo {
+            sdk_version: system::get_version().ok(),
+            qd_version: info(build_info::QD_VERSION),
+            vendor: info(build_info::VENDOR),
+            march: info(build_info::MARCH),
+            gc: info(build_info::GC),
+        }
+    }
+}
+
+/// The text of the summary file of a run.
+pub fn format_summary(options: &Options, info: &ToolInfo, result: &RunResult) -> String {
     let report = &result.report;
     let build = Object::new()
-        .add("vendor", "null")
-        .add("march", "null")
-        .add("gc", "null")
+        .add("vendor", string_or_null(info.vendor.as_deref()))
+        .add("march", string_or_null(info.march.as_deref()))
+        .add("gc", string_or_null(info.gc.as_deref()))
         .text();
     let tool = Object::new()
         .add("implementation", json_string(IMPLEMENTATION))
         .add("name", json_string(TOOL_NAME))
         .add("version", json_string(env!("CARGO_PKG_VERSION")))
-        .add("sdk_version", string_or_null(sdk_version))
-        .add("qd_version", "null")
+        .add("sdk_version", string_or_null(info.sdk_version.as_deref()))
+        .add("qd_version", string_or_null(info.qd_version.as_deref()))
         .add("build", build)
         .text();
     let records: i64 = report.intervals.iter().map(|interval| interval.records).sum();
@@ -689,6 +717,24 @@ mod tests {
     use crate::net_test::histogram::Histogram;
     use crate::net_test::kit::summary_errors;
     use crate::net_test::statistics::LagStats;
+
+    /// Every value of `tool`, one with a character that JSON escapes.
+    fn full_info() -> ToolInfo {
+        ToolInfo {
+            sdk_version: Some("9.9.9".to_owned()),
+            qd_version: Some("3.999".to_owned()),
+            vendor: Some("GraalVM CE 99".to_owned()),
+            march: Some("x86-64-v3".to_owned()),
+            gc: Some("serial, \"young\"".to_owned()),
+        }
+    }
+
+    fn sdk_only(version: &str) -> ToolInfo {
+        ToolInfo {
+            sdk_version: Some(version.to_owned()),
+            ..ToolInfo::default()
+        }
+    }
 
     const START: i64 = 1_763_380_800_000_000_000;
     const MB: i64 = BYTES_PER_MB;
@@ -867,17 +913,17 @@ mod tests {
             "summary.json",
         ];
         let options = options(&args);
-        let text = format_summary(&options, Some("9.9.9"), &producer_result());
+        let text = format_summary(&options, &full_info(), &producer_result());
         assert_valid(&text);
         let value = parsed(&text);
         assert_eq!(value["side"], "producer");
         assert_eq!(value["tool"]["implementation"], "rust-api");
         assert_eq!(value["tool"]["name"], "NetTest");
         assert_eq!(value["tool"]["sdk_version"], "9.9.9");
-        assert_eq!(value["tool"]["qd_version"], Value::Null);
+        assert_eq!(value["tool"]["qd_version"], "3.999");
         assert_eq!(
             value["tool"]["build"],
-            serde_json::json!({"vendor": null, "march": null, "gc": null})
+            serde_json::json!({"vendor": "GraalVM CE 99", "march": "x86-64-v3", "gc": "serial, \"young\""})
         );
         // The arguments are kept as they were given, the summary path included.
         assert_eq!(value["args"], serde_json::json!(args));
@@ -918,13 +964,18 @@ mod tests {
     #[test]
     fn a_consumer_summary_is_valid_against_the_schema_of_the_kit() {
         let options = options(&["c", "127.0.0.1:7001", "-S", "100", "-c", "stream"]);
-        let text = format_summary(&options, None, &consumer_result());
+        let text = format_summary(&options, &ToolInfo::default(), &consumer_result());
         assert_valid(&text);
         let value = parsed(&text);
         assert_eq!(value["side"], "consumer");
         assert_eq!(value["status"], "stopped_by_signal");
         assert_eq!(value["exit_code"], 0);
         assert_eq!(value["tool"]["sdk_version"], Value::Null);
+        assert_eq!(value["tool"]["qd_version"], Value::Null);
+        assert_eq!(
+            value["tool"]["build"],
+            serde_json::json!({"vendor": null, "march": null, "gc": null})
+        );
         assert_eq!(value["config"]["rate_limit"], Value::Null);
         assert_eq!(value["config"]["batch"], Value::Null);
         assert_eq!(value["config"]["reuse"], Value::Null);
@@ -948,7 +999,7 @@ mod tests {
         let options = options(&["p", ":7001", "-S", "100"]);
         let message = "cannot connect \"x\"\n\ttab \\ done";
         let result = RunResult::failed(message.to_owned(), START, START + 5);
-        let text = format_summary(&options, Some("1"), &result);
+        let text = format_summary(&options, &sdk_only("1"), &result);
         assert_valid(&text);
         let value = parsed(&text);
         assert_eq!(value["status"], "error");
@@ -980,7 +1031,7 @@ mod tests {
                 error: (status != Status::Ok).then(|| "x".to_owned()),
                 ..consumer_result()
             };
-            let text = format_summary(&options, None, &result);
+            let text = format_summary(&options, &ToolInfo::default(), &result);
             assert_valid(&text);
             let value = parsed(&text);
             assert_eq!(value["status"], status.name());
@@ -994,7 +1045,7 @@ mod tests {
     fn the_checker_is_not_vacuous_for_the_summary() {
         let mut unnamed = options(&["p", ":7001", "-S", "100"]);
         unnamed.name.clear();
-        let errors = summary_errors(&format_summary(&unnamed, None, &producer_result()));
+        let errors = summary_errors(&format_summary(&unnamed, &ToolInfo::default(), &producer_result()));
         assert!(
             errors
                 .iter()
@@ -1002,7 +1053,11 @@ mod tests {
             "{errors:?}"
         );
         // A status outside the enumeration and a missing key are found too.
-        let text = format_summary(&options(&["p", ":7001", "-S", "100"]), None, &producer_result());
+        let text = format_summary(
+            &options(&["p", ":7001", "-S", "100"]),
+            &ToolInfo::default(),
+            &producer_result(),
+        );
         let errors = summary_errors(&text.replace("\"status\": \"ok\"", "\"status\": \"fine\""));
         assert!(
             errors.iter().any(|error| error.contains(".status: is not one of")),
@@ -1017,7 +1072,11 @@ mod tests {
 
     #[test]
     fn the_top_level_keys_come_in_the_order_of_the_c_tool() {
-        let text = format_summary(&options(&["p", ":7001", "-S", "100"]), None, &producer_result());
+        let text = format_summary(
+            &options(&["p", ":7001", "-S", "100"]),
+            &ToolInfo::default(),
+            &producer_result(),
+        );
         let keys: Vec<&str> = text
             .lines()
             .filter_map(|line| line.strip_prefix("  \""))
@@ -1065,7 +1124,7 @@ mod tests {
         assert_eq!(json_string("é\u{7f}/"), "\"é\u{7f}/\"");
         // A name and an argument with the special characters come back unchanged.
         let options = options(&["p", ":7001", "-S", "1", "-n", "a\"b\\c\td"]);
-        let value = parsed(&format_summary(&options, None, &producer_result()));
+        let value = parsed(&format_summary(&options, &ToolInfo::default(), &producer_result()));
         assert_eq!(value["name"], "a\"b\\c\td");
         assert_eq!(value["args"][5], "a\"b\\c\td");
     }
@@ -1179,7 +1238,7 @@ mod tests {
             },
             ..consumer_result()
         };
-        let text = format_summary(&options, None, &result);
+        let text = format_summary(&options, &ToolInfo::default(), &result);
         assert_valid(&text);
         let lag = &parsed(&text)["e2e_lag"];
         assert_eq!(lag["count"], 0);

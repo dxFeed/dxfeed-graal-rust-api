@@ -17,7 +17,7 @@ and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) 
 [![Crates.io](https://img.shields.io/crates/v/dxfeed-graal)](https://crates.io/crates/dxfeed-graal)
 [![docs.rs](https://img.shields.io/docsrs/dxfeed-graal)](https://docs.rs/dxfeed-graal)
 ![Status](https://img.shields.io/badge/status-alpha-red)
-![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.18.0-yellow)
+![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.19.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-blueviolet)
 [![License](https://img.shields.io/badge/license-MPL--2.0-orange)](LICENSE)
@@ -166,10 +166,10 @@ the executables of an application (see [Running and Deployment](#running-and-dep
 
 ### Getting the SDK
 
-The build script of `dxfeed-graal-sys` gets SDK 3.18.0 in one of these ways:
+The build script of `dxfeed-graal-sys` gets SDK 3.19.0 in one of these ways:
 
 - `DXFEED_GRAAL_SDK_DIR` names an unpacked SDK archive (`graal-native-sdk-<version>-<platform>.zip` from the
-  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.18.0)). Use it for offline builds.
+  [release](https://github.com/dxFeed/dxfeed-graal-native-sdk/releases/tag/v3.19.0)). Use it for offline builds.
 - Otherwise the default feature `download` fetches that archive from GitHub and checks its pinned SHA-256. The download
   honours the `ALL_PROXY`, `HTTPS_PROXY`, `HTTP_PROXY` and `NO_PROXY` environment variables and the operating system's
   certificate store. A timeout, a failed connection or an HTTP 429 or 5xx response is retried, three attempts in all.
@@ -267,7 +267,7 @@ fn main() -> dxfeed_graal::Result<()> {
 <br>
 
 ```
-I 261106 172639.536 [main] QDFactory - Using QDS-3.357, (C) Devexperts
+I 261106 172639.536 [main] QDFactory - Using QDS-3.358, (C) Devexperts
 I 261106 172639.563 [main] QDFactory - Using scheme com.dxfeed.api.impl.DXFeedScheme JFhzUYbcPr_gDabkoYd4_S0tWsvvKpzBmiN2aRCDnkY
 I 261106 172639.606 [main] MARS - Started JVM self-monitoring
 I 261106 172639.636 [main] MonitoredQDEndpoint - qdrst with collectors [Ticker, Stream, History]
@@ -615,11 +615,17 @@ SIGBREAK on Windows) once its isolate is up: a signal while the symbols are read
 `stopped_by_signal` before the endpoints start, and a second signal ends the process at once, by the default action of
 the signal, without the last block and the summary.
 
+The SDK archive ships the kit of the specification in `docs/wrapper-guide/nettest/`. Its `monitoring/` has a Prometheus
+configuration and a Grafana dashboard that watch the metrics of a run while it goes: list the `--metrics-port` addresses
+of the tools in `targets.json`. The tool updates the connector and runtime values once per `-s` period, so keep the
+`window` of the dashboard at least two periods long.
+
 The tool has no differences from `nettest/1`. The choices the specification leaves to the tool:
 
 - The summary: `tool.implementation` and the metrics label `tool` are `rust-api`, from the list of the specification;
-  `tool.version` is the version of the crate and `tool.sdk_version` comes from the SDK at run time. `qd_version` and
-  the values of `build` are `null`, as the SDK does not report them. `config.reuse_effective` is `false`, which the
+  `tool.version` is the version of the crate; `tool.sdk_version`, `tool.qd_version` and the values of `build` come from
+  the SDK at run time (`system::get_version` and `system::get_build_info`), and a value that the SDK cannot tell is
+  `null`. `config.reuse_effective` is `false`, which the
   specification asks of a tool whose API copies the events anyway: the Rust API copies them into native structures on
   every call, so `--reuse` overwrites one batch in place and saves the Rust allocations only.
 - The optional options: `--legacy` is rejected with `unsupported option: --legacy`, the text that the specification

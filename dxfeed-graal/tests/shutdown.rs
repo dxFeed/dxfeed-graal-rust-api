@@ -6,8 +6,7 @@ mod support;
 
 use std::net::TcpListener;
 use std::process;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, mpsc};
+use std::sync::mpsc;
 use std::thread;
 use std::time::Duration;
 
@@ -51,20 +50,9 @@ fn child_shutdown_stops_delivery_and_creation() {
     hub.publish_and_process(&[quote("AAPL").into()]);
     assert!(events.try_recv().is_ok());
 
-    // Shutdown waits for the endpoint's tasks: a manual executor needs another thread to run them meanwhile.
-    let stop = Arc::new(AtomicBool::new(false));
-    let pump = {
-        let (executor, stop) = (hub.executor.clone(), stop.clone());
-        thread::spawn(move || {
-            while !stop.load(Ordering::Acquire) {
-                let _ = executor.process_all_pending();
-                thread::sleep(Duration::from_millis(10));
-            }
-        })
-    };
+    // Shutdown waits for the endpoint's tasks and runs those of the manual executor on this thread: nothing else
+    // processes the executor meanwhile.
     system::shutdown().unwrap();
-    stop.store(true, Ordering::Release);
-    pump.join().unwrap();
     system::shutdown().unwrap();
     let _ = hub.publisher.publish_events(&[quote_with_bid("AAPL", 2.0).into()]);
     let _ = hub.executor.process_all_pending();

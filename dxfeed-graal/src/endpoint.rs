@@ -856,8 +856,8 @@ impl DXEndpoint {
     /// after [`close`](Self::close), only waits.
     ///
     /// Inside a listener it returns [`Error::InCallback`]: it would wait for the notification that is running. With a
-    /// [`ManualExecutor`](crate::ManualExecutor), keep processing the executor from another thread until it returns.
-    /// It also waits while an [event queue](crate::event_queue) of a subscription of the endpoint holds events that no
+    /// [`ManualExecutor`](crate::ManualExecutor), it runs the tasks of the executor on the calling thread while it
+    /// waits, so the listeners of the endpoint may be called on this thread before it returns. It also waits while an [event queue](crate::event_queue) of a subscription of the endpoint holds events that no
     /// poll returned, and while the executor of a queue that a subscription has as its executor holds work: close the
     /// queue first, and never call it on the polling thread (see
     /// [`SharedEventQueue::get_executor`](crate::event_queue::SharedEventQueue::get_executor)). An
