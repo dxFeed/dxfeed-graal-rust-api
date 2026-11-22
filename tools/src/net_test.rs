@@ -43,8 +43,8 @@ use self::statistics::{
     IntervalTaken, ReporterOutcome, ReporterSettings, RuntimeSample, Side, StatisticsSample, run_reporter, system_clock,
 };
 use self::summary::{
-    ProducerTotals, RunReport, RunResult, connector_summaries, connector_totals, format_summary, producer_report,
-    write_summary,
+    ProducerTotals, RunReport, RunResult, ToolInfo, connector_summaries, connector_totals, format_summary,
+    producer_report, write_summary,
 };
 use self::symbols::Symbols;
 
@@ -222,7 +222,7 @@ fn finish(options: &Options, result: &RunResult) -> ExitCode {
     let Some(file) = &options.summary_file else {
         return ExitCode::from(code);
     };
-    let text = format_summary(options, system::get_version().ok().as_deref(), result);
+    let text = format_summary(options, &ToolInfo::read(), result);
     match write_summary(file, &text) {
         Ok(()) => ExitCode::from(code),
         Err(error) => {

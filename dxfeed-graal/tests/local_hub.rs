@@ -5,6 +5,7 @@ mod support;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver};
 use std::sync::{Arc, Barrier, Mutex};
+use std::thread;
 use std::time::Duration;
 
 use dxfeed_graal::event::{
@@ -188,6 +189,23 @@ fn close_and_await_termination_delivers_scheduled_events() {
     hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
     hub.endpoint.close_and_await_termination().unwrap();
     assert_eq!(received(&events), vec![Event::Quote(delivered_quote(quote("AAPL")))]);
+}
+
+#[test]
+fn close_and_await_termination_runs_the_tasks_of_a_manual_executor() {
+    // Nothing else processes the executor: the endpoint runs its tasks on the closing thread while it waits.
+    let hub = Hub::new();
+    let subscription = hub.feed.create_subscription::<Quote>().unwrap();
+    let (sender, threads) = mpsc::channel();
+    subscription
+        .add_event_listener(move |_| {
+            let _ = sender.send(thread::current().id());
+        })
+        .unwrap();
+    subscription.add_symbols(["AAPL"]).unwrap();
+    hub.publisher.publish_events(&[quote("AAPL").into()]).unwrap();
+    hub.endpoint.close_and_await_termination().unwrap();
+    assert_eq!(threads.try_iter().collect::<Vec<_>>(), vec![thread::current().id()]);
     hub.endpoint.close_and_await_termination().unwrap();
     hub.endpoint.close().unwrap();
 }

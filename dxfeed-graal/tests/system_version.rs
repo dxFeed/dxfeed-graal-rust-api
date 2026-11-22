@@ -25,6 +25,7 @@ fn every_feature_of_the_headers_is_supported() {
         system::feature::CONNECTION_ERRORS,
         system::feature::RUNTIME_STATISTICS,
         system::feature::MESSAGE_CONNECTOR_IO_STATISTICS,
+        system::feature::BUILD_INFO,
     ] {
         assert!(system::is_feature_supported(name).unwrap(), "{name}");
     }
@@ -73,6 +74,54 @@ fn the_feature_names_are_those_of_the_headers() {
         system::feature::MESSAGE_CONNECTOR_IO_STATISTICS,
         name(dxfeed_graal_sys::DXFG_V4_FEATURE_MESSAGE_CONNECTOR_IO_STATISTICS)
     );
+    assert_eq!(
+        system::feature::BUILD_INFO,
+        name(dxfeed_graal_sys::DXFG_V4_FEATURE_BUILD_INFO)
+    );
+    assert_eq!(
+        system::build_info::QD_VERSION,
+        name(dxfeed_graal_sys::DXFG_V4_BUILD_INFO_QD_VERSION)
+    );
+    assert_eq!(
+        system::build_info::VENDOR,
+        name(dxfeed_graal_sys::DXFG_V4_BUILD_INFO_VENDOR)
+    );
+    assert_eq!(
+        system::build_info::MARCH,
+        name(dxfeed_graal_sys::DXFG_V4_BUILD_INFO_MARCH)
+    );
+    assert_eq!(system::build_info::GC, name(dxfeed_graal_sys::DXFG_V4_BUILD_INFO_GC));
+}
+
+#[test]
+fn the_build_info_names_the_qds_version_the_runtime_and_the_gc() {
+    let value = |key| {
+        system::get_build_info(key)
+            .unwrap()
+            .unwrap_or_else(|| panic!("no {key}"))
+    };
+    let qd_version = value(system::build_info::QD_VERSION);
+    assert!(
+        qd_version.starts_with("3.") && qd_version[2..].chars().all(|c| c.is_ascii_digit()),
+        "{qd_version}"
+    );
+    for key in [
+        system::build_info::VENDOR,
+        system::build_info::MARCH,
+        system::build_info::GC,
+    ] {
+        assert!(!value(key).is_empty(), "{key}");
+    }
+}
+
+#[test]
+fn an_unknown_build_info_key_has_no_value() {
+    assert_eq!(system::get_build_info("no_such_key").unwrap(), None);
+    assert_eq!(system::get_build_info("").unwrap(), None);
+    assert!(matches!(
+        system::get_build_info("qd\0version"),
+        Err(Error::InvalidArgument(_))
+    ));
 }
 
 #[test]

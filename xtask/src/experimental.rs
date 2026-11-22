@@ -212,8 +212,8 @@ unsafe extern "C" {
     fn the_allowlist_is_in_the_bindings() {
         let path = crate::workspace_root().join("dxfeed-graal-sys/src/bindings.rs");
         let experimental = experimental_items(&fs::read_to_string(path).unwrap());
+        // Empty while the stable API uses no experimental SDK item.
         let allowlist = allowlist(ALLOWLIST).unwrap();
-        assert!(!allowlist.is_empty());
         assert_eq!(
             allowlist.difference(&experimental).collect::<Vec<_>>(),
             Vec::<&String>::new()

@@ -72,8 +72,10 @@ impl Executor {
 /// It is an [`Executor`]: pass it where one is taken. Useful for tests and for applications that deliver events on a
 /// thread of their own. Clones share one executor.
 ///
-/// [`system::shutdown`](crate::system::shutdown) waits for the tasks of every endpoint: while it runs, another thread
-/// must call `process_all_pending`, or it blocks.
+/// An endpoint terminates only after the tasks it gave the executor have run, so
+/// [`DXEndpoint::close_and_await_termination`](crate::DXEndpoint::close_and_await_termination) and
+/// [`system::shutdown`](crate::system::shutdown) run them on their calling thread while they wait, listener calls
+/// included: no other thread needs to call `process_all_pending` meanwhile.
 #[derive(Clone)]
 pub struct ManualExecutor {
     executor: Executor,

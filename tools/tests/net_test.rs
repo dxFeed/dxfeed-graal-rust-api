@@ -766,6 +766,21 @@ fn a_producer_writes_the_summary_file() {
     let summary = read_summary(&file);
     assert_eq!(summary["side"], "producer", "{summary}");
     assert_eq!(summary["tool"]["implementation"], "rust-api");
+    // The SDK tells the QDS version and the runtime.
+    assert_eq!(
+        summary["tool"]["sdk_version"],
+        dxfeed_graal_sys::SDK_VERSION,
+        "{summary}"
+    );
+    assert!(
+        summary["tool"]["qd_version"]
+            .as_str()
+            .is_some_and(|version| version.starts_with("3.")),
+        "{summary}"
+    );
+    for key in ["vendor", "march", "gc"] {
+        assert!(summary["tool"]["build"][key].is_string(), "{summary}");
+    }
     assert_eq!(summary["status"], "ok");
     assert_eq!(summary["exit_code"], 0);
     assert_eq!(summary["error"], serde_json::Value::Null);

@@ -128,6 +128,46 @@ pub mod feature {
     /// The I/O statistics of a message connector
     /// ([`MessageConnector::get_io_statistics`](crate::MessageConnector::get_io_statistics)).
     pub const MESSAGE_CONNECTOR_IO_STATISTICS: &str = "message_connector_io_statistics";
+    /// How the library was built and what runs it ([`get_build_info`](super::get_build_info)).
+    pub const BUILD_INFO: &str = "build_info";
+}
+
+/// The keys of [`get_build_info`] (the `DXFG_V4_BUILD_INFO_` macros).
+pub mod build_info {
+    /// The version of QDS that the library is built with, such as `3.358`.
+    pub const QD_VERSION: &str = "qd_version";
+    /// The vendor and the version of the runtime that the library is built with, such as `GraalVM CE 25.0.1+8.1`.
+    pub const VENDOR: &str = "vendor";
+    /// The target machine of the build (`-march` of native-image), such as `compatibility` (the baseline CPU of the
+    /// architecture) or `x86-64-v3`.
+    pub const MARCH: &str = "march";
+    /// The garbage collectors of the runtime, separated by `, `.
+    pub const GC: &str = "gc";
+}
+
+/// Returns a value that tells how the library was built and what runs it, one of the [`build_info`] keys
+/// (`dxfg_v4_system_get_build_info`), or `None` for a value that the library does not know and for an unknown key,
+/// also an empty one.
+///
+/// A tool records the values next to its measurements, as the NetTest summary does. They are text for display and
+/// records: it may change with the runtime or the build, so do not parse it. A key with a NUL byte returns
+/// [`Error::InvalidArgument`].
+///
+/// ```no_run
+/// use dxfeed_graal::system::{self, build_info};
+///
+/// # fn main() -> dxfeed_graal::Result<()> {
+/// let qd_version = system::get_build_info(build_info::QD_VERSION)?;
+/// println!("QDS {}", qd_version.as_deref().unwrap_or("unknown"));
+/// # Ok(())
+/// # }
+/// ```
+pub fn get_build_info(key: &str) -> Result<Option<String>> {
+    let key = c_string(key, "build info key")?;
+    // SAFETY: the key is NUL-terminated and outlives the call; the out-pointer is valid for writes.
+    isolate::out_optional_string("System", |t, value| unsafe {
+        sys::dxfg_v4_system_get_build_info(t, key.as_ptr(), value)
+    })
 }
 
 /// The runtime statistics of the isolate of the SDK and of its process, from [`get_runtime_statistics`].
@@ -267,9 +307,8 @@ pub fn is_feature_supported(name: &str) -> Result<bool> {
 ///
 /// It is not needed before the process exits: the exit does not wait for the SDK threads. Call it from a normal
 /// context of the application: inside a listener it returns [`Error::InCallback`], and holding a lock that a listener
-/// takes while calling it deadlocks. The endpoints' tasks are waited for as well, so call
-/// [`ManualExecutor::process_all_pending`](crate::ManualExecutor::process_all_pending) from another thread if an
-/// endpoint uses a [`ManualExecutor`](crate::ManualExecutor).
+/// takes while calling it deadlocks. The endpoints' tasks are waited for as well; those of a
+/// [`ManualExecutor`](crate::ManualExecutor) run on the calling thread meanwhile.
 pub fn shutdown() -> Result<()> {
     static DONE: Mutex<bool> = Mutex::new(false);
     if isolate::in_callback() {
