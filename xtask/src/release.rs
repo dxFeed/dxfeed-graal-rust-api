@@ -12,7 +12,10 @@ use crate::{LIBRARY, run_sanitized, suppress_error_dialogs, target_dir, workspac
 
 const PRODUCT: &str = "dxFeedGraalRustApi";
 const NOTES_FILE: &str = "ReleaseNotes.md";
+const SYS_CRATE: &str = "dxfeed-graal-sys";
 const SYS_MANIFEST: &str = "dxfeed-graal-sys/Cargo.toml";
+/// The manifests that depend on `dxfeed-graal-sys`.
+const SYS_DEPENDENTS: [&str; 2] = ["dxfeed-graal/Cargo.toml", "tools/Cargo.toml"];
 /// The one `dxfeed.system.properties` of the samples archive, the demo feed, as the C++ API installs it.
 const SAMPLE_PROPERTIES: &str = "samples/API/PrintQuoteEventsSample/dxfeed.system.properties";
 /// The sample that checks the samples archive: it runs without a network and writes a tape file.
@@ -70,18 +73,55 @@ pub fn workspace_version(manifest: &str) -> Result<String, String> {
         .ok_or_else(|| "the root Cargo.toml has no [workspace.package] version".into())
 }
 
-/// Checks that `dxfeed-graal-sys`, whose version is not inherited, has the workspace version; the SDK version is only
-/// its build metadata (`+sdk.X.Y.Z`).
-pub fn check_sys_version(sys_manifest: &str, workspace_version: &str) -> Result<(), String> {
+/// The version requirement of the `dxfeed-graal-sys` dependency in a manifest
+/// (`dxfeed-graal-sys = { version = "X.Y.Z", ... }`).
+fn sys_requirement(manifest: &str) -> Option<&str> {
+    let line = manifest.lines().map(str::trim).find(|line| {
+        line.strip_prefix(SYS_CRATE)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+    })?;
+    let value = &line[line.find("version")? + "version".len()..];
+    value
+        .trim_start()
+        .strip_prefix('=')?
+        .trim_start()
+        .strip_prefix('"')?
+        .split('"')
+        .next()
+}
+
+/// Checks the version of `dxfeed-graal-sys`, which has a SemVer of its own: its build metadata names the SDK of the
+/// bindings (`+sdk.<sdk_version>`), and each of the `dependents` (manifest path and text) requires exactly its version.
+pub fn check_sys_version(sys_manifest: &str, sdk_version: &str, dependents: &[(&str, &str)]) -> Result<(), String> {
     let version = table_version(sys_manifest, "[package]").ok_or(format!("{SYS_MANIFEST} has no [package] version"))?;
-    let release = version.split_once('+').map_or(version, |(release, _)| release);
-    if release == workspace_version {
-        Ok(())
-    } else {
-        Err(format!(
-            "{SYS_MANIFEST} has the version {version}, not the workspace version {workspace_version}"
-        ))
+    let (release, metadata) = version.split_once('+').unwrap_or((version, ""));
+    if metadata != format!("sdk.{sdk_version}") {
+        return Err(format!(
+            "{SYS_MANIFEST} has the version {version}, whose build metadata is not sdk.{sdk_version}"
+        ));
     }
+    for (path, manifest) in dependents {
+        match sys_requirement(manifest) {
+            Some(requirement) if requirement == release => {}
+            Some(requirement) => {
+                return Err(format!(
+                    "{path} requires {SYS_CRATE} {requirement}, not its version {release}"
+                ));
+            }
+            None => return Err(format!("{path} has no version of the {SYS_CRATE} dependency")),
+        }
+    }
+    Ok(())
+}
+
+/// Checks the version of `dxfeed-graal-sys` in the workspace (see [`check_sys_version`]).
+fn check_workspace_sys_version(root: &Path) -> Result<(), String> {
+    let manifests = SYS_DEPENDENTS
+        .iter()
+        .map(|path| read(&root.join(path)).map(|text| (*path, text)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let dependents: Vec<(&str, &str)> = manifests.iter().map(|(path, text)| (*path, text.as_str())).collect();
+    check_sys_version(&read(&root.join(SYS_MANIFEST))?, crate::SDK_VERSION, &dependents)
 }
 
 /// Checks that the tag's version is the workspace version.
@@ -166,7 +206,7 @@ pub fn release_notes(tag: &str) -> Result<String, String> {
     let tag = parse_tag(tag)?;
     let version = workspace_version(&read(&root.join("Cargo.toml"))?)?;
     check_version(&tag, &version)?;
-    check_sys_version(&read(&root.join(SYS_MANIFEST))?, &version)?;
+    check_workspace_sys_version(&root)?;
     notes_section(&read(&root.join(NOTES_FILE))?, tag.version).map(|notes| notes.trim_end().to_owned())
 }
 
@@ -374,19 +414,32 @@ mod tests {
             "{samples:?}"
         );
         assert!(notes_section(&read(&root.join(NOTES_FILE)).unwrap(), &version).is_ok());
-        check_sys_version(&read(&root.join(SYS_MANIFEST)).unwrap(), &version).unwrap();
+        check_workspace_sys_version(&root).unwrap();
     }
 
     #[test]
-    fn the_sys_version_is_the_workspace_version_with_the_sdk_as_metadata() {
+    fn the_sys_version_names_the_sdk_and_its_dependents_require_it() {
         let manifest = "[package]\nname = \"dxfeed-graal-sys\"\nversion = \"1.2.3+sdk.3.13.0\"\n\n[features]\n";
-        assert!(check_sys_version(manifest, "1.2.3").is_ok());
-        let prerelease = "[package]\nversion = \"1.2.3-rc.1\"\n";
-        assert!(check_sys_version(prerelease, "1.2.3-rc.1").is_ok());
-        let error = check_sys_version(manifest, "1.2.4").unwrap_err();
+        let api = "[dependencies]\ndxfeed-graal-sys = { version = \"1.2.3\", path = \"../dxfeed-graal-sys\" }\n";
+        let tools = concat!(
+            "[dependencies]\ndxfeed-graal-build = \"2.0.0\"\n",
+            "dxfeed-graal-sys = { path = \"x\", version = \"1.2.3\" }\n"
+        );
+        assert!(check_sys_version(manifest, "3.13.0", &[("api", api), ("tools", tools)]).is_ok());
+
+        let error = check_sys_version(manifest, "3.14.0", &[("api", api)]).unwrap_err();
         assert!(error.contains("1.2.3+sdk.3.13.0"), "{error}");
-        let no_package = "[features]\nversion = \"1.2.3\"\n";
-        assert!(check_sys_version(no_package, "1.2.3").is_err());
+        let no_metadata = "[package]\nversion = \"1.2.3\"\n";
+        assert!(check_sys_version(no_metadata, "3.13.0", &[]).is_err());
+
+        let old = "[dependencies]\ndxfeed-graal-sys = { version = \"1.2.2\", path = \"../dxfeed-graal-sys\" }\n";
+        let error = check_sys_version(manifest, "3.13.0", &[("api", api), ("old", old)]).unwrap_err();
+        assert!(error.starts_with("old requires dxfeed-graal-sys 1.2.2"), "{error}");
+        let none = "[dependencies]\ndxfeed-graal-sys = { path = \"../dxfeed-graal-sys\" }\n";
+        assert!(check_sys_version(manifest, "3.13.0", &[("none", none)]).is_err());
+
+        let no_package = "[features]\nversion = \"1.2.3+sdk.3.13.0\"\n";
+        assert!(check_sys_version(no_package, "3.13.0", &[]).is_err());
     }
 
     #[test]

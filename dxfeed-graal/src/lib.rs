@@ -1,6 +1,6 @@
 //! Safe Rust API for dxFeed market data over the dxFeed Graal Native SDK.
 //!
-//! The project is in alpha: the API may change in any release. It covers the dxFeed Java API 3.357 wherever the
+//! The API follows Semantic Versioning (see [Stability](#stability)). It covers the dxFeed Java API 3.358 wherever the
 //! SDK exports it; the README lists the Java members that wait for their wrappers or for new SDK exports.
 //!
 //! The names follow the dxFeed Java API: [`DXEndpoint`], [`DXFeed`], [`DXFeedSubscription`], [`DXPublisher`], with
@@ -197,9 +197,8 @@
 //!
 //! # Stability
 //!
-//! From version 1.0.0 on, the crate follows Semantic Versioning: a patch release fixes bugs, a minor release adds to
-//! the API and may move to a newer SDK, and only a major release breaks code that builds against the public API.
-//! Before 1.0.0, a minor release may break the API.
+//! The crate follows Semantic Versioning since 1.0.0: a patch release fixes bugs, a minor release adds to the API and
+//! may move to a newer SDK, and only a major release breaks code that builds against the public API.
 //!
 //! - The event types, [`InstrumentProfile`](ipf::InstrumentProfile) and the enums that mirror Java enums are
 //!   `#[non_exhaustive]`: a minor release may add fields and variants as the SDK and the Java API grow. Make an event
