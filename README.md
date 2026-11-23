@@ -9,14 +9,10 @@ the [dxFeed Graal Native](https://github.com/dxFeed/dxfeed-graal-native-sdk) lib
 which was compiled with [GraalVM Native Image](https://www.graalvm.org/latest/reference-manual/native-image/)
 and [dxFeed Java API](https://docs.dxfeed.com/dxfeed/api/overview-summary.html) (our flagman API).
 
-> [!WARNING]
-> The project is in **alpha**: the API may change in any release (see [Current State](#current-state)).
-
 [![Build](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml/badge.svg?branch=main)](https://github.com/dxFeed/dxfeed-graal-rust-api/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/dxFeed/dxfeed-graal-rust-api?include_prereleases)](https://github.com/dxFeed/dxfeed-graal-rust-api/releases)
 [![Crates.io](https://img.shields.io/crates/v/dxfeed-graal)](https://crates.io/crates/dxfeed-graal)
 [![docs.rs](https://img.shields.io/docsrs/dxfeed-graal)](https://docs.rs/dxfeed-graal)
-![Status](https://img.shields.io/badge/status-alpha-red)
 ![Graal Native SDK](https://img.shields.io/badge/Graal%20Native%20SDK-v3.19.0-yellow)
 ![Platform](https://img.shields.io/badge/platform-win--x64%20%7C%20linux--x64%20%7C%20linux--aarch64%20%7C%20osx--x64%20%7C%20osx--aarch64-lightgrey)
 ![Rust](https://img.shields.io/badge/Rust-1.88%2B-blueviolet)
@@ -158,7 +154,7 @@ Add the crate from [crates.io](https://crates.io/crates/dxfeed-graal):
 
 ```toml
 [dependencies]
-dxfeed-graal = "0.5"
+dxfeed-graal = "1"
 ```
 
 The API is documented on [docs.rs](https://docs.rs/dxfeed-graal). `dxfeed-graal-build` deploys the SDK library next to
@@ -324,7 +320,8 @@ fn main() -> dxfeed_graal::Result<()> {
 }
 ```
 
-To familiarize with the dxLink protocol, please click [here](https://demo.dxfeed.com/market-data/dxlink-ws/debug/#/protocol).
+To familiarize with the dxLink protocol, please click
+[here](https://demo.dxfeed.com/market-data/dxlink-ws/debug/#/protocol).
 
 ### Message Connectors
 
@@ -474,7 +471,8 @@ while let Some(quote) = quotes.next().await {
 
 - The listener of the stream copies each batch into a buffer and wakes the task once; it never waits for the consumer.
   The buffer holds 65 536 events by default and drops the oldest ones when more come, counting them in `dropped()`;
-  `into_stream_with(StreamOptions::bounded(n))` changes the capacity, and `StreamOptions::unbounded()` keeps every event.
+  `into_stream_with(StreamOptions::bounded(n))` changes the capacity, and `StreamOptions::unbounded()` keeps every
+  event.
 - `into_stream_with(StreamOptions::event_queue())` takes the events from the event queue of the subscription instead,
   on a thread of the stream and only while a task waits for them. Meanwhile they stay in the SDK: it keeps the last
   quote (and other lasting event) of each symbol, keeps trades and other events in the buffer of the subscription, and
@@ -483,8 +481,8 @@ while let Some(quote) = quotes.next().await {
 - An untyped stream (`create_subscription_with_types`) yields `Event` and skips the events of types the crate does not
   map, counting them in `skipped()`.
 - The stream yields `None` after its buffered events once it is closed with `close()`, its subscription is closed, the
-  endpoints of all the feeds of its subscription are closed, or `system::shutdown()` runs. Dropping the stream closes its
-  subscription.
+  endpoints of all the feeds of its subscription are closed, or `system::shutdown()` runs. Dropping the stream closes
+  its subscription.
 - With the cargo feature `stream`, `EventStream` implements `futures_core::Stream`, for the `StreamExt` of `futures` or
   `tokio-stream`.
 
@@ -760,9 +758,9 @@ cd samples/API/PrintQuoteEventsSample
 
 ## Stability
 
-From version 1.0.0 on, `dxfeed-graal` and `dxfeed-graal-build` follow [Semantic Versioning](https://semver.org):
-a patch release fixes bugs, a minor release adds to the API and may move to a newer SDK, and only a major release
-breaks code that builds against the public API. Before 1.0.0, a minor release may break the API.
+`dxfeed-graal` and `dxfeed-graal-build` follow [Semantic Versioning](https://semver.org) since 1.0.0: a patch release
+fixes bugs, a minor release adds to the API and may move to a newer SDK, and only a major release breaks code that
+builds against the public API.
 
 - The event types, `InstrumentProfile` and the enums that mirror Java enums are `#[non_exhaustive]`: a minor release
   may add fields and variants as the SDK and the Java API grow. Make an event with `new` and field writes, and match
@@ -784,9 +782,10 @@ breaks code that builds against the public API. Before 1.0.0, a minor release ma
 
 ## Current State
 
-The API covers the dxFeed Java API 3.357 wherever the SDK exports it, its experimental tier with the feature
-`experimental`. `PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. Deprecated Java members are
-left out.
+Version 1.0 covers the dxFeed Java API 3.358 wherever the SDK exports it. Deprecated Java members are left out, and
+`PriceLevelService.getCandles` and `PriceLevelCandle` wait for SDK exports. The few items that the SDK still marks
+experimental are behind the cargo feature `experimental` (see [Other Features](#other-features)) and outside the
+promise of [Stability](#stability).
 
 ### Endpoint Roles
 
@@ -856,14 +855,14 @@ left out.
   option symbol listed under the specified Underlying
 - [x] [OtcMarketsOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OtcMarketsOrder.html) represents
   an extension of `Order` for the symbols traded on the OTC Markets
-- [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html) (experimental)
-  shows the imbalance between buy and sell orders during auctions
-- [x] [NuamOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamOrder.html) (experimental) is an
-  extension of `Order` for the NUAM exchange
-- [x] [NuamTrade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTrade.html) (experimental) is an
-  extension of `Trade` for the NUAM exchange
-- [x] [NuamTimeAndSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTimeAndSale.html)
-  (experimental) is an extension of `TimeAndSale` for the NUAM exchange
+- [x] [OrderImbalance](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/OrderImbalance.html) shows the
+  imbalance between buy and sell orders during auctions
+- [x] [NuamOrder](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamOrder.html) is an extension of
+  `Order` for the NUAM exchange
+- [x] [NuamTrade](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTrade.html) is an extension of
+  `Trade` for the NUAM exchange
+- [x] [NuamTimeAndSale](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/custom/NuamTimeAndSale.html) is an
+  extension of `TimeAndSale` for the NUAM exchange
 - [x] [MarketMaker](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/event/market/MarketMaker.html) is the bid and ask of
   a market maker on an exchange
 
@@ -935,7 +934,8 @@ the types.
 - [x] The glossary: `PriceIncrements`, `Cfi` and additional underlyings
 - [x] [Schedule](https://docs.dxfeed.com/dxfeed/api/com/dxfeed/schedule/Schedule.html) provides API to retrieve and
   explore various exchanges’ trading schedules and different financial instrument classes: days, sessions, holidays,
-  venues, the schedule defaults, UTC and NYSE, the `accept` of the day and session filters, and custom filters with a Rust predicate
+  venues, the schedule defaults, UTC and NYSE, the `accept` of the day and session filters, and custom filters with a
+  Rust predicate
   ([ScheduleSample](samples/Schedule/ScheduleSample/main.rs))
 
 ### Services

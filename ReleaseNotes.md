@@ -1,3 +1,44 @@
+## v1.0.0
+
+* **\[MDAPI-619]\[RUST]** Release 1.0.0: `dxfeed-graal` and `dxfeed-graal-build` follow Semantic Versioning, as the
+  section Stability of the README describes. The alpha status is gone.
+    * `dxfeed-graal-sys` has a version of its own from now on: a major one only when the SDK removes or changes a
+      function that it exports. Its build metadata names the SDK, and a release that keeps it publishes nothing new.
+    * The SemVer job of the CI fails on a breaking change of the public API (cargo-semver-checks).
+* **\[MDAPI-631]\[RUST]** Migrated to dxFeed Graal Native SDK v3.19.0 (QDS 3.358).
+    * The API covers the dxFeed Java API 3.358, whose public API is the same as that of 3.357.
+    * The stable API uses no experimental SDK item: MDAPI-623 made stable the functions of the transactional models,
+      `SubscriptionController`, the two subscription getters and the events `NuamOrder`, `NuamTrade`,
+      `NuamTimeAndSale` and `OrderImbalance`.
+    * `system::get_build_info` reads the build information of the SDK: the QDS version, the runtime vendor, the target
+      machine and the garbage collectors (`system::build_info`), with `system::feature::BUILD_INFO`.
+    * `DXEndpoint::close_and_await_termination` and `system::shutdown` run the tasks of a `ManualExecutor` on the
+      calling thread while they wait (MDAPI-603): no other thread has to process the executor meanwhile.
+* **\[MDAPI-613]\[RUST]** The public API is ready for SemVer.
+    * The events, `InstrumentProfile`, the candle attributes and the enums that mirror Java enums are
+      `#[non_exhaustive]`, so that the SDK and the Java API can grow them in a minor release.
+    * The handle types print an opaque `Debug`; the public types are checked to be `Send` and `Sync`.
+    * The test hooks `live_handles` and `live_events` moved into the hidden module `__private`.
+* **\[MDAPI-614]\[RUST]** CI checks that the stable API uses no experimental SDK item (`xtask check-experimental`).
+* **\[MDAPI-616]\[MDAPI-617]\[RUST]** The crate docs state when a method returns `Result` and which types carry times;
+  the README and the crate docs have the section Stability.
+* **\[MDAPI-628]\[RUST]** `Tools NetTest` takes `-h` and `-help` for `--help` anywhere outside the value of an option,
+  and ends with the summary of `stopped_by_signal` on a signal while the symbols are read; a second signal ends the
+  process at once.
+* **\[MDAPI-631]\[RUST]** The summary of `Tools NetTest` has the QDS version and the build of the SDK
+  (`tool.qd_version`, `tool.build`).
+* **\[MDAPI-620]\[RUST]** Two rare test failures are fixed.
+
+### For integrators
+
+* Depend on `dxfeed-graal = "1"`. The crates use dxFeed Graal Native SDK 3.19.0: `dxfeed-graal-sys` is
+  `1.0.0+sdk.3.19.0`. The minimum Rust version stays 1.88.
+* Migration from 0.5:
+    * Build an event or an `InstrumentProfile` with `new` and field writes instead of a struct literal:
+      `let mut quote = Quote::new("AAPL"); quote.bid_price = 1.0;`.
+    * Match the `#[non_exhaustive]` enums with a wildcard arm.
+    * `live_handles` and `live_events` are not part of the API.
+
 ## v0.5.0
 
 * **\[MDAPI-606]\[RUST]** Migrated to dxFeed Graal Native SDK v3.17.0.

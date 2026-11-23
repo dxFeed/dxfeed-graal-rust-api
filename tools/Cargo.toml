@@ -15,7 +15,7 @@ path = "src/main.rs"
 [dependencies]
 dxfeed-graal = { path = "../dxfeed-graal" }
 # Not used in the code: a direct dependency is what hands the SDK location to build.rs (the kit of the NetTest tests).
-dxfeed-graal-sys = { version = "0.5.0", path = "../dxfeed-graal-sys" }
+dxfeed-graal-sys = { version = "1.0.0", path = "../dxfeed-graal-sys" }
 # The signal handler of NetTest: the C `signal` and `raise`, as the C NetTest uses them.
 libc = "0.2.191"
 

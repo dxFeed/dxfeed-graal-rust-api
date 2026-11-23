@@ -27,9 +27,10 @@ The version follows the Stability section of the README; from 1.0.0 on:
   move to a newer SDK, and a higher minimum supported Rust version (say so in the notes);
 - **patch** for fixes that change no API.
 
-Before 1.0.0 a breaking change takes the next minor version. `dxfeed-graal-build` and, until 1.0.0, `dxfeed-graal-sys`
-take the version of the workspace (`xtask release-notes` checks the latter); from 1.0.0 the bindings get a version of
-their own, as the README describes.
+`dxfeed-graal-build` takes the version of the workspace. `dxfeed-graal-sys` has a version of its own, as the README
+describes: a major one when the SDK removes or changes a function that it exports, a minor one for a newer SDK that
+only adds, and a patch for a fix of the bindings or the build script. Its build metadata names the SDK
+(`X.Y.Z+sdk.<SDK version>`), and a release that keeps its version leaves the published crate as it is.
 
 The SemVer job of the CI (`.github/scripts/semver-checks.sh`) checks the public API of `dxfeed-graal` and
 `dxfeed-graal-build` against the latest release tag with cargo-semver-checks, without `experimental`. While the
@@ -42,12 +43,12 @@ breaking change is a warning, from 1.0.0 on an error. Run it locally with `cargo
 
 On a branch, in a pull request:
 
-1. Set the version in `Cargo.toml` (`[workspace.package] version`), in `dxfeed-graal-sys/Cargo.toml`, which keeps
-   the SDK version as build metadata (`X.Y.Z+sdk.<SDK version>`), and in the `dxfeed-graal-sys` dependency of
-   `dxfeed-graal/Cargo.toml`; the crate versions follow SemVer of the Rust API, not that of the SDK. Run `cargo check`
-   to update `Cargo.lock`.
+1. Set the version in `Cargo.toml` (`[workspace.package] version`); the crate versions follow SemVer of the Rust API,
+   not that of the SDK. If the bindings changed, also set the version of `dxfeed-graal-sys/Cargo.toml`, with the SDK
+   version as build metadata, and the `dxfeed-graal-sys` dependency of `dxfeed-graal/Cargo.toml` and
+   `tools/Cargo.toml`. Run `cargo check` to update `Cargo.lock`.
 2. Add the section `## vX.Y.Z` to the top of `ReleaseNotes.md`.
-3. Check the tag, the version of `dxfeed-graal-sys` and the notes locally:
+3. Check the tag, the version of `dxfeed-graal-sys` (its SDK and the dependencies on it) and the notes locally:
 
    ```bash
    cargo run -p xtask -- release-tag
@@ -149,7 +150,8 @@ cargo publish --dry-run --workspace --locked
 cargo publish --workspace --locked
 ```
 
-If that stops halfway, publish the crates that are not on crates.io yet one by one, in the same order:
+If that stops halfway, or `dxfeed-graal-sys` keeps a version that is already there, publish the crates that are not on
+crates.io yet one by one, in the same order:
 `cargo publish --locked -p <crate>`. Then check the pages of the crates on crates.io and their documentation on
 docs.rs, which builds without the SDK (`DOCS_RS`) for the five supported targets (`[package.metadata.docs.rs]`).
 
