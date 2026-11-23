@@ -127,6 +127,25 @@ impl Tool {
         };
         Outcome { status, stdout, stderr }
     }
+
+    /// Waits until the tool accepts connections on the loopback port; fails the test with its output if it ends or
+    /// does not listen in time.
+    fn accepting(mut self, port: u16) -> Tool {
+        let deadline = Instant::now() + Duration::from_secs(30);
+        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+            let ended = self.child.try_wait().unwrap();
+            if ended.is_none() && Instant::now() < deadline {
+                std::thread::sleep(Duration::from_millis(50));
+                continue;
+            }
+            let _ = self.child.kill();
+            let status = self.child.wait().unwrap();
+            let stdout = self.stdout.join().unwrap();
+            let stderr = self.stderr.join().unwrap();
+            panic!("NetTest does not accept on {port} ({status})\nstdout:\n{stdout}\nstderr:\n{stderr}");
+        }
+        self
+    }
 }
 
 fn run(args: &[&str]) -> Outcome {
@@ -661,7 +680,7 @@ fn a_consumer_receives_from_a_publisher_tool_and_exits_with_zero() {
     let address = format!(":{port}");
     // The publisher outlives the consumer by far: the consumer's first endpoint may take seconds on a slow runner.
     let publisher = Tool::start(&["p", &address, "-S", "20", "-r", "*/2k", "-s", "1s", "--duration", "10s"]);
-    wait_for_port(port);
+    let publisher = publisher.accepting(port);
     let client = format!("127.0.0.1:{port}");
     let consumer = run(&["c", &client, "-S", "20", "-s", "1s", "--duration", "3s"]);
     let publisher = publisher.finish();
@@ -961,7 +980,7 @@ fn two_consumer_instances_see_every_symbol_of_a_publisher_process() {
         "--duration",
         "12s",
     ]);
-    wait_for_port(port);
+    let publisher = publisher.accepting(port);
     let directory = TempDir::new("pair-consumer");
     let file = directory.file("summary.json");
     let client = format!("127.0.0.1:{port}");
@@ -1025,7 +1044,7 @@ fn the_limiter_waits_ahead_so_a_batch_is_not_published_late() {
         "--duration",
         "12s",
     ]);
-    wait_for_port(port);
+    let publisher = publisher.accepting(port);
     let directory = TempDir::new("pair-batch");
     let file = directory.file("summary.json");
     let client = format!("127.0.0.1:{port}");
@@ -1068,7 +1087,7 @@ fn a_consumer_that_finds_no_nanosecond_part_ends_with_nano_missing() {
         "10s",
         "-Ddxscheme.nanoTime=false",
     ]);
-    wait_for_port(port);
+    let publisher = publisher.accepting(port);
     let directory = TempDir::new("pair-nano");
     let file = directory.file("summary.json");
     let client = format!("127.0.0.1:{port}");
@@ -1162,7 +1181,7 @@ fn a_producer_serves_its_metrics_during_the_run() {
         "--summary",
         &file,
     ]);
-    wait_for_port(port);
+    let tool = tool.accepting(port);
     let labels = "tool=\"rust-api\",side=\"producer\",name=\"NetTest\"";
     // The published records are live; the runtime values come with the first tick of the reporter.
     let text = scrape_until(port, |text| {
@@ -1227,7 +1246,7 @@ fn a_consumer_serves_its_metrics_during_the_run() {
     let port = free_port();
     let address = format!(":{port}");
     let publisher = Tool::start(&["p", &address, "-S", "20", "-r", "*/2k", "-s", "1s", "--duration", "12s"]);
-    wait_for_port(port);
+    let publisher = publisher.accepting(port);
     let metrics_port = free_port();
     let metrics = metrics_port.to_string();
     let client = format!("127.0.0.1:{port}");
@@ -1243,7 +1262,7 @@ fn a_consumer_serves_its_metrics_during_the_run() {
         "--metrics-port",
         &metrics,
     ]);
-    wait_for_port(metrics_port);
+    let consumer = consumer.accepting(metrics_port);
     let labels = "tool=\"rust-api\",side=\"consumer\",name=\"NetTest\"";
     let text = scrape_until(metrics_port, |text| {
         series_value(text, &format!("nettest_e2e_lag_seconds_count{{{labels}}} ")).is_some_and(|n| n > 0)
@@ -1279,7 +1298,7 @@ fn a_consumer_serves_its_metrics_during_the_run() {
 fn a_second_tool_on_a_taken_metrics_port_fails_the_start_with_the_error_status() {
     let port = free_port();
     let metrics = port.to_string();
-    let mut first = Tool::start(&[
+    let first = Tool::start(&[
         "p",
         "127.0.0.1:1",
         "-S",
@@ -1289,7 +1308,7 @@ fn a_second_tool_on_a_taken_metrics_port_fails_the_start_with_the_error_status()
         "--metrics-port",
         &metrics,
     ]);
-    wait_for_port(port);
+    let mut first = first.accepting(port);
     let directory = TempDir::new("metrics-taken");
     let file = directory.file("summary.json");
     let second = run(&[
