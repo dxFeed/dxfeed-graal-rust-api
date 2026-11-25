@@ -49,11 +49,12 @@ impl DXPublisher {
     /// a market maker over 8 characters; of a market maker of 5 to 8 characters it keeps the last 4.
     #[doc(alias = "publishEvents")]
     pub fn publish_events(&self, events: &[Event]) -> Result<()> {
-        let mut sys_events = SysEvents::new(events)?;
-        let mut list = sys_events.list();
         let p = self.state.publisher.as_ptr();
-        // SAFETY: the publisher and the list are live; the SDK only reads the list and the events.
-        call(|t| unsafe { sys::dxfg_v4_DXPublisher_publishEvents(t, p, &mut list) })
+        SysEvents::with(events, |sys_events| {
+            let mut list = sys_events.list();
+            // SAFETY: the publisher and the list are live; the SDK only reads the list and the events.
+            call(|t| unsafe { sys::dxfg_v4_DXPublisher_publishEvents(t, p, &mut list) })
+        })
     }
 
     /// The subscription of the publisher to the events of type `E`, such as [`Profile`](crate::event::Profile): its

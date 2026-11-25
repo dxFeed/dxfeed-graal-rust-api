@@ -113,7 +113,7 @@ mod trade_eth;
 mod underlying;
 
 use std::borrow::Cow;
-use std::ffi::{CStr, CString, c_char};
+use std::ffi::{CStr, c_char};
 use std::fmt::{self, Display, Formatter};
 use std::marker::PhantomData;
 use std::ptr;
@@ -159,7 +159,7 @@ use traits::AsDyn;
 pub use traits::{BaseEvent, IndexedEvent, LastingEvent, MarketEvent, OrderEvent, TimeSeriesEvent};
 pub use underlying::{Underlying, UnderlyingRef};
 
-use crate::error::{Error, Result, c_string};
+use crate::error::{Error, Result};
 
 /// What the table of an event type generates for the code of this module.
 trait Table {
@@ -169,7 +169,7 @@ trait Table {
     const CLASS: sys::dxfg_event_clazz_t;
 
     /// The SDK struct of the event; its strings point into `strings`, which must outlive it.
-    fn to_sys(&self, strings: &mut Vec<CString>) -> Result<Self::Sys>;
+    fn to_sys(&self, strings: &mut StringArena) -> Result<Self::Sys>;
 }
 
 /// Generates what each event type adds to the enums and traits of this module, from the list of types: the name of the
@@ -596,7 +596,7 @@ macro_rules! event_types {
         }
 
         impl SysEvent {
-            fn new(event: &Event, strings: &mut Vec<CString>) -> Result<Self> {
+            fn new(event: &Event, strings: &mut StringArena) -> Result<Self> {
                 Ok(match event {
                     $( Event::$name(e) => SysEvent::$name(e.to_sys(strings)?), )*
                 })
@@ -812,51 +812,138 @@ unsafe fn opt_string<'a>(s: *const c_char) -> Option<Cow<'a, str>> {
 
 /// Pattern `p` of the strings of the extreme-value tests: NULL, bytes that are not UTF-8, characters outside ASCII.
 #[cfg(test)]
-fn extreme_string(strings: &mut Vec<CString>, p: usize) -> *const c_char {
+fn extreme_string(strings: &mut StringArena, p: usize) -> *const c_char {
     let bytes: &[u8] = match p % 3 {
         0 => return ptr::null(),
         1 => b"\xff\xfe",
         _ => "\u{1F600} \u{e9}".as_bytes(),
     };
-    let s = CString::new(bytes).unwrap();
-    let pointer = s.as_ptr();
-    strings.push(s);
-    pointer
+    strings.push_bytes(bytes)
 }
 
 /// Keeps a NUL-terminated copy of `s` in `strings` and returns a pointer to it, or NULL for `None`; `what` names the
 /// string in the error for a NUL byte.
-fn arena_string(strings: &mut Vec<CString>, s: Option<&str>, what: &str) -> Result<*const c_char> {
+fn arena_string(strings: &mut StringArena, s: Option<&str>, what: &str) -> Result<*const c_char> {
     let Some(s) = s else {
         return Ok(ptr::null());
     };
-    let s = c_string(s, what)?;
-    // The heap buffer of a `CString` does not move when `strings` grows.
-    let pointer = s.as_ptr();
-    strings.push(s);
-    Ok(pointer)
+    if s.as_bytes().contains(&0) {
+        return Err(Error::InvalidArgument(format!("{what} contains a NUL byte")));
+    }
+    Ok(strings.push_bytes(s.as_bytes()))
+}
+
+/// NUL-terminated strings for the SDK events, copied into blocks that are reused after [`clear`](Self::clear): no
+/// allocation per string, and none per batch once the blocks are there.
+#[derive(Default)]
+pub(crate) struct StringArena {
+    blocks: Vec<Vec<u8>>,
+    /// The block that takes the next string; the blocks before it are full.
+    current: usize,
+}
+
+impl StringArena {
+    /// The bytes of a new block; a longer string gets a block of its own size.
+    const BLOCK: usize = 16 * 1024;
+
+    /// Copies `bytes`, which hold no NUL, and a NUL into the arena and returns a pointer to the copy, valid until the
+    /// arena is cleared or dropped.
+    fn push_bytes(&mut self, bytes: &[u8]) -> *const c_char {
+        let need = bytes.len() + 1;
+        // A block never grows past its capacity, so its buffer never moves and earlier pointers stay valid.
+        while self
+            .blocks
+            .get(self.current)
+            .is_some_and(|block| block.capacity() - block.len() < need)
+        {
+            self.current += 1;
+        }
+        if self.current == self.blocks.len() {
+            self.blocks.push(Vec::with_capacity(need.max(Self::BLOCK)));
+        }
+        let block = &mut self.blocks[self.current];
+        let start = block.len();
+        block.extend_from_slice(bytes);
+        block.push(0);
+        // SAFETY: `start` is within the block, which holds the copy just written.
+        unsafe { block.as_ptr().add(start) }.cast()
+    }
+
+    /// Forgets the strings and keeps the blocks; the pointers handed out before are dangling from now on.
+    fn clear(&mut self) {
+        self.blocks.iter_mut().for_each(Vec::clear);
+        self.current = 0;
+    }
+
+    /// The bytes the blocks hold.
+    fn capacity(&self) -> usize {
+        self.blocks.iter().map(Vec::capacity).sum()
+    }
 }
 
 /// SDK events built from owned ones, with the strings they point to; kept alive while the SDK reads them.
+#[derive(Default)]
 pub(crate) struct SysEvents {
     events: Vec<SysEvent>,
-    _strings: Vec<CString>,
+    strings: StringArena,
     pointers: Vec<*mut sys::dxfg_event_type_t>,
 }
 
+thread_local! {
+    // The buffers of the last batch of this thread, reused by the next one.
+    static SCRATCH: std::cell::RefCell<SysEvents> = std::cell::RefCell::default();
+}
+
 impl SysEvents {
+    /// The events and the bytes of strings the buffers of a thread keep for the next batch; a larger batch frees them.
+    const KEEP_EVENTS: usize = 4096;
+    const KEEP_BYTES: usize = 256 * 1024;
+
     pub(crate) fn new(events: &[Event]) -> Result<Self> {
-        let mut strings = Vec::new();
-        let mut sys_events = events
-            .iter()
-            .map(|event| SysEvent::new(event, &mut strings))
-            .collect::<Result<Vec<_>>>()?;
-        let pointers = sys_events.iter_mut().map(SysEvent::as_mut_ptr).collect();
-        Ok(SysEvents {
-            events: sys_events,
-            _strings: strings,
-            pointers,
-        })
+        let mut sys_events = SysEvents::default();
+        sys_events.fill(events)?;
+        Ok(sys_events)
+    }
+
+    /// Runs `f` on SDK events built from `events` in the buffers of the calling thread, so that a batch allocates
+    /// nothing once the buffers are there; falls back to new buffers when they are busy (a nested call) or gone (the
+    /// thread is exiting).
+    pub(crate) fn with<R>(events: &[Event], f: impl FnOnce(&mut SysEvents) -> Result<R>) -> Result<R> {
+        let mut f = Some(f);
+        let reused = SCRATCH.try_with(|scratch| {
+            let Ok(mut sys_events) = scratch.try_borrow_mut() else {
+                return None;
+            };
+            let f = f.take().expect("taken once");
+            let result = sys_events.fill(events).and_then(|()| f(&mut sys_events));
+            sys_events.reset();
+            Some(result)
+        });
+        match reused {
+            Ok(Some(result)) => result,
+            _ => f.take().expect("not taken")(&mut SysEvents::new(events)?),
+        }
+    }
+
+    /// Builds the SDK events in place of the previous ones.
+    fn fill(&mut self, events: &[Event]) -> Result<()> {
+        self.reset();
+        self.events.reserve(events.len());
+        for event in events {
+            self.events.push(SysEvent::new(event, &mut self.strings)?);
+        }
+        self.pointers.extend(self.events.iter_mut().map(SysEvent::as_mut_ptr));
+        Ok(())
+    }
+
+    /// Empties the buffers, and frees them when a large batch has grown them.
+    fn reset(&mut self) {
+        self.pointers.clear();
+        self.events.clear();
+        self.strings.clear();
+        if self.events.capacity() > Self::KEEP_EVENTS || self.strings.capacity() > Self::KEEP_BYTES {
+            *self = SysEvents::default();
+        }
     }
 
     /// The SDK events, valid while `self` is neither moved nor dropped.
@@ -879,5 +966,100 @@ impl<E: SubscriptionItem> std::fmt::Debug for Events<'_, E> {
         f.debug_struct("Events")
             .field("remaining", &(self.elements.len() - self.next))
             .finish_non_exhaustive()
+    }
+}
+
+#[cfg(test)]
+mod arena_tests {
+    use std::ffi::CStr;
+
+    use super::*;
+
+    fn read(pointer: *const c_char) -> String {
+        // SAFETY: the pointer comes from a live arena.
+        unsafe { CStr::from_ptr(pointer) }.to_str().unwrap().to_owned()
+    }
+
+    #[test]
+    fn strings_stay_valid_across_blocks() {
+        let mut arena = StringArena::default();
+        let long = "x".repeat(StringArena::BLOCK + 10);
+        let mut expected = Vec::new();
+        for i in 0..5000 {
+            let s = if i == 2500 { long.clone() } else { format!("SYM{i:06}") };
+            expected.push((arena_string(&mut arena, Some(&s), "s").unwrap(), s));
+        }
+        assert!(arena.blocks.len() > 2);
+        for (pointer, s) in &expected {
+            assert_eq!(&read(*pointer), s);
+        }
+    }
+
+    #[test]
+    fn clear_reuses_the_blocks() {
+        let mut arena = StringArena::default();
+        let fill = |arena: &mut StringArena| {
+            (0..3000).for_each(|i| {
+                arena_string(arena, Some(&format!("SYM{i}")), "s").unwrap();
+            })
+        };
+        fill(&mut arena);
+        let (blocks, capacity) = (arena.blocks.len(), arena.capacity());
+        arena.clear();
+        fill(&mut arena);
+        assert_eq!((arena.blocks.len(), arena.capacity()), (blocks, capacity));
+    }
+
+    #[test]
+    fn none_is_null_and_nul_is_an_error() {
+        let mut arena = StringArena::default();
+        assert!(arena_string(&mut arena, None, "s").unwrap().is_null());
+        let error = arena_string(&mut arena, Some("a\0b"), "event symbol").unwrap_err();
+        assert!(
+            error.to_string().contains("event symbol contains a NUL byte"),
+            "{error}"
+        );
+        assert_eq!(read(arena_string(&mut arena, Some(""), "s").unwrap()), "");
+    }
+
+    fn quotes(n: usize) -> Vec<Event> {
+        (0..n).map(|i| Quote::new(format!("Q{i}")).into()).collect()
+    }
+
+    #[test]
+    fn a_nested_batch_gets_buffers_of_its_own() {
+        let outer = quotes(3);
+        let inner = quotes(5);
+        let sizes = SysEvents::with(&outer, |sys_events| {
+            let before = sys_events.list().size;
+            let nested = SysEvents::with(&inner, |nested| Ok(nested.list().size))?;
+            Ok((before, nested, sys_events.list().size))
+        })
+        .unwrap();
+        assert_eq!(sizes, (3, 5, 3));
+    }
+
+    #[test]
+    fn a_large_batch_frees_the_buffers_of_the_thread() {
+        let size = |events: &[Event]| SysEvents::with(events, |sys_events| Ok(sys_events.list().size)).unwrap();
+        assert_eq!(size(&quotes(10)), 10);
+        assert!(SCRATCH.with_borrow(|scratch| scratch.events.capacity()) >= 10);
+        assert_eq!(
+            size(&quotes(SysEvents::KEEP_EVENTS + 1)),
+            SysEvents::KEEP_EVENTS as i32 + 1
+        );
+        assert_eq!(SCRATCH.with_borrow(|scratch| scratch.events.capacity()), 0);
+    }
+
+    #[test]
+    fn an_error_leaves_the_buffers_empty() {
+        let mut events = quotes(2);
+        events.push(Quote::new("bad\0").into());
+        let error = SysEvents::with(&events, |_| Ok(())).unwrap_err();
+        assert!(error.to_string().contains("NUL"), "{error}");
+        assert_eq!(
+            SCRATCH.with_borrow(|scratch| scratch.events.len() + scratch.pointers.len()),
+            0
+        );
     }
 }
