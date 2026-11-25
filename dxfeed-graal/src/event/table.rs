@@ -146,7 +146,7 @@ macro_rules! event_type {
             type Sys = $sys;
             const CLASS: ::dxfeed_graal_sys::dxfg_event_clazz_t = $class;
 
-            fn to_sys(&self, strings: &mut Vec<::std::ffi::CString>) -> $crate::error::Result<$sys> {
+            fn to_sys(&self, strings: &mut $crate::event::StringArena) -> $crate::error::Result<$sys> {
                 // SAFETY: the SDK struct is plain data (integers, floats and pointers) for which all zeros are valid.
                 let mut raw: $sys = unsafe { ::std::mem::zeroed() };
                 raw $(.$h)* .event_type.clazz = $class;
@@ -171,7 +171,7 @@ macro_rules! event_type {
                 unsafe { &*(raw as *const $sys).cast::<$view>() }
             }
 
-            fn header(raw: &mut $sys, strings: &mut Vec<::std::ffi::CString>, event_time: i64) {
+            fn header(raw: &mut $sys, strings: &mut $crate::event::StringArena, event_time: i64) {
                 raw $(.$h)* .event_type.clazz = $class;
                 raw $(.$h)* .event_symbol = $crate::event::arena_string(strings, Some("SYM"), "").unwrap();
                 raw $(.$h)* .event_time = event_time;
@@ -186,7 +186,7 @@ macro_rules! event_type {
 
             #[test]
             fn fields_convert_both_ways() {
-                let mut strings = Vec::new();
+                let mut strings = $crate::event::StringArena::default();
                 // SAFETY: as in `to_sys`.
                 let mut raw: $sys = unsafe { ::std::mem::zeroed() };
                 header(&mut raw, &mut strings, 123_456_789);
@@ -199,7 +199,7 @@ macro_rules! event_type {
                 let mut n: u32 = 0;
                 $( n += 1; assert_eq!(owned.$field, event_field!(@sample $kind, n), stringify!($field)); )*
 
-                let mut back_strings = Vec::new();
+                let mut back_strings = $crate::event::StringArena::default();
                 let back = owned.to_sys(&mut back_strings).unwrap();
                 assert_eq!(back $(.$h)* .event_type.clazz, $class);
                 assert_eq!(view(&back).to_owned(), owned);
@@ -218,7 +218,7 @@ macro_rules! event_type {
             #[test]
             fn extreme_values_neither_panic_nor_fail() {
                 for pattern in 0..6 {
-                    let mut strings = Vec::new();
+                    let mut strings = $crate::event::StringArena::default();
                     // SAFETY: as in `to_sys`.
                     let mut raw: $sys = unsafe { ::std::mem::zeroed() };
                     header(&mut raw, &mut strings, event_field!(@extreme i64, pattern, &mut strings));
@@ -227,7 +227,7 @@ macro_rules! event_type {
                     let owned = view.to_owned();
                     let _ = (view.to_string(), owned.to_string(), format!("{view:?}"));
                     $( let _ = (view.$dname(), owned.$dname()); )*
-                    owned.to_sys(&mut Vec::new()).unwrap();
+                    owned.to_sys(&mut $crate::event::StringArena::default()).unwrap();
                 }
             }
         }
