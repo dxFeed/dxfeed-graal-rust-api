@@ -132,7 +132,7 @@ impl Tool {
     /// does not listen in time.
     fn accepting(mut self, port: u16) -> Tool {
         let deadline = Instant::now() + Duration::from_secs(30);
-        while TcpStream::connect(("127.0.0.1", port)).is_err() {
+        while !accepts(port) {
             let ended = self.child.try_wait().unwrap();
             if ended.is_none() && Instant::now() < deadline {
                 std::thread::sleep(Duration::from_millis(50));
@@ -478,7 +478,7 @@ fn end_to_end(time_and_sale: bool, flags: &[&str]) -> (Outcome, Collected) {
     let tool = Tool::start(&args);
     // The port accepts once the tool listens.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+    while !accepts(port) {
         assert!(Instant::now() < deadline, "the port {port} does not accept");
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -549,7 +549,7 @@ fn sigint_ends_the_run() {
     // The port accepts once the tool listens, after it has installed the Ctrl+C handler; then the run lasts
     // well over the second that the last block needs.
     let deadline = Instant::now() + Duration::from_secs(30);
-    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+    while !accepts(port) {
         assert!(Instant::now() < deadline, "the port {port} does not accept");
         std::thread::sleep(Duration::from_millis(50));
     }
@@ -665,10 +665,16 @@ fn a_second_signal_ends_the_process_at_once() {
     );
 }
 
+/// Whether something accepts connections on the loopback port. A connection to itself does not count: on Linux a connect
+/// to a free port of the ephemeral range can pick that port as its source and connect to itself (TCP simultaneous open).
+fn accepts(port: u16) -> bool {
+    TcpStream::connect(("127.0.0.1", port)).is_ok_and(|stream| stream.local_addr().ok() != stream.peer_addr().ok())
+}
+
 /// Waits until something accepts connections on the loopback port.
 fn wait_for_port(port: u16) {
     let deadline = Instant::now() + Duration::from_secs(30);
-    while TcpStream::connect(("127.0.0.1", port)).is_err() {
+    while !accepts(port) {
         assert!(Instant::now() < deadline, "the port {port} does not accept");
         std::thread::sleep(Duration::from_millis(50));
     }
